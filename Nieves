@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Esquema de bloques HTML</title>
+    <style>
+        header, main, footer, section, article, aside {
+            border: 1px solid #000;
+            margin: 5px;
+            padding: 10px;
+        }
+        header { background-color: #cfe2f3; }
+        footer { background-color: #b6d7a8; }
+        main { background-color: #d9d2e9; }
+        section { background-color: #f9cb9c; }
+        article { background-color: #ffd966; }
+        aside { background-color: #9fc5e8; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Encabezado (Header)</h1>
+    </header>
+    <main>
+        <section>
+            <h2>Sección 1</h2>
+            <article>Artículo 1</article>
+            <article>Artículo 2</article>
+        </section>
+        <section>
+            <h2>Sección 2</h2>
+            <article>Artículo 3</article>
+            <article>Artículo 4</article>
+        </section>
+        <aside>
+            <h2>Aside</h2>
+        </aside>
+    </main>
+    <footer>
+        <p>Pie de página (Footer)</p>
+    </footer>
+</body>
+</html>
