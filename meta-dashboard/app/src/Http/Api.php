@@ -13,6 +13,8 @@ use App\Meta\GraphException;
 use App\Meta\OAuth;
 use App\Services\AccessDenied;
 use App\Services\Ads;
+use App\Services\Budgets;
+use App\Services\SalesImport;
 use App\Services\Assets;
 use App\Services\AssetSync;
 use App\Services\Clients;
@@ -33,11 +35,15 @@ final class Api
         'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales',
     ];
 
+    /** Usuarios internos de solo lectura (ej. gerencia): todo lo del cliente + vistas de agencia. */
+    private const VIEWER_ACTIONS = ['clients', 'client_brand', 'budgets'];
+
     private const POST_ACTIONS = [
         'sync', 'connection_add_token', 'connection_delete', 'asset_toggle', 'cache_flush',
         'user_add', 'user_delete', 'user_reset_password', 'password_change',
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
+        'budget_save', 'settings_save', 'campaign_target_save',
     ];
 
     public static function handle(): void
@@ -53,7 +59,11 @@ final class Api
         $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
         $body = $isPost ? (json_decode((string) file_get_contents('php://input'), true) ?: $_POST) : [];
 
-        if (!Auth::isAdmin() && !in_array($action, self::CLIENT_ACTIONS, true)) {
+        $role = Auth::user()['role'] ?? '';
+        $permitted = $role === 'admin'
+            || in_array($action, self::CLIENT_ACTIONS, true)
+            || ($role === 'viewer' && in_array($action, self::VIEWER_ACTIONS, true));
+        if (!$permitted) {
             self::json(['ok' => false, 'error' => 'No tenés permiso para esta acción.'], 403);
         }
         if (in_array($action, self::POST_ACTIONS, true) && (!$isPost || !Auth::checkCsrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null))) {
@@ -130,6 +140,7 @@ final class Api
                     'refresh_sec' => (int) Config::get('cache.realtime_ttl', 120),
                     'kinds'       => Clients::UPDATE_KINDS,
                     'statuses'    => Clients::UPDATE_STATUS,
+                    'tax_rate'    => \App\Settings::taxRate(),
                 ];
 
             case 'assets':
@@ -213,13 +224,34 @@ final class Api
             case 'settings':
                 return [
                     'connections'   => Connections::all(),
-                    'users'         => Db::all("SELECT id, username, email, name, role, last_login_at FROM users WHERE role = 'admin' ORDER BY id"),
+                    'users'         => Db::all("SELECT id, username, email, name, role, last_login_at FROM users WHERE role IN ('admin', 'viewer') ORDER BY id"),
+                    'tax_rate'      => \App\Settings::taxRate() * 100,
                     'oauth_ready'   => Config::get('meta.app_id') && Config::get('meta.app_secret'),
                     'redirect_uri'  => OAuth::redirectUri(),
                     'webhook_url'   => Config::url('webhook.php'),
                     'graph_version' => GraphClient::version(),
                     'log'           => Db::all('SELECT job, status, message, created_at FROM sync_log ORDER BY id DESC LIMIT 15'),
                 ];
+            case 'budgets':
+                return Budgets::overview(null, $force);
+            case 'budget_save':
+                Budgets::save(self::id((string) ($body['account'] ?? '')), $body['month'] ?? null, $body['amount'] ?? null, $body['note'] ?? null);
+                return null;
+            case 'settings_save':
+                $rate = SalesImport::parseNumber($body['tax_rate'] ?? null);
+                if ($rate === null || $rate < 0 || $rate > 200) {
+                    throw new InvalidArgumentException('Ingresá un porcentaje entre 0 y 200.');
+                }
+                \App\Settings::set('tax_rate', (string) $rate);
+                Cache::flush(); // las métricas guardadas en caché llevan el impuesto anterior
+                return null;
+            case 'campaign_target_save':
+                Sales::saveCampaignTarget(self::id((string) ($body['campaign_id'] ?? '')), $body['month'] ?? null, $body['target_orders'] ?? '', $body['target_revenue'] ?? '');
+                return null;
+            case 'client_brand':
+                return Clients::brand((int) ($q['id'] ?? 0));
+            case 'campaign_names':
+                return Sales::campaignNames((int) ($q['id'] ?? 0));
             case 'clients':
                 return Clients::all();
             case 'client':
@@ -251,7 +283,7 @@ final class Api
                 Cache::flush();
                 return null;
             case 'user_add':
-                $role = ($body['role'] ?? '') === 'client' ? 'client' : 'admin';
+                $role = in_array($body['role'] ?? '', ['client', 'viewer'], true) ? $body['role'] : 'admin';
                 $clientId = $role === 'client' ? Clients::find((int) ($body['client_id'] ?? 0))['id'] : null;
                 return ['id' => Auth::createUser((string) ($body['username'] ?? ''), (string) ($body['name'] ?? ''), (string) ($body['password'] ?? ''), $role, $clientId)];
             case 'user_delete':

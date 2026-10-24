@@ -146,8 +146,9 @@ final class Sales
         $leads = trim((string) ($d['leads'] ?? '')) === '' ? null : SalesImport::parseNumber($d['leads']);
         Db::upsert('sales_daily', [
             'client_id' => $clientId, 'source_id' => $sourceId, 'day' => $day, 'dim' => mb_substr(trim((string) ($d['dim'] ?? '')), 0, 120),
+            'campaign' => mb_substr(trim((string) ($d['campaign'] ?? '')), 0, 190),
             'orders' => SalesImport::parseNumber($d['orders'] ?? 0) ?? 0, 'revenue' => SalesImport::parseNumber($d['revenue'] ?? 0) ?? 0, 'leads' => $leads,
-        ], ['source_id', 'day', 'dim']);
+        ], ['source_id', 'day', 'dim', 'campaign']);
         self::touch($sourceId);
     }
 
@@ -160,8 +161,40 @@ final class Sales
     /** Últimos días cargados (para revisar/corregir desde el admin). */
     public static function recent(int $clientId, int $limit = 60): array
     {
-        return Db::all('SELECT d.day, d.dim, d.orders, d.revenue, d.leads, s.name AS source FROM sales_daily d JOIN sales_sources s ON s.id = d.source_id
+        return Db::all('SELECT d.day, d.dim, d.campaign, d.orders, d.revenue, d.leads, s.name AS source FROM sales_daily d JOIN sales_sources s ON s.id = d.source_id
                         WHERE d.client_id = ? ORDER BY d.day DESC, d.dim LIMIT ' . max(1, min(500, $limit)), [$clientId]);
+    }
+
+    /** Objetivo mensual de ventas/facturación de una campaña. Vacío = se borra. */
+    public static function saveCampaignTarget(string $campaignId, ?string $month, mixed $orders, mixed $revenue): void
+    {
+        $month = $month && preg_match('/^\d{4}-\d{2}$/', $month) ? $month : date('Y-m');
+        $o = trim((string) $orders) === '' ? null : SalesImport::parseNumber($orders);
+        $r = trim((string) $revenue) === '' ? null : SalesImport::parseNumber($revenue);
+        if (!$o && !$r) {
+            Db::exec('DELETE FROM campaign_targets WHERE campaign_id = ? AND month = ?', [$campaignId, $month]);
+            return;
+        }
+        Db::upsert('campaign_targets', ['campaign_id' => $campaignId, 'month' => $month, 'target_orders' => $o ?: null, 'target_revenue' => $r ?: null, 'updated_at' => Db::now()], ['campaign_id', 'month']);
+    }
+
+    /** Nombres exactos de las campañas del cliente (para copiar en la planilla). */
+    public static function campaignNames(int $clientId): array
+    {
+        $out = [];
+        $range = DateRange::fromRequest(['preset' => 'last_90d']);
+        foreach (Clients::allowed($clientId)['ad_account'] as $acc) {
+            try {
+                foreach (Ads::campaigns($acc, $range) as $c) {
+                    if ($c['effective_status'] === 'ACTIVE' || $c['metrics']['spend'] > 0) {
+                        $out[] = ['name' => $c['name'], 'id' => $c['id'], 'status' => $c['effective_status'], 'account' => $acc, 'spend' => $c['metrics']['spend']];
+                    }
+                }
+            } catch (\Throwable) {
+            }
+        }
+        usort($out, fn ($a, $b) => [$a['status'] !== 'ACTIVE', -$a['spend']] <=> [$b['status'] !== 'ACTIVE', -$b['spend']]);
+        return $out;
     }
 
     public static function hasData(int $clientId): bool
@@ -249,6 +282,7 @@ final class Sales
             'month'      => self::monthProjection($clientId, $lastDay, $client),
             'last'       => $lastDay ? self::totals($clientId, $lastDay, $lastDay) + ['day' => $lastDay] : null,
             'ads'        => self::adsCrossover($clientId, $range, $cur),
+            'tax_rate'   => \App\Settings::taxRate(),
             'sources'    => array_map(fn ($s) => ['name' => $s['name'], 'kind' => $s['kind'], 'last_sync_at' => $s['last_sync_at'], 'last_error' => $s['last_error']], self::sources($clientId)),
         ];
     }
@@ -310,7 +344,10 @@ final class Sales
         ];
     }
 
-    /** Si el cliente tiene campañas: costo por venta y ROAS con ventas reales. */
+    /**
+     * Si el cliente tiene campañas: costo por venta y ROAS con ventas reales,
+     * usando el gasto con impuestos, en total y por campaña (cruce por nombre).
+     */
     private static function adsCrossover(int $clientId, DateRange $range, array $cur): ?array
     {
         $accounts = Clients::allowed($clientId)['ad_account'];
@@ -327,18 +364,149 @@ final class Sales
             return null;
         }
         $spend = $t['metrics']['spend'];
+        $spendTax = $t['metrics']['spend_tax'];
         $spendDaily = [];
         foreach ($ov['daily'][$t['currency']] ?? [] as $day => $v) {
-            $spendDaily[$day] = $v['spend'];
+            $spendDaily[$day] = $v['spend'] * (1 + \App\Settings::taxRate());
         }
+        $metaResults = $t['metrics']['purchases'] ?: $t['metrics']['results'];
         return [
             'currency'         => $t['currency'],
             'spend'            => $spend,
-            'cost_per_order'   => $cur['orders'] > 0 ? $spend / $cur['orders'] : null,
-            'roas_real'        => $spend > 0 && $cur['revenue'] > 0 ? $cur['revenue'] / $spend : null,
-            'meta_results'     => $t['metrics']['purchases'] ?: $t['metrics']['results'],
-            'meta_share'       => $cur['orders'] > 0 ? min(100, ($t['metrics']['purchases'] ?: $t['metrics']['results']) / $cur['orders'] * 100) : null,
+            'spend_tax'        => $spendTax,
+            'cost_per_order'   => $cur['orders'] > 0 ? $spendTax / $cur['orders'] : null,
+            'roas_real'        => $spendTax > 0 && $cur['revenue'] > 0 ? $cur['revenue'] / $spendTax : null,
+            'meta_results'     => $metaResults,
+            'meta_share'       => $cur['orders'] > 0 ? min(100, $metaResults / $cur['orders'] * 100) : null,
             'spend_daily'      => $spendDaily,
+            'campaigns'        => self::byCampaign($clientId, $range, $accounts),
+        ];
+    }
+
+    /** Cruza las ventas cargadas con columna "Campaña" contra las campañas de Meta. */
+    private static function byCampaign(int $clientId, DateRange $range, array $accounts): array
+    {
+        $since = $range->since->format('Y-m-d');
+        $until = $range->until->format('Y-m-d');
+        $sales = Db::all("SELECT campaign, SUM(orders) AS orders, SUM(revenue) AS revenue, SUM(leads) AS leads FROM sales_daily
+                          WHERE client_id = ? AND day BETWEEN ? AND ? GROUP BY campaign", [$clientId, $since, $until]);
+        $hasCampaignColumn = (bool) Db::one("SELECT 1 AS x FROM sales_daily WHERE client_id = ? AND campaign <> '' LIMIT 1", [$clientId]);
+
+        $meta = [];
+        foreach ($accounts as $acc) {
+            try {
+                foreach (Ads::campaigns($acc, $range) as $c) {
+                    $meta[] = $c + ['account' => $acc];
+                }
+            } catch (\Throwable) {
+                // Cuenta sin acceso: se omite.
+            }
+        }
+        $byName = [];
+        foreach ($meta as $i => $c) {
+            $byName[SalesImport::normName($c['name'])] = $i;
+            $byName[$c['id']] = $i;
+        }
+
+        $rows = [];
+        $unmatched = [];
+        $noCampaign = null;
+        foreach ($sales as $sRow) {
+            $name = (string) $sRow['campaign'];
+            $data = ['orders' => (float) $sRow['orders'], 'revenue' => (float) $sRow['revenue'], 'leads' => $sRow['leads'] !== null ? (float) $sRow['leads'] : null];
+            if ($name === '') {
+                $noCampaign = $data;
+                continue;
+            }
+            $key = $byName[SalesImport::normName($name)] ?? $byName[trim($name)] ?? null;
+            if ($key === null) {
+                // Sugerimos el nombre de Meta más parecido.
+                $best = null;
+                $bestPct = 0;
+                foreach ($meta as $c) {
+                    similar_text(SalesImport::normName($name), SalesImport::normName($c['name']), $pct);
+                    if ($pct > $bestPct) {
+                        [$best, $bestPct] = [$c['name'], $pct];
+                    }
+                }
+                $unmatched[] = ['name' => $name, 'suggestion' => $bestPct >= 60 ? $best : null] + $data;
+                continue;
+            }
+            $rows[$key] = ($rows[$key] ?? ['orders' => 0, 'revenue' => 0, 'leads' => null]);
+            $rows[$key]['orders'] += $data['orders'];
+            $rows[$key]['revenue'] += $data['revenue'];
+            if ($data['leads'] !== null) {
+                $rows[$key]['leads'] = ($rows[$key]['leads'] ?? 0) + $data['leads'];
+            }
+        }
+
+        // Objetivos del mes por campaña y avance acumulado del mes (independiente del rango elegido).
+        $month = date('Y-m');
+        $daysInMonth = (int) date('t');
+        $elapsed = max(1, (int) date('j'));
+        $targets = [];
+        if ($meta) {
+            $ids = array_map(fn ($c) => $c['id'], $meta);
+            foreach (Db::all('SELECT campaign_id, target_orders, target_revenue FROM campaign_targets WHERE month = ? AND campaign_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')', [$month, ...$ids]) as $t) {
+                $targets[$t['campaign_id']] = $t;
+            }
+        }
+        $mtd = [];
+        foreach (Db::all("SELECT campaign, SUM(orders) AS orders, SUM(revenue) AS revenue FROM sales_daily WHERE client_id = ? AND day BETWEEN ? AND ? AND campaign <> '' GROUP BY campaign",
+            [$clientId, date('Y-m-01'), date('Y-m-d')]) as $r) {
+            $k = $byName[SalesImport::normName((string) $r['campaign'])] ?? $byName[trim((string) $r['campaign'])] ?? null;
+            if ($k !== null) {
+                $mtd[$k]['orders'] = ($mtd[$k]['orders'] ?? 0) + (float) $r['orders'];
+                $mtd[$k]['revenue'] = ($mtd[$k]['revenue'] ?? 0) + (float) $r['revenue'];
+            }
+        }
+
+        $out = [];
+        foreach ($meta as $i => $c) {
+            $m = $c['metrics'];
+            $real = $rows[$i] ?? null;
+            $target = $targets[$c['id']] ?? null;
+            if ($m['spend'] <= 0 && !$real && !$target) {
+                continue;
+            }
+            $mo = $mtd[$i]['orders'] ?? 0;
+            $mr = $mtd[$i]['revenue'] ?? 0;
+            $tO = $target && $target['target_orders'] !== null ? (float) $target['target_orders'] : null;
+            $tR = $target && $target['target_revenue'] !== null ? (float) $target['target_revenue'] : null;
+            $goal = [
+                'month' => $month, 'target_orders' => $tO, 'target_revenue' => $tR,
+                'mtd_orders' => $mo, 'mtd_revenue' => $mr,
+                'projected_orders' => $mo / $elapsed * $daysInMonth, 'projected_revenue' => $mr / $elapsed * $daysInMonth,
+                'pct_orders' => $tO ? $mo / $tO * 100 : null, 'pct_revenue' => $tR ? $mr / $tR * 100 : null,
+                // Ritmo esperado a esta altura del mes, para saber si va en camino.
+                'expected_pct' => $elapsed / $daysInMonth * 100,
+            ];
+            $orders = $real['orders'] ?? 0;
+            $revenue = $real['revenue'] ?? 0;
+            $out[] = [
+                'id' => $c['id'], 'name' => $c['name'], 'account' => $c['account'], 'effective_status' => $c['effective_status'],
+                'objective' => $c['objective'], 'matched' => $real !== null,
+                'spend' => $m['spend'], 'spend_tax' => $m['spend_tax'], 'impressions' => $m['impressions'], 'reach' => $m['reach'],
+                'link_clicks' => $m['link_clicks'], 'link_ctr' => $m['link_ctr'], 'cpm' => $m['cpm'],
+                'meta_results' => $m['results'], 'result_label' => $m['result_label'], 'meta_purchases' => $m['purchases'],
+                'meta_value' => $m['purchase_value'], 'roas_meta' => $m['roas'],
+                'orders' => $orders, 'revenue' => $revenue, 'leads' => $real['leads'] ?? null,
+                'roas_real' => $m['spend_tax'] > 0 && $revenue > 0 ? $revenue / $m['spend_tax'] : null,
+                'cost_per_order' => $orders > 0 ? $m['spend_tax'] / $orders : null,
+                'ticket' => $orders > 0 && $revenue > 0 ? $revenue / $orders : null,
+                'conv_rate' => $m['link_clicks'] > 0 && $orders > 0 ? $orders / $m['link_clicks'] * 100 : null,
+                'profit' => $revenue - $m['spend_tax'],
+                'goal' => $goal,
+            ];
+        }
+        usort($out, fn ($a, $b) => $b['spend'] <=> $a['spend']);
+
+        return [
+            'enabled'     => $hasCampaignColumn,
+            'rows'        => $out,
+            'unmatched'   => $unmatched,
+            'no_campaign' => $noCampaign,
+            'names'       => array_values(array_unique(array_map(fn ($c) => $c['name'], array_filter($meta, fn ($c) => $c['effective_status'] === 'ACTIVE' || $c['metrics']['spend'] > 0)))),
         ];
     }
 
@@ -357,7 +525,7 @@ final class Sales
             }
             foreach ($agg['days'] as $d) {
                 Db::insert('sales_daily', [
-                    'client_id' => $clientId, 'source_id' => $sourceId, 'day' => $d['day'], 'dim' => $d['dim'],
+                    'client_id' => $clientId, 'source_id' => $sourceId, 'day' => $d['day'], 'dim' => $d['dim'], 'campaign' => $d['campaign'] ?? '',
                     'orders' => round($d['orders'], 2), 'revenue' => round($d['revenue'], 2), 'leads' => $d['leads'] !== null ? round($d['leads'], 2) : null,
                 ]);
             }

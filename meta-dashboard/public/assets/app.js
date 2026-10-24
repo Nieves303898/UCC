@@ -25,6 +25,8 @@ const state = {
   preview: null, // admin viendo el portal de un cliente
 };
 const isClient = () => state.boot?.user.role === 'client';
+const isAdmin = () => state.boot?.user.role === 'admin';
+const isViewer = () => state.boot?.user.role === 'viewer';
 /** ID del cliente cuyo portal se está mostrando (propio o vista previa). */
 const portalClient = () => (isClient() ? state.boot.client?.id : state.preview);
 
@@ -441,7 +443,7 @@ function dropChart(c) { if (c) { c.destroy(); state.charts = state.charts.filter
 // Ads: métricas, columnas, KPIs
 // =========================================================================
 function sumMetrics(rows) {
-  const keys = ['spend', 'impressions', 'reach', 'clicks', 'link_clicks', 'purchases', 'purchase_value', 'messages', 'leads', 'results', 'add_to_cart', 'initiate_checkout'];
+  const keys = ['spend', 'spend_tax', 'impressions', 'reach', 'clicks', 'link_clicks', 'purchases', 'purchase_value', 'messages', 'leads', 'results', 'add_to_cart', 'initiate_checkout'];
   const t = Object.fromEntries(keys.map((k) => [k, rows.reduce((s, r) => s + (r[k] || 0), 0)]));
   const div = (a, b) => (b > 0 ? a / b : null);
   return {
@@ -458,6 +460,7 @@ function metricCols(cur, get = (r) => r.metrics, { compact = false } = {}) {
   });
   const cols = [
     col('spend', 'Inversión', money),
+    col('spend_tax', `Inv. + ${taxPct()}`, money),
     { key: 'results', label: 'Resultados', value: (r) => get(r).results,
       html: (r) => `${fmt.int(get(r).results)} <span class="sub">${esc(get(r).result_label || '')}</span>`,
       total: (rows) => fmt.int(sumMetrics(rows.map(get)).results) },
@@ -475,7 +478,7 @@ function metricCols(cur, get = (r) => r.metrics, { compact = false } = {}) {
     col('cpc', 'CPC', money),
     col('cpm', 'CPM', money),
   ];
-  return compact ? cols.filter((c) => ['spend', 'results', 'cost_per_result', 'roas', 'reach', 'link_ctr'].includes(c.key)) : cols;
+  return compact ? cols.filter((c) => ['spend', 'spend_tax', 'results', 'cost_per_result', 'roas', 'reach', 'link_ctr'].includes(c.key)) : cols;
 }
 
 /** Elige KPIs relevantes: siempre los base y los de conversión sólo si hay datos. */
@@ -486,6 +489,7 @@ function adsKpis(m, p, cur, daily = [], { client = false } = {}) {
   const has = (k) => (m[k] || 0) > 0 || (P[k] || 0) > 0;
   const items = [
     ['Inversión', money(m.spend), delta(m.spend, P.spend), s('spend')],
+    [`Inversión + imp. (${taxPct()})`, money(m.spend_tax), delta(m.spend_tax, P.spend_tax), ''],
     ['Resultados', fmt.int(m.results), delta(m.results, P.results), s('results')],
     ['Costo por resultado', money(m.cost_per_result), delta(m.cost_per_result, P.cost_per_result, true), s('cost_per_result')],
     has('purchases') && ['Compras', fmt.int(m.purchases), delta(m.purchases, P.purchases), s('purchases')],
@@ -582,7 +586,7 @@ async function mountLiveToday(id, clientId) {
 // =========================================================================
 async function viewOverview() {
   crumbs([{ label: 'Resumen general' }]);
-  if (!state.boot.connections) {
+  if (state.boot.connections === 0) {
     return { html: empty('Conectá tu cuenta de Meta', 'Para ver campañas, páginas e Instagram primero conectá un usuario de Facebook o un token de System User con acceso a tus portfolios comerciales.', '<a class="btn btn-primary" href="#/settings">Ir a Configuración</a>', 'link') };
   }
   const d = await api('overview', rp());
@@ -1207,17 +1211,16 @@ function todayLabel() {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-const previewBanner = (cid, name) => (state.preview ? `
+const previewBanner = (cid, name) => (state.preview ? (crumbs([{ label: 'Clientes', href: '#/clients' }, { label: name, href: isAdmin() ? `#/clients/${cid}` : `#/preview/${cid}` }, { label: 'Vista del cliente' }]), `
   <div class="card mb-5 px-4 py-3 flex flex-wrap items-center gap-3 no-print" style="border-color:var(--accent-line);background:var(--accent-soft)">
     <span class="t-accent">${icon('eye', 16)}</span><div class="flex-1 t1 text-[13px]">Vista previa del portal de <b>${esc(name)}</b>: así lo ve el cliente.</div>
     <a class="btn btn-sm" href="#/preview/${cid}">Inicio</a><a class="btn btn-sm" href="#/preview/${cid}/sales">Ventas</a><a class="btn btn-sm" href="#/preview/${cid}/work">Trabajo</a><a class="btn btn-sm" href="#/preview/${cid}/report">Reporte</a>
-    <a class="btn btn-sm btn-primary" href="#/clients/${cid}">Salir de la vista previa</a>
-  </div>` : '');
+    <a class="btn btn-sm btn-primary" href="${isAdmin() ? `#/clients/${cid}` : '#/clients'}">Salir de la vista previa</a>
+  </div>`) : '');
 
 async function clientBrand(cid) {
   if (isClient()) return state.boot.client;
-  const c = await api('client', { id: cid });
-  return { id: c.id, name: c.name, color: c.color, logo_url: c.logo_url };
+  return api('client_brand', { id: cid });
 }
 
 function updateCard(u, compact = false) {
@@ -1427,9 +1430,9 @@ async function viewClients() {
   crumbs([{ label: 'Clientes' }]);
   const list = await api('clients');
   const html = `
-    ${pageHead('Clientes', 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', `<button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button>`)}
+    ${pageHead('Clientes', isViewer() ? 'Abrí el portal de cada cliente para ver sus métricas, ventas, trabajo y reporte.' : 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', isAdmin() ? `<button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button>` : '')}
     ${list.length ? `<div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${list.map((c) => `
-      <a href="#/clients/${c.id}" class="card card-link p-5 block">
+      <a href="#/${isViewer() ? 'preview' : 'clients'}/${c.id}" class="card card-link p-5 block">
         <div class="flex items-center gap-3">
           <div class="mono-avatar w-11 h-11" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
           <div class="min-w-0 flex-1"><div class="h2 truncate">${esc(c.name)}</div><div class="t3 text-xs mt-0.5">Creado ${fmt.date(c.created_at)}</div></div>
@@ -1723,6 +1726,11 @@ async function viewSettings() {
       </div>
 
       <div class="space-y-6">
+        <form class="card p-5 space-y-3" id="tax-form">
+          <div class="h2">Impuestos sobre el gasto en Meta</div>
+          <p class="t3 text-xs">Se suman al gasto en presupuestos, costo por venta y ROAS real. En Argentina suele rondar el 35% (IVA + percepciones).</p>
+          <div class="flex gap-2 items-center"><input class="input num w-28" name="tax_rate" value="${esc(String(s.tax_rate))}" inputmode="decimal"><span class="t2">%</span><div class="flex-1"></div><button class="btn btn-primary">Guardar</button></div>
+        </form>
         <section class="card p-5 space-y-4">
           <div class="h2">Datos para tu app de Meta</div>
           ${copyRow('URI de redirección OAuth', s.redirect_uri)}
@@ -1730,12 +1738,13 @@ async function viewSettings() {
           <div class="t3 text-xs">Graph API ${esc(s.graph_version)}</div>
         </section>
         <section class="card">
-          <div class="card-h"><div class="h2">Equipo de la agencia</div></div>
-          <div class="divide">${s.users.map((u) => `<div class="px-5 py-3 flex items-center gap-3"><div class="mono-avatar w-8 h-8 text-xs" style="background:var(--sunk);color:var(--t2)">${esc(initials(u.name))}</div><div class="flex-1 min-w-0"><div class="t1 truncate">${esc(u.name)}</div><div class="t3 text-xs mono truncate">${esc(u.username)}</div></div>${u.id !== state.boot.user.id ? `<button class="btn btn-sm btn-ghost btn-danger" data-del-user="${u.id}">${icon('x', 14)}</button>` : '<span class="pill plain">Vos</span>'}</div>`).join('')}</div>
+          <div class="card-h"><div class="h2">Equipo y gerencia</div></div>
+          <div class="divide">${s.users.map((u) => `<div class="px-5 py-3 flex items-center gap-3"><div class="mono-avatar w-8 h-8 text-xs" style="background:var(--sunk);color:var(--t2)">${esc(initials(u.name))}</div><div class="flex-1 min-w-0"><div class="t1 truncate">${esc(u.name)} ${u.role === 'viewer' ? '<span class="pill blue plain">Solo lectura</span>' : ''}</div><div class="t3 text-xs mono truncate">${esc(u.username)}</div></div>${u.id !== state.boot.user.id ? `<button class="btn btn-sm btn-ghost btn-danger" data-del-user="${u.id}">${icon('x', 14)}</button>` : '<span class="pill plain">Vos</span>'}</div>`).join('')}</div>
           <form class="p-5 space-y-2 hair-t" id="admin-form">
             <input class="input" name="name" placeholder="Nombre" required><input class="input mono" name="username" placeholder="Usuario o email" autocapitalize="none" required>
             <input class="input" name="password" type="password" minlength="8" placeholder="Contraseña (mín. 8)" required>
-            <button class="btn w-full">Agregar administrador</button>
+            <select class="select" name="role"><option value="viewer">Solo lectura (jefes / gerencia): ve todo, no edita</option><option value="admin">Administrador: ve y edita todo</option></select>
+            <button class="btn w-full">Agregar usuario</button>
             <p class="t3 text-xs">Para clientes usá la sección Clientes.</p>
           </form>
         </section>
@@ -1788,7 +1797,8 @@ async function viewSettings() {
         });
       };
       form('token-form', 'connection_add_token', 'Token guardado y activos sincronizados', reload);
-      form('admin-form', 'user_add', 'Administrador creado', () => render(), { role: 'admin' });
+      form('admin-form', 'user_add', 'Usuario creado', () => render());
+      form('tax-form', 'settings_save', 'Impuestos actualizados', async () => { state.boot = await api('bootstrap'); render(); });
       form('pass-form', 'password_change', 'Contraseña actualizada');
     },
   };
@@ -1835,7 +1845,7 @@ function crossoverCard(ads, L, tot) {
     <div class="card p-5">
       <div class="flex items-center gap-2"><div class="h2">Publicidad vs. ${esc(lower(L.sales))} reales</div><span class="pill accent plain">Meta Ads</span></div>
       <div class="grid grid-cols-2 gap-4 mt-4">
-        <div><div class="t2 text-[12.5px]">Inversión</div><div class="num text-xl font-semibold t1 mt-1">${money(ads.spend)}</div></div>
+        <div><div class="t2 text-[12.5px]">Inversión + imp. (${taxPct()})</div><div class="num text-xl font-semibold t1 mt-1">${money(ads.spend_tax)}</div><div class="t3 text-xs">${money(ads.spend)} en Meta</div></div>
         <div><div class="t2 text-[12.5px]">Costo por ${esc(lower(L.sales).replace(/s$/, ''))}</div><div class="num text-xl font-semibold t1 mt-1">${money(ads.cost_per_order)}</div></div>
         <div><div class="t2 text-[12.5px]">ROAS real</div><div class="num text-xl font-semibold t1 mt-1">${fmt.x(ads.roas_real)}</div></div>
         <div><div class="t2 text-[12.5px]">Atribuidas por Meta</div><div class="num text-xl font-semibold t1 mt-1">${fmt.int(ads.meta_results)} <span class="t3 text-sm font-normal">de ${fmt.int(tot.orders)}</span></div></div>
@@ -1886,7 +1896,7 @@ async function viewSales(cid) {
       { key: 'ticket', label: 'Ticket prom.', value: (r) => (r.orders ? r.revenue / r.orders : null), html: (r) => moneyFull(r.orders ? r.revenue / r.orders : null) }] : []),
     ...(d.has_leads ? [{ key: 'leads', label: L.leads, value: (r) => r.leads, total: (rows) => fmt.int(rows.reduce((x, r) => x + (r.leads || 0), 0)) },
       { key: 'conv', label: 'Conversión', value: (r) => (r.leads ? (r.orders / r.leads) * 100 : null), html: (r) => fmt.pct(r.leads ? (r.orders / r.leads) * 100 : null) }] : []),
-    ...(d.ads ? [{ key: 'spend', label: 'Inversión Meta', value: (r) => d.ads.spend_daily[r.date] ?? null, html: (r) => fmt.money(d.ads.spend_daily[r.date], d.ads.currency) },
+    ...(d.ads ? [{ key: 'spend', label: `Inversión + ${taxPct()}`, value: (r) => d.ads.spend_daily[r.date] ?? null, html: (r) => fmt.money(d.ads.spend_daily[r.date], d.ads.currency) },
       { key: 'cpo', label: 'Costo/venta', value: (r) => (r.orders && d.ads.spend_daily[r.date] ? d.ads.spend_daily[r.date] / r.orders : null), html: (r) => fmt.money(r.orders && d.ads.spend_daily[r.date] ? d.ads.spend_daily[r.date] / r.orders : null, d.ads.currency) }] : []),
   ];
   const last = d.last;
@@ -1907,8 +1917,9 @@ async function viewSales(cid) {
       </div>
     </div>
     ${d.ads ? `<div class="mb-6">${crossoverCard(d.ads, L, d.totals)}</div>` : ''}
+    ${campaignSalesBlock(d.ads, L, cur)}
     <div class="card mb-6"><div class="card-h"><div class="h2">${esc(L.sales)} por día</div><div class="flex-1"></div>
-      ${d.totals.revenue > 0 || d.ads ? `<span class="t3 text-xs">vs.</span><select class="select select-sm" id="sales-line">${d.totals.revenue > 0 ? '<option value="revenue">Facturación</option>' : ''}${d.has_leads ? `<option value="leads">${esc(L.leads)}</option>` : ''}${d.ads ? '<option value="spend">Inversión Meta</option>' : ''}<option value="">—</option></select>` : ''}</div>
+      ${d.totals.revenue > 0 || d.ads ? `<span class="t3 text-xs">vs.</span><select class="select select-sm" id="sales-line">${d.totals.revenue > 0 ? '<option value="revenue">Facturación</option>' : ''}${d.has_leads ? `<option value="leads">${esc(L.leads)}</option>` : ''}${d.ads ? `<option value="spend">Inversión + ${taxPct()}</option>` : ''}<option value="">—</option></select>` : ''}</div>
       <div class="p-4 h-[300px]"><canvas id="sales-chart"></canvas></div></div>
     <div class="grid xl:grid-cols-2 gap-6 mb-6">
       <div class="card"><div class="card-h"><div class="h2">¿Qué días rinden más?</div><span class="t3 text-xs">promedio, últimos 90 días</span></div><div class="p-4 h-[260px]"><canvas id="wd-chart"></canvas></div></div>
@@ -1924,6 +1935,14 @@ async function viewSales(cid) {
     html,
     mount() {
       mountTable('sales-days');
+      $('#view').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-copy-name]');
+        if (b) return copyText(b.dataset.copyName);
+        const g = e.target.closest('[data-goal]');
+        if (g) { const r = d.ads.campaigns.rows.find((x) => x.id === g.dataset.goal); return goalModal(r, d.ads.currency, () => render({ silent: true })); }
+        const tr = e.target.closest('tr[data-go]');
+        if (tr) location.hash = tr.dataset.go;
+      });
       const sel = $('#sales-line');
       let c;
       const draw = () => {
@@ -1932,7 +1951,7 @@ async function viewSales(cid) {
         const k = sel?.value;
         if (k === 'revenue') ds.push({ label: 'Facturación', data: daily.map((x) => x.revenue), axis: 'y1', fmt: (v) => fmt.money(v, cur), color: cssVar('--c2') });
         if (k === 'leads') ds.push({ label: L.leads, data: daily.map((x) => x.leads), axis: 'y1', color: cssVar('--c3') });
-        if (k === 'spend') ds.push({ label: 'Inversión Meta', data: daily.map((x) => d.ads.spend_daily[x.date] ?? null), axis: 'y1', fmt: (v) => fmt.money(v, d.ads.currency), color: cssVar('--c2') });
+        if (k === 'spend') ds.push({ label: `Inversión + ${taxPct()}`, data: daily.map((x) => d.ads.spend_daily[x.date] ?? null), axis: 'y1', fmt: (v) => fmt.money(v, d.ads.currency), color: cssVar('--c2') });
         c = chart($('#sales-chart'), daily.map((x) => fmt.date(x.date)), ds);
       };
       sel?.addEventListener('change', draw);
@@ -2003,6 +2022,8 @@ function salesPane(c) {
         </div>
       </div>
       <div class="xl:col-span-2 space-y-6">
+        <div class="card" id="camp-names-card"><div class="card-h"><div class="h2">Nombres exactos de campañas</div><span class="t3 text-xs">para la columna “Campaña”</span></div>
+          <div class="p-4 t3 text-[13px]" data-names>${c.assets.some((a) => a.asset_type === 'ad_account') ? 'Cargando…' : 'Este cliente no tiene cuentas publicitarias asignadas.'}</div></div>
         <form class="card p-5 space-y-3" id="sales-entry">
           <div class="h2">Cargar un día a mano</div>
           <div class="grid grid-cols-2 gap-3">
@@ -2011,13 +2032,15 @@ function salesPane(c) {
             <label class="field"><span>Facturación (${esc(c.currency)})</span><input class="input num" name="revenue" inputmode="decimal" placeholder="opcional"></label>
             <label class="field"><span>${esc(c.leads_label)}</span><input class="input num" name="leads" inputmode="decimal" placeholder="opcional"></label>
           </div>
+          <label class="field"><span>Campaña de Meta (opcional)</span><input class="input" name="campaign" list="camp-names" placeholder="Elegí o escribí el nombre exacto"></label>
+          <datalist id="camp-names"></datalist>
           <label class="field"><span>${esc(c.dim_label)} (opcional)</span><input class="input" name="dim"></label>
           <button class="btn btn-accent w-full">Guardar día</button>
           <p class="t3 text-xs">Si el día ya existe en la carga manual, se reemplaza.</p>
         </form>
         <div class="card overflow-hidden"><div class="card-h"><div class="h2">Últimos días</div></div>
-          <div class="max-h-[420px] overflow-y-auto"><table class="tbl"><thead><tr><th style="text-align:left">Día</th><th>${esc(c.sales_label)}</th><th>Facturación</th><th style="text-align:left">${esc(c.dim_label)}</th></tr></thead><tbody>
-            ${c.sales_recent.map((r) => `<tr><td style="text-align:left">${fmt.date(r.day)}</td><td>${fmt.int(+r.orders)}</td><td>${fmt.money(+r.revenue, c.currency)}</td><td style="text-align:left" class="t3">${esc(r.dim || '—')}</td></tr>`).join('') || '<tr><td colspan="4" class="t3 !py-6" style="text-align:center">Sin datos</td></tr>'}
+          <div class="max-h-[420px] overflow-y-auto"><table class="tbl"><thead><tr><th style="text-align:left">Día</th><th>${esc(c.sales_label)}</th><th>Facturación</th><th style="text-align:left">Campaña · ${esc(c.dim_label)}</th></tr></thead><tbody>
+            ${c.sales_recent.map((r) => `<tr><td style="text-align:left">${fmt.date(r.day)}</td><td>${fmt.int(+r.orders)}</td><td>${fmt.money(+r.revenue, c.currency)}</td><td style="text-align:left" class="t3 max-w-[220px] truncate">${esc([r.campaign, r.dim].filter(Boolean).join(' · ') || '—')}</td></tr>`).join('') || '<tr><td colspan="4" class="t3 !py-6" style="text-align:center">Sin datos</td></tr>'}
           </tbody></table></div></div>
       </div>
     </div>`;
@@ -2026,6 +2049,16 @@ function salesPane(c) {
 function mountSalesPane(c) {
   const wiz = $('#sales-wizard');
   if (!wiz) return;
+  if (c.assets.some((a) => a.asset_type === 'ad_account')) {
+    api('campaign_names', { id: c.id }).then((names) => {
+      const box = $('#camp-names-card [data-names]');
+      if (!box) return;
+      $('#camp-names').innerHTML = names.map((n) => `<option value="${esc(n.name)}">`).join('');
+      box.innerHTML = names.length ? `<div class="space-y-1.5 max-h-[260px] overflow-y-auto">${names.map((n) => `
+        <button class="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded-lg hover:bg-[var(--hover)]" data-copy-name="${esc(n.name)}">${statusPill(n.status)}<span class="t1 truncate flex-1">${esc(n.name)}</span><span class="t3">${icon('copy', 13)}</span></button>`).join('')}</div>
+        <div class="t3 text-xs mt-2">Tocá para copiar y pegalo tal cual en la planilla.</div>` : 'No hay campañas activas ni con gasto en los últimos 90 días.';
+    }).catch(() => {});
+  }
   let kind = 'gsheet';
   $('#imp-kind').addEventListener('click', (e) => {
     const b = e.target.closest('[data-k]');
@@ -2050,7 +2083,7 @@ function mountSalesPane(c) {
       }
     } catch (err) { toast(err.message, 'error'); return; } finally { btn.disabled = false; btn.textContent = 'Leer columnas'; }
     const opt = (field) => `<option value="">— ninguna —</option>${p.headers.map((h, i) => `<option value="${i}" ${p.suggest[field] === i ? 'selected' : ''}>${esc(h)}</option>`).join('')}`;
-    const fields = [['date', 'Fecha', true], ['orders', `${c.sales_label} (cantidad)`], ['revenue', 'Facturación / monto'], ['leads', `${c.leads_label}`], ['dim', `${c.dim_label} / canal`]];
+    const fields = [['date', 'Fecha', true], ['orders', `${c.sales_label} (cantidad)`], ['revenue', 'Facturación / monto'], ['campaign', 'Campaña de Meta'], ['leads', `${c.leads_label}`], ['dim', `${c.dim_label} / canal`]];
     step2.innerHTML = `
       <div class="flex items-center gap-2"><div class="h2">Revisá las columnas</div><span class="t3 text-xs">${fmt.int(p.total)} filas leídas${p.detected ? ` · ${p.detected.days} días (${fmt.date(p.detected.min)} → ${fmt.date(p.detected.max)})` : ''}</span></div>
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${fields.map(([f, l, req]) => `<label class="field"><span>${esc(l)}${req ? ' *' : ''}</span><select class="select" data-map="${f}">${opt(f)}</select></label>`).join('')}</div>
@@ -2077,6 +2110,7 @@ function mountSalesPane(c) {
   $('#view').addEventListener('click', async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.dataset.copyName) copyText(b.dataset.copyName);
     if (b.dataset.salesSync) { b.disabled = true; try { await post('sales_sync', { id: +b.dataset.salesSync }, 'Planilla sincronizada'); render({ silent: true }); } catch { b.disabled = false; } }
     if (b.dataset.salesDel && confirm('¿Eliminar esta fuente y todos sus datos?')) { await post('sales_source_delete', { id: +b.dataset.salesDel }, 'Fuente eliminada'); render({ silent: true }); }
     if (b.dataset.salesReupload) {
@@ -2089,10 +2123,201 @@ function mountSalesPane(c) {
 }
 
 // =========================================================================
+// Presupuestos (planificado vs. gastado con impuestos)
+// =========================================================================
+const BUDGET_STATUS = { en_ritmo: ['En ritmo', 'green'], excede: ['Se pasa del presupuesto', 'red'], subejecuta: ['Por debajo de lo planificado', 'amber'], sin_plan: ['Sin presupuesto cargado', 'gray'] };
+const taxPct = () => fmt.dec((state.boot.tax_rate || 0) * 100, 0) + '%';
+
+function budgetBar(spent, planned, projected) {
+  if (!planned) return '';
+  const pct = Math.min(100, (spent / planned) * 100);
+  const proj = Math.min(100, (projected / planned) * 100);
+  const over = projected > planned * 1.05;
+  return `<div class="relative h-2.5 rounded-full sunk overflow-hidden mt-3">
+      <div class="absolute inset-y-0 left-0 rounded-full" style="width:${proj}%;background:${over ? 'var(--bad-soft)' : 'var(--accent-soft)'}"></div>
+      <div class="absolute inset-y-0 left-0 rounded-full" style="width:${pct}%;background:${spent > planned ? 'var(--bad)' : 'var(--accent)'}"></div>
+    </div>`;
+}
+
+async function viewBudgets() {
+  crumbs([{ label: 'Presupuestos' }]);
+  const d = await api('budgets');
+  const monthName = new Date(d.month + '-15').toLocaleDateString(LOCALE, { month: 'long', year: 'numeric' });
+  const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
+  if (!d.accounts.length) return { html: empty('Sin cuentas publicitarias', 'Conectá Meta desde Configuración.', '', 'target') };
+
+  const totals = d.totals.map((t) => {
+    const m = (v) => fmt.moneyShort(v, t.currency);
+    return `<div class="kpi-row grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 mb-6" style="display:grid">
+      ${kpi(`Presupuesto planificado · ${t.currency}`, t.planned ? m(t.planned) : '—', { spark: '' })}
+      ${kpi(`Gastado en ${monthName.split(' ')[0]} (+${tax})`, m(t.spent_mtd_tax), { d: `<span class="t3 text-xs">${m(t.spent_mtd)} en Meta</span>`, vs: '' })}
+      ${kpi('Disponible', t.planned ? m(t.planned - t.spent_mtd_tax) : '—', { d: t.planned ? `<span class="t3 text-xs">${fmt.dec((t.spent_mtd_tax / t.planned) * 100, 0)}% consumido</span>` : '', vs: '' })}
+      ${kpi(`Gasto de hoy (+${tax})`, m(t.spent_today_tax), { d: `<span class="t3 text-xs">${m(t.active_daily_tax)}/día activo</span>`, vs: '' })}
+      ${kpi('Cierre estimado del mes', m(t.projected_budgets), { d: t.planned ? `<span class="${t.projected_budgets > t.planned * 1.05 ? 't-bad' : 't3'} text-xs">${t.projected_budgets > t.planned ? 'Supera' : 'Dentro de'} lo planificado</span>` : '', vs: '' })}
+    </div>`;
+  }).join('');
+
+  const accountCard = (a) => {
+    const m = (v) => fmt.money(v, a.currency);
+    const [stLabel, stCls] = BUDGET_STATUS[a.status] || BUDGET_STATUS.sin_plan;
+    const rows = a.campaigns.map((c) => `
+      <tr>
+        <td style="text-align:left"><div class="font-medium max-w-[340px] truncate" title="${esc(c.name)}">${esc(c.name)}</div><div class="mt-1 flex gap-2 items-center">${statusPill(c.effective_status)}<span class="sub">${esc(c.budget_type || '')}</span></div></td>
+        <td>${c.daily !== null ? m(c.daily) : (c.lifetime ? `${m(c.lifetime)} <span class="sub">total</span>` : '—')}</td>
+        <td class="font-medium">${c.daily_tax !== null ? m(c.daily_tax) : '—'}</td>
+        <td>${m(c.spent_today_tax)}${c.today_pct !== null ? `<div class="bar mt-1.5 w-20 ml-auto"><i style="width:${Math.min(100, c.today_pct)}%"></i></div>` : ''}</td>
+        <td>${m(c.spent_mtd)}</td>
+        <td class="font-medium">${m(c.spent_mtd_tax)}</td>
+        <td>${c.remaining ? m(c.remaining) : '—'}${c.stop_time ? `<div class="sub">hasta ${fmt.date(c.stop_time)}</div>` : ''}</td>
+      </tr>`).join('');
+    return `
+      <div class="card mb-5" data-acc="${esc(a.id)}">
+        <div class="p-5">
+          <div class="flex flex-wrap items-start gap-3">
+            <div class="min-w-0 flex-1"><a class="h2 hover:underline" href="#/ads/${esc(a.id)}">${esc(a.name)}</a><div class="t3 text-xs mt-0.5">${esc(a.business || 'Sin portfolio')} · ${esc(a.currency)}</div></div>
+            <span class="pill ${stCls}">${stLabel}</span>
+          </div>
+          ${a.error ? `<div class="t-warn text-xs mt-2">${esc(a.error)}</div>` : ''}
+          <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mt-5">
+            <div><div class="t3 text-xs">Presupuesto del mes</div>
+              ${isAdmin() ? `<div class="flex gap-1.5 mt-1"><input class="input select-sm num !w-full" data-plan="${esc(a.id)}" value="${a.planned ?? ''}" placeholder="Cargar" inputmode="decimal"><button class="btn btn-sm" data-plan-save="${esc(a.id)}">${icon('check', 14)}</button></div>`
+                : `<div class="num text-lg font-semibold t1 mt-0.5">${a.planned ? m(a.planned) : '—'}</div>`}
+              <div class="t3 text-[11px] mt-1">con impuestos</div></div>
+            <div><div class="t3 text-xs">Gastado (+${tax})</div><div class="num text-lg font-semibold t1 mt-0.5">${m(a.spent_mtd_tax)}</div><div class="t3 text-[11px]">${m(a.spent_mtd)} en Meta</div></div>
+            <div><div class="t3 text-xs">Disponible</div><div class="num text-lg font-semibold ${a.remaining !== null && a.remaining < 0 ? 't-bad' : 't1'} mt-0.5">${a.remaining !== null ? m(a.remaining) : '—'}</div><div class="t3 text-[11px]">${a.pct !== null ? fmt.dec(a.pct, 0) + '% consumido' : ''}</div></div>
+            <div><div class="t3 text-xs">Hoy (+${tax})</div><div class="num text-lg font-semibold t1 mt-0.5">${m(a.spent_today_tax)}</div><div class="t3 text-[11px]">activo: ${m(a.active_daily_tax)}/día</div></div>
+            <div><div class="t3 text-xs">Cierre estimado</div><div class="num text-lg font-semibold t1 mt-0.5">${m(a.projected_budgets)}</div><div class="t3 text-[11px]">al ritmo: ${m(a.projected_pace)}</div></div>
+            <div><div class="t3 text-xs">Diario sugerido en Meta</div><div class="num text-lg font-semibold t-accent mt-0.5">${a.suggested_daily !== null ? m(a.suggested_daily) : '—'}</div><div class="t3 text-[11px]">${a.suggested_daily !== null ? `para cerrar en lo planificado (${d.days_left} días)` : 'cargá el presupuesto'}</div></div>
+          </div>
+          ${budgetBar(a.spent_mtd_tax, a.planned, a.projected_budgets)}
+        </div>
+        ${a.campaigns.length ? `<details class="hair-t" ${a.campaigns.length <= 8 ? 'open' : ''}><summary class="px-5 py-3 cursor-pointer t2 text-[13px] select-none">Campañas del mes (${a.campaigns.length})</summary>
+          <div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Campaña</th><th>Diario Meta</th><th>Diario +${tax}</th><th>Hoy +${tax}</th><th>Mes Meta</th><th>Mes +${tax}</th><th>Restante (total)</th></tr></thead><tbody>${rows}</tbody></table></div></details>` : ''}
+      </div>`;
+  };
+
+  return {
+    html: `${pageHead(`Presupuestos · ${esc(monthName)}`, `Día ${d.day} de ${d.days_in_month} · todos los montos “+${tax}” incluyen impuestos sobre el gasto en Meta`, isAdmin() ? `<a class="btn" href="#/settings">${icon('sliders', 14)}Impuestos: ${tax}</a>` : `<span class="pill plain">Impuestos ${tax}</span>`)}
+      ${totals}
+      <div class="flex items-center gap-3 mb-3"><div class="h2">Por cuenta publicitaria</div><div class="flex-1"></div><input class="input select-sm w-56" placeholder="Buscar cuenta" id="bud-search"></div>
+      <div id="bud-list">${d.accounts.map(accountCard).join('')}</div>`,
+    mount() {
+      $('#bud-search').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('#bud-list [data-acc]').forEach((el) => { el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none'; }); });
+      $('#view').addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-plan-save]');
+        if (!b) return;
+        const acc = b.dataset.planSave;
+        await post('budget_save', { account: acc, amount: $(`[data-plan="${acc}"]`).value }, 'Presupuesto guardado');
+        render({ silent: true });
+      });
+      $('#view').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.plan) $(`[data-plan-save="${e.target.dataset.plan}"]`).click(); });
+    },
+  };
+}
+
+/** Estado de un objetivo mensual de campaña. */
+function goalInfo(g) {
+  if (!g || (!g.target_orders && !g.target_revenue)) return null;
+  const byOrders = !!g.target_orders;
+  const target = byOrders ? g.target_orders : g.target_revenue;
+  const done = byOrders ? g.mtd_orders : g.mtd_revenue;
+  const proj = byOrders ? g.projected_orders : g.projected_revenue;
+  const pct = (done / target) * 100;
+  const [label, cls] = pct >= 100 ? ['Cumplido', 'green'] : proj >= target ? ['En camino', 'green'] : proj >= target * 0.85 ? ['Ajustado', 'amber'] : ['Atrasado', 'red'];
+  return { byOrders, target, done, proj, pct, label, cls, expected: g.expected_pct };
+}
+
+function goalBar(gi) {
+  return `<div class="relative h-2 rounded-full sunk overflow-hidden mt-1.5">
+    <div class="absolute inset-y-0 left-0 rounded-full" style="width:${Math.min(100, gi.pct)}%;background:var(--${gi.cls === 'red' ? 'bad' : gi.cls === 'amber' ? 'warn' : 'accent'})"></div>
+    <div class="absolute inset-y-0 w-px" style="left:${Math.min(100, gi.expected)}%;background:var(--t2)" title="Ritmo esperado a hoy"></div></div>`;
+}
+
+function goalCell(r, L, money) {
+  const gi = goalInfo(r.goal);
+  const edit = isAdmin() ? `<button class="btn btn-sm btn-ghost !h-6 !px-1.5" data-goal="${esc(r.id)}" title="Editar objetivo">${icon(gi ? 'sliders' : 'plus', 13)}${gi ? '' : 'Objetivo'}</button>` : '';
+  if (!gi) return `<div class="flex justify-end">${edit || '<span class="t3">—</span>'}</div>`;
+  const f = gi.byOrders ? fmt.int : money;
+  return `<div class="min-w-[170px]"><div class="flex items-center justify-end gap-1.5"><span class="num font-medium">${f(gi.done)} / ${f(gi.target)}</span><span class="pill ${gi.cls} plain">${gi.label}</span>${edit}</div>
+    ${goalBar(gi)}<div class="sub mt-1">Cierre est. ${f(gi.proj)}${gi.byOrders ? ' ' + esc(lower(L.sales)) : ''}</div></div>`;
+}
+
+function goalsStrip(rows, L, money) {
+  const list = rows.map((r) => [r, goalInfo(r.goal)]).filter(([, g]) => g).sort((a, b) => a[1].pct - b[1].pct);
+  if (!list.length) return '';
+  const monthName = new Date().toLocaleDateString(LOCALE, { month: 'long' });
+  return `<div class="mb-6"><div class="flex items-center gap-2 mb-3"><div class="h2">Objetivos de ${esc(monthName)} por campaña</div><span class="t3 text-xs">la línea marca dónde deberías estar hoy</span></div>
+    <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">${list.map(([r, g]) => {
+      const f = g.byOrders ? fmt.int : money;
+      return `<div class="card p-4">
+        <div class="flex items-start gap-2"><div class="t1 font-medium truncate flex-1" title="${esc(r.name)}">${esc(r.name)}</div><span class="pill ${g.cls}">${g.label}</span></div>
+        <div class="flex items-end gap-2 mt-3"><span class="hero-num t1" style="font-size:28px">${f(g.done)}</span><span class="t3 mb-1">de ${f(g.target)} ${g.byOrders ? esc(lower(L.sales)) : ''}</span><span class="flex-1"></span><span class="num font-semibold t2 mb-1">${fmt.dec(g.pct, 0)}%</span></div>
+        ${goalBar(g)}
+        <div class="flex text-xs t3 mt-2"><span>Cierre estimado: <b class="t1">${f(g.proj)}</b></span><span class="flex-1"></span><span>${r.cost_per_order ? 'Costo/venta ' + money(r.cost_per_order) : ''}</span></div>
+      </div>`;
+    }).join('')}</div></div>`;
+}
+
+function goalModal(r, cur, after) {
+  const el = modal(`${modalHead('Objetivo del mes', esc(r.name))}
+    <form class="p-5 space-y-3" id="goal-form">
+      <p class="t3 text-xs">Se compara con las ventas cargadas en la planilla para esta campaña (mes en curso). Podés usar uno o los dos.</p>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="field"><span>Ventas (cantidad)</span><input class="input num" name="target_orders" inputmode="decimal" value="${esc(r.goal?.target_orders ?? '')}"></label>
+        <label class="field"><span>Facturación (${esc(cur)})</span><input class="input num" name="target_revenue" inputmode="decimal" value="${esc(r.goal?.target_revenue ?? '')}"></label>
+      </div>
+      <div class="flex gap-2 pt-1"><button class="btn btn-primary">Guardar</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button><div class="flex-1"></div>
+        ${r.goal?.target_orders || r.goal?.target_revenue ? '<button type="button" class="btn btn-ghost btn-danger" id="goal-clear">Quitar objetivo</button>' : ''}</div>
+    </form>`, 'sm');
+  const save = async (data) => { await post('campaign_target_save', { campaign_id: r.id, ...data }, 'Objetivo guardado'); closeModal(); after(); };
+  $('#goal-form', el).addEventListener('submit', (e) => { e.preventDefault(); save(Object.fromEntries(new FormData(e.target))).catch(() => {}); });
+  $('#goal-clear', el)?.addEventListener('click', () => save({ target_orders: '', target_revenue: '' }).catch(() => {}));
+}
+
+/** Tabla de ventas reales por campaña (cruce con Meta, gasto con impuestos). */
+function campaignSalesBlock(ads, L, cur) {
+  const cs = ads?.campaigns;
+  if (!cs) return '';
+  const m = (v) => fmt.money(v, ads.currency);
+  const tax = taxPct();
+  if (!cs.enabled) {
+    return `<div class="card p-5 mb-6"><div class="h2">${esc(L.sales)} por campaña</div>
+      <p class="t2 mt-1 text-[13px]">Agregá una columna <b>“Campaña”</b> a la planilla con el nombre exacto de la campaña de Meta y vas a ver el ROAS y el costo por ${esc(lower(L.sales).replace(/s$/, ''))} reales de cada una.</p>
+      ${cs.names.length ? `<div class="mt-3 flex flex-wrap gap-2">${cs.names.slice(0, 12).map((n) => `<button class="pill plain" style="cursor:copy" data-copy-name="${esc(n)}" title="Copiar">${esc(n)}</button>`).join('')}</div><div class="t3 text-xs mt-2">Tocá un nombre para copiarlo.</div>` : ''}</div>`;
+  }
+  const rows = cs.rows;
+  const sum = (k) => rows.reduce((s, r) => s + (r[k] || 0), 0);
+  const tSpendTax = sum('spend_tax'), tRev = sum('revenue'), tOrd = sum('orders');
+  return `
+    ${goalsStrip(rows, L, m)}
+    <div class="card overflow-hidden mb-6">
+      <div class="card-h"><div class="h2">Rendimiento real por campaña</div><span class="t3 text-xs">${esc(L.sales)} de la planilla × gasto en Meta +${tax}</span></div>
+      <div class="scroll-x"><table class="tbl"><thead><tr>
+        <th style="text-align:left">Campaña</th><th>Objetivo del mes</th><th>Gasto +${tax}</th><th>${esc(L.sales)} reales</th><th>Facturación</th><th>Costo por ${esc(lower(L.sales).replace(/s$/, ''))}</th><th>ROAS real</th><th>Resultado neto</th><th>Ticket</th><th>Conv. clic→venta</th><th>Resultados Meta</th><th>ROAS Meta</th><th>CTR</th>
+      </tr></thead><tbody>
+      ${rows.map((r) => `<tr class="clickable" data-go="#/ads/${esc(r.account)}/c/${esc(r.id)}">
+        <td style="text-align:left"><div class="font-medium max-w-[320px] truncate" title="${esc(r.name)}">${esc(r.name)}</div><div class="mt-1 flex gap-2 items-center">${statusPill(r.effective_status)}${r.matched ? '' : `<span class="pill amber plain">Sin ${esc(lower(L.sales))} cargadas</span>`}</div></td>
+        <td>${goalCell(r, L, m)}</td>
+        <td>${m(r.spend_tax)}</td><td class="font-semibold">${fmt.int(r.orders)}</td><td>${m(r.revenue)}</td>
+        <td class="font-semibold">${m(r.cost_per_order)}</td>
+        <td class="font-semibold ${r.roas_real !== null ? (r.roas_real >= 1 ? 't-pos' : 't-bad') : ''}">${fmt.x(r.roas_real)}</td>
+        <td class="${r.profit >= 0 ? 't-pos' : 't-bad'}">${r.revenue ? m(r.profit) : '—'}</td>
+        <td>${m(r.ticket)}</td><td>${fmt.pct(r.conv_rate)}</td>
+        <td>${fmt.int(r.meta_results)} <span class="sub">${esc(r.result_label)}</span></td><td>${fmt.x(r.roas_meta)}</td><td>${fmt.pct(r.link_ctr)}</td>
+      </tr>`).join('') || `<tr><td colspan="13" style="text-align:center" class="t3 !py-8">Sin campañas con gasto en el período</td></tr>`}
+      </tbody>${rows.length > 1 ? `<tfoot><tr><td style="text-align:left">Total campañas</td><td></td><td>${m(tSpendTax)}</td><td>${fmt.int(tOrd)}</td><td>${m(tRev)}</td><td>${m(tOrd ? tSpendTax / tOrd : null)}</td><td>${fmt.x(tSpendTax ? tRev / tSpendTax : null)}</td><td>${m(tRev - tSpendTax)}</td><td colspan="5"></td></tr></tfoot>` : ''}</table></div>
+      ${cs.no_campaign ? `<div class="px-5 py-3 hair-t t2 text-[13px]">Además hay <b>${fmt.int(cs.no_campaign.orders)}</b> ${esc(lower(L.sales))} sin campaña asignada${cs.no_campaign.revenue ? ` (${m(cs.no_campaign.revenue)})` : ''}: orgánicas, otros canales o filas sin completar.</div>` : ''}
+      ${cs.unmatched.length ? `<div class="px-5 py-3 hair-t"><div class="t-warn text-[13px] font-medium flex items-center gap-1.5">${icon('alert', 14)}Nombres de la planilla que no coinciden con ninguna campaña de Meta</div>
+        <ul class="mt-2 space-y-1 text-[13px]">${cs.unmatched.map((u) => `<li class="t2">“${esc(u.name)}” · ${fmt.int(u.orders)} ${esc(lower(L.sales))}${u.suggestion ? ` → ¿quisiste decir <button class="link" data-copy-name="${esc(u.suggestion)}">“${esc(u.suggestion)}”</button>?` : ''}</li>`).join('')}</ul>
+        <div class="t3 text-xs mt-2">Corregí el nombre en la planilla (mayúsculas y tildes no importan).</div></div>` : ''}
+    </div>`;
+}
+
+// =========================================================================
 // Navegación
 // =========================================================================
 const ADMIN_NAV = [
-  ['Rendimiento', [['overview', '#/', 'grid', 'Resumen'], ['ads', '#/ads', 'target', 'Campañas', 'ad_account'], ['pages', '#/pages', 'page', 'Facebook', 'page'], ['ig', '#/ig', 'instagram', 'Instagram', 'ig_account']]],
+  ['Rendimiento', [['overview', '#/', 'grid', 'Resumen'], ['budgets', '#/budgets', 'calendar', 'Presupuestos'], ['ads', '#/ads', 'target', 'Campañas', 'ad_account'], ['pages', '#/pages', 'page', 'Facebook', 'page'], ['ig', '#/ig', 'instagram', 'Instagram', 'ig_account']]],
   ['Agencia', [['clients', '#/clients', 'users', 'Clientes'], ['activity', '#/activity', 'bell', 'Actividad'], ['settings', '#/settings', 'sliders', 'Configuración']]],
 ];
 const CLIENT_NAV = [['home', '#/', 'home', 'Inicio'], ['ads', '#/ads', 'target', 'Campañas'], ['social', '#/social', 'social', 'Redes'], ['work', '#/work', 'briefcase', 'Trabajo'], ['report', '#/report', 'report', 'Reporte']];
@@ -2113,7 +2338,8 @@ function renderNav() {
     return;
   }
   const counts = state.boot.counts;
-  $('#nav').innerHTML = ADMIN_NAV.map(([sec, items]) => `<div class="nav-sec">${sec}</div>${items.map(([k, href, ic, l, cnt]) => `
+  const nav = ADMIN_NAV.map(([sec, items]) => [sec, isViewer() ? items.filter(([k]) => k !== 'settings') : items]);
+  $('#nav').innerHTML = nav.map(([sec, items]) => `<div class="nav-sec">${sec}</div>${items.map(([k, href, ic, l, cnt]) => `
     <a href="${href}" data-nav="${k}" class="nav-link">${icon(ic)}${l}${cnt && counts[cnt] ? `<span class="nav-count">${counts[cnt]}</span>` : ''}</a>`).join('')}`).join('');
 }
 
@@ -2171,6 +2397,7 @@ async function openPalette() {
 // =========================================================================
 const ADMIN_ROUTES = [
   [/^\/?$/, viewOverview, 'overview'],
+  [/^\/budgets$/, viewBudgets, 'budgets'],
   [/^\/ads$/, viewAdAccounts, 'ads'],
   [/^\/ads\/(act_\d+)$/, viewAccount, 'ads'],
   [/^\/ads\/(act_\d+)\/c\/(\d+)$/, viewCampaign, 'ads'],
@@ -2207,6 +2434,11 @@ const NO_LIVE = /^#\/(settings|clients)/;
 async function render({ silent = false } = {}) {
   const path = location.hash.replace(/^#/, '') || '/';
   const id = ++state.renderId;
+  if (isViewer() && /^\/(settings|clients\/\d+)/.test(path)) {
+    const m2 = path.match(/^\/clients\/(\d+)/);
+    location.replace(m2 ? `#/preview/${m2[1]}` : '#/');
+    return;
+  }
   const routes = isClient() ? CLIENT_ROUTES : ADMIN_ROUTES;
   const match = routes.map(([re, fn, nav, preview]) => [path.match(re), fn, nav, preview]).find(([m]) => m);
   if (!match) { location.hash = '#/'; return; }

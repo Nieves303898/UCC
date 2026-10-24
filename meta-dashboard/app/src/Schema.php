@@ -123,10 +123,37 @@ final class Schema
                 source_id INT NOT NULL,
                 day DATE NOT NULL,
                 dim VARCHAR(120) NOT NULL DEFAULT '',
+                campaign VARCHAR(190) NOT NULL DEFAULT '',
                 orders DECIMAL(14,2) NOT NULL DEFAULT 0,
                 revenue DECIMAL(16,2) NOT NULL DEFAULT 0,
                 leads DECIMAL(14,2) NULL,
-                UNIQUE (source_id, day, dim)
+                UNIQUE (source_id, day, dim, campaign)
+            )$suffix",
+
+            // Presupuesto mensual planificado por cuenta publicitaria.
+            "CREATE TABLE IF NOT EXISTS ad_budgets (
+                account_id VARCHAR(64) NOT NULL,
+                month CHAR(7) NOT NULL,
+                amount DECIMAL(16,2) NOT NULL,
+                note VARCHAR(255) NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE (account_id, month)
+            )$suffix",
+
+            // Objetivo mensual de ventas por campaña de Meta.
+            "CREATE TABLE IF NOT EXISTS campaign_targets (
+                campaign_id VARCHAR(64) NOT NULL,
+                month CHAR(7) NOT NULL,
+                target_orders DECIMAL(14,2) NULL,
+                target_revenue DECIMAL(16,2) NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE (campaign_id, month)
+            )$suffix",
+
+            // Ajustes editables desde el panel (ej. impuestos sobre el gasto).
+            "CREATE TABLE IF NOT EXISTS settings (
+                k VARCHAR(64) NOT NULL PRIMARY KEY,
+                v TEXT NULL
             )$suffix",
 
             "CREATE TABLE IF NOT EXISTS daily_snapshots (
@@ -158,6 +185,33 @@ final class Schema
 
         foreach ($tables as $sql) {
             Db::pdo()->exec($sql);
+        }
+        self::migrate();
+    }
+
+    /** Actualizaciones de instalaciones existentes (idempotentes). */
+    private static function migrate(): void
+    {
+        // v4: ventas por campaña.
+        try {
+            Db::one('SELECT campaign FROM sales_daily LIMIT 1');
+        } catch (\Throwable) {
+            if (Db::driver() === 'sqlite') {
+                $pdo = Db::pdo();
+                $pdo->exec('ALTER TABLE sales_daily RENAME TO sales_daily_old');
+                $pdo->exec("CREATE TABLE sales_daily (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INT NOT NULL, source_id INT NOT NULL, day DATE NOT NULL,
+                    dim VARCHAR(120) NOT NULL DEFAULT '', campaign VARCHAR(190) NOT NULL DEFAULT '', orders DECIMAL(14,2) NOT NULL DEFAULT 0,
+                    revenue DECIMAL(16,2) NOT NULL DEFAULT 0, leads DECIMAL(14,2) NULL, UNIQUE (source_id, day, dim, campaign))");
+                $pdo->exec('INSERT INTO sales_daily (client_id, source_id, day, dim, orders, revenue, leads) SELECT client_id, source_id, day, dim, orders, revenue, leads FROM sales_daily_old');
+                $pdo->exec('DROP TABLE sales_daily_old');
+            } else {
+                Db::pdo()->exec("ALTER TABLE sales_daily ADD COLUMN campaign VARCHAR(190) NOT NULL DEFAULT '' AFTER dim");
+                try {
+                    Db::pdo()->exec('ALTER TABLE sales_daily DROP INDEX source_id');
+                } catch (\Throwable) {
+                }
+                Db::pdo()->exec('ALTER TABLE sales_daily ADD UNIQUE KEY uq_sales_day (source_id, day, dim, campaign)');
+            }
         }
     }
 

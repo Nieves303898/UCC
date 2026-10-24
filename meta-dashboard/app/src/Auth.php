@@ -60,7 +60,7 @@ final class Auth
             'email'         => $email ? mb_strtolower(trim($email)) : (filter_var($username, FILTER_VALIDATE_EMAIL) ? $username : null),
             'name'          => trim($name) ?: $username,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'role'          => $role === 'client' ? 'client' : 'admin',
+            'role'          => in_array($role, ['client', 'viewer'], true) ? $role : 'admin',
             'client_id'     => $role === 'client' ? $clientId : null,
             'created_at'    => Db::now(),
         ]);

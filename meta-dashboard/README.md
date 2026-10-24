@@ -48,6 +48,14 @@ Para clientes que **no tienen campañas** (ej. VTV) o para cruzar la publicidad 
 
 El tablero muestra: total, facturación, ticket promedio, promedio diario, consultas y tasa de conversión (vs. la misma cantidad de días anteriores); **proyección de cierre del mes** con avance contra el objetivo y ritmo diario necesario; último día cargado y mejor día; serie diaria; **días de la semana que más rinden**; desglose por sucursal/planta; detalle diario exportable a CSV. Si el cliente además tiene campañas asignadas, suma **costo por venta real**, **ROAS real** y cuántas ventas atribuye Meta sobre el total. Todo aparece también en el inicio del portal y en el reporte PDF.
 
+### Presupuestos, impuestos y ventas por campaña
+
+- **Presupuestos** (menú Rendimiento): presupuesto mensual por cuenta (con impuestos), gastado del mes en Meta y **+35%**, gasto de hoy, presupuestos diarios activos (campaña o suma de conjuntos), cierre estimado, disponible y **presupuesto diario sugerido** para cerrar en lo planificado.
+- **Impuestos**: el porcentaje (35% por defecto) se edita en *Configuración*. Se aplica a "Inversión + imp.", costo por venta y ROAS real.
+- **Ventas por campaña**: agregá en la planilla una columna **"Campaña"** con el nombre de la campaña de Meta (mayúsculas, tildes y signos no importan). El tablero de ventas muestra por campaña: gasto +35%, ventas reales, facturación, costo por venta, ROAS real, resultado neto, ticket y conversión clic→venta, y avisa qué nombres no coinciden (con sugerencia). En *Clientes → Ventas* está la lista de nombres exactos para copiar.
+- **Objetivo mensual por campaña** (cantidad y/o facturación): avance del mes, línea de ritmo esperado, cierre estimado y estado (en camino, ajustado, atrasado, cumplido).
+- **Usuario de solo lectura** (gerencia): ve todo, incluidos presupuestos y el portal de cada cliente, pero no puede editar ni entrar a Configuración. Se crea en *Configuración → Equipo y gerencia*.
+
 ## 1. Requisitos
 
 - PHP 8.1 o superior con extensiones `curl`, `openssl`, `pdo_mysql` (vienen en cPanel).

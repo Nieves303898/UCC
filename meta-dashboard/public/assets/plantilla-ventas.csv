@@ -1,4 +1,4 @@
-﻿Fecha;Ventas;Facturación;Consultas;Sucursal
-01/10/2026;42;1.260.000;95;Planta Norte
-01/10/2026;35;1.050.000;70;Planta Sur
-02/10/2026;47;1.410.000;101;Planta Norte
+﻿Fecha;Campaña;Ventas;Facturación;Consultas;Sucursal
+01/10/2026;BF | Ventas Catálogo;12;1.260.000;30;Online
+01/10/2026;Mensajes WhatsApp;8;840.000;25;Online
+01/10/2026;;5;520.000;;Local

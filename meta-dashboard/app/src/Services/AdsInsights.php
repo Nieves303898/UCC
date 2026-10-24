@@ -61,6 +61,7 @@ final class AdsInsights
         $m['result_label'] = self::RESULT_LABELS[$resultKey] ?? 'Resultados';
         $m['results'] = (int) ($m[$resultKey] ?? 0);
         $m['cost_per_result'] = $m['results'] > 0 ? $m['spend'] / $m['results'] : null;
+        $m['cost_per_result_tax'] = $m['results'] > 0 ? $m['spend_tax'] / $m['results'] : null;
         return $m;
     }
 
@@ -68,6 +69,8 @@ final class AdsInsights
     public static function derive(array $m): array
     {
         $div = fn ($a, $b) => $b > 0 ? $a / $b : null;
+        // Gasto real con impuestos (Argentina: IVA + percepciones, configurable).
+        $m['spend_tax'] = $m['spend'] * (1 + \App\Settings::taxRate());
         $m['ctr'] = $div($m['clicks'] * 100, $m['impressions']);
         $m['link_ctr'] = $div($m['link_clicks'] * 100, $m['impressions']);
         $m['cpc'] = $div($m['spend'], $m['link_clicks']);
@@ -94,6 +97,7 @@ final class AdsInsights
         $total = self::derive($total);
         $total['results'] = array_sum(array_map(fn ($r) => $r['results'] ?? 0, $rows));
         $total['cost_per_result'] = $total['results'] > 0 ? $total['spend'] / $total['results'] : null;
+        $total['cost_per_result_tax'] = $total['results'] > 0 ? $total['spend_tax'] / $total['results'] : null;
         return $total;
     }
 

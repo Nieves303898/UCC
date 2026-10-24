@@ -19,6 +19,7 @@ final class SalesImport
         'orders'  => ['ventas', 'cantidad', 'cant', 'operaciones', 'conversiones', 'pedidos', 'ordenes', 'órdenes', 'turnos', 'verificaciones', 'unidades', 'orders', 'sales', 'qty'],
         'revenue' => ['facturacion', 'facturación', 'monto', 'importe', 'total', 'ingresos', 'revenue', 'recaudacion', 'recaudación', 'neto', 'valor'],
         'leads'   => ['consultas', 'leads', 'contactos', 'visitas', 'mensajes', 'solicitudes', 'reservas', 'turnos solicitados'],
+        'campaign' => ['campaña', 'campana', 'campaign', 'nombre de campaña', 'campaña meta', 'anuncio'],
         'dim'     => ['sucursal', 'planta', 'canal', 'origen', 'producto', 'servicio', 'local', 'sede', 'categoria', 'categoría', 'medio'],
     ];
 
@@ -80,6 +81,14 @@ final class SalesImport
         throw new InvalidArgumentException('No reconocimos el link de Google Sheets.');
     }
 
+    /** Normaliza nombres de campaña para cruzarlos con Meta (sin tildes, mayúsculas ni espacios dobles). */
+    public static function normName(string $s): string
+    {
+        $s = mb_strtolower(trim($s));
+        $s = strtr($s, ['á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u', 'ñ' => 'n']);
+        return trim(preg_replace('/[\s\-_|·]+/u', ' ', $s));
+    }
+
     /** Sugiere qué columna corresponde a cada campo según el encabezado. */
     public static function suggest(array $headers): array
     {
@@ -107,7 +116,7 @@ final class SalesImport
 
     /**
      * Agrupa las filas por día (+ dimensión opcional).
-     * $map = ['date' => idx, 'orders' => idx|null, 'revenue' => idx|null, 'leads' => idx|null, 'dim' => idx|null]
+     * $map = ['date' => idx, 'orders' => idx|null, 'revenue' => idx|null, 'leads' => idx|null, 'campaign' => idx|null, 'dim' => idx|null]
      * Si no se mapea 'orders', cada fila cuenta como 1.
      * @return array{days: array<string, array>, skipped: int, min: ?string, max: ?string}
      */
@@ -117,7 +126,7 @@ final class SalesImport
             throw new InvalidArgumentException('Elegí qué columna tiene la fecha.');
         }
         $col = fn ($k) => isset($map[$k]) && $map[$k] !== '' && $map[$k] !== null ? (int) $map[$k] : null;
-        [$d, $o, $r, $l, $dim] = [$col('date'), $col('orders'), $col('revenue'), $col('leads'), $col('dim')];
+        [$d, $o, $r, $l, $dim, $camp] = [$col('date'), $col('orders'), $col('revenue'), $col('leads'), $col('dim'), $col('campaign')];
         $days = [];
         $skipped = 0;
         foreach ($rows as $row) {
@@ -127,8 +136,9 @@ final class SalesImport
                 continue;
             }
             $key = mb_substr(trim((string) ($dim !== null ? ($row[$dim] ?? '') : '')), 0, 120);
-            $agg = &$days[$day . '|' . $key];
-            $agg ??= ['day' => $day, 'dim' => $key, 'orders' => 0.0, 'revenue' => 0.0, 'leads' => null];
+            $campaign = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) ($camp !== null ? ($row[$camp] ?? '') : ''))), 0, 190);
+            $agg = &$days[$day . '|' . $key . '|' . $campaign];
+            $agg ??= ['day' => $day, 'dim' => $key, 'campaign' => $campaign, 'orders' => 0.0, 'revenue' => 0.0, 'leads' => null];
             $agg['orders'] += $o !== null ? (self::parseNumber($row[$o] ?? null) ?? 0) : 1;
             $agg['revenue'] += $r !== null ? (self::parseNumber($row[$r] ?? null) ?? 0) : 0;
             if ($l !== null) {
