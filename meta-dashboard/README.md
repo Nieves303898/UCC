@@ -77,6 +77,15 @@ Si una cuenta tiene campañas de distintas marcas (ej. PayLab Gestión con campa
 
 Se puede asignar por **portfolio comercial** (incluye todas sus cuentas publicitarias), **cliente/marca** (sus cuentas, páginas e Instagram), **cuenta publicitaria**, **página** (incluye su Instagram) o **Instagram**. Todo se valida en el servidor.
 
+### Reportes en formato presentación (PDF)
+
+Menú *Reportes*: diapositivas 16:9 con el estilo de la agencia (azul marino y celeste, logo arriba a la derecha y pie con la empresa), listas para descargar en PDF.
+
+- **Avances del equipo** (semanal, quincenal o mensual): presencia y visualizaciones por marca (Facebook + Instagram contra el período anterior), conversaciones y campañas activas, inversión +35% y ventas con costo por venta y por conversación, lo que se hizo (Trabajo en curso), qué ajustar y objetivos.
+- **Proyección de inversión y ventas** (con impuestos): cómo venimos, inversión proyectada a fin de mes (invertido + presupuesto diario × días que faltan), comparación con los 3 meses anteriores, ventas y costo por venta, cierre estimado del mes, próxima semana, escenarios del mes siguiente (+15% / +30%) y objetivos con presupuesto (se editan en la diapositiva y el presupuesto se recalcula).
+- Se elige qué marcas entran. Todos los textos se editan con un clic y se guardan solos.
+- Logos: el del reporte se sube en *Reportes*; el de cada cliente, en *Clientes → Editar → Subir logo* (PNG, JPG o WebP, hasta 2 MB; se guardan en `public/uploads`).
+
 ## 1. Requisitos
 
 - PHP 8.1 o superior con extensiones `curl`, `openssl`, `pdo_mysql` (vienen en cPanel).

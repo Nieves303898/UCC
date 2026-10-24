@@ -1504,6 +1504,7 @@ function clientForm(c = null) {
         <label class="field"><span>Color de marca</span><input type="color" name="color" value="${esc(c?.color || '#0e7c66')}"></label>
         <label class="field flex-1"><span>Logo (URL https, opcional)</span><input class="input" name="logo_url" value="${esc(c?.logo_url || '')}" placeholder="https://…/logo.png"></label>
       </div>
+      ${c ? `<div class="flex items-center gap-3">${c.logo_url ? `<img src="${esc(c.logo_url)}" class="h-10 rounded border bd bg-white px-1" alt="">` : ''}<label class="btn btn-sm cursor-pointer">${icon('plus', 13)}Subir logo desde la compu<input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" id="client-logo"></label><span class="t3 text-xs">PNG, JPG o WebP · máx. 2 MB</span></div>` : '<p class="t3 text-xs">Después de crearlo vas a poder subir el logo desde la compu.</p>'}
       <p class="t3 text-xs">El color se usa como acento en el portal y en los reportes del cliente.</p>
       <div class="hair-t pt-4"><div class="h2">Ventas / conversiones</div><p class="t3 text-xs mt-0.5">Cómo se llaman en este negocio (ej. VTV: “Verificaciones”, “Turnos”, “Planta”).</p></div>
       <div class="grid grid-cols-2 gap-3">
@@ -1516,6 +1517,11 @@ function clientForm(c = null) {
       </div>
       <div class="flex gap-2 pt-1"><button class="btn btn-primary">${c ? 'Guardar' : 'Crear cliente'}</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button></div>
     </form>`, 'sm');
+  $('#client-logo', el)?.addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append('file', f); fd.append('target', String(c.id));
+    try { const r = await post('logo_upload', fd, 'Logo cargado'); $('[name=logo_url]', el).value = r.url; } catch { /* toast */ }
+  });
   $('#client-form', el).addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -2546,10 +2552,407 @@ function campaignSalesBlock(ads, L, cur) {
 }
 
 // =========================================================================
+// Reportes de agencia en formato presentación (16:9, listo para PDF)
+// =========================================================================
+const DECK_COLORS = ['#1d2862', '#9aa5bd', '#29a8e0', '#2e9c6a', '#f0a93b', '#7b61c9', '#d1495b', '#5b8c2a'];
+const cap = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
+const moneyM = (v) => (bad(v) ? '—' : `$${fmt.dec(v / 1e6, Math.abs(v) >= 1e7 ? 1 : 2)} M`);
+const moneyAR = (v) => (bad(v) ? '—' : '$' + fmt.int(v));
+const pctTxt = (cur, prev) => (!prev ? null : ((cur - prev) / prev) * 100);
+const pctBadge = (p) => (p === null || bad(p) ? '' : `<em class="${p >= 0 ? 's-up' : 's-down'}">${p >= 0 ? '↑' : '↓'} ${fmt.dec(Math.abs(p), Math.abs(p) >= 100 ? 0 : 1)}%</em>`);
+const dm = (iso) => { const [, m, d] = iso.split('-'); return `${+d}/${+m}`; };
+
+/** Plugin: escribe el valor arriba (o al costado) de cada barra, como en las presentaciones. */
+const barLabels = {
+  id: 'barLabels',
+  afterDatasetsDraw(chart, _a, opts) {
+    if (!opts || !opts.fmt) return;
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = '600 12px Geist, Inter, sans-serif';
+    ctx.fillStyle = '#1d2862';
+    const max = Math.max(1, ...chart.data.datasets.flatMap((d) => d.data.map((v) => Math.abs(v || 0))));
+    chart.data.datasets.forEach((ds, i) => {
+      const meta = chart.getDatasetMeta(i);
+      if (meta.hidden || ds.noLabels) return;
+      meta.data.forEach((el, j) => {
+        const v = ds.data[j];
+        if (v === null || v === undefined || Math.abs(v) < max * 0.01) return;
+        const txt = opts.fmt(v);
+        if (chart.options.indexAxis === 'y') {
+          if (opts.stackTotal && i !== chart.data.datasets.length - 1) return;
+          ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          ctx.fillText(opts.stackTotal ? opts.fmt(opts.stackTotal[j]) : txt, el.x + 6, el.y);
+        } else {
+          ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText(txt, el.x, el.y - 4);
+        }
+      });
+    });
+    ctx.restore();
+  },
+};
+
+function deckChart(canvas, spec) {
+  if (!canvas) return;
+  const c = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: spec.labels,
+      datasets: spec.datasets.map((d, i) => ({
+        label: d.label, data: d.data, backgroundColor: d.colors || d.color || DECK_COLORS[i % DECK_COLORS.length],
+        borderRadius: 2, maxBarThickness: spec.horizontal ? 38 : 64, stack: spec.stacked ? 's' : undefined, noLabels: d.noLabels,
+      })),
+    },
+    options: {
+      animation: false, devicePixelRatio: 2, responsive: true, maintainAspectRatio: false, indexAxis: spec.horizontal ? 'y' : 'x',
+      layout: { padding: { top: 22, right: spec.horizontal ? 70 : 8 } },
+      plugins: {
+        legend: { display: spec.datasets.length > 1, position: 'bottom', labels: { color: '#2b3550', boxWidth: 10, boxHeight: 10, font: { size: 12 } } },
+        tooltip: { enabled: false },
+        barLabels: { fmt: spec.fmt || fmt.int, stackTotal: spec.stackTotal },
+      },
+      scales: spec.horizontal
+        ? { x: { stacked: !!spec.stacked, display: false, grid: { display: false } }, y: { stacked: !!spec.stacked, grid: { display: false }, ticks: { color: '#2b3550', font: { size: 12 } } } }
+        : { x: { grid: { display: false }, ticks: { color: '#2b3550', font: { size: 12 } }, border: { color: '#5a6582' } }, y: { display: false, beginAtZero: true, grid: { display: false } } },
+    },
+    plugins: [barLabels],
+  });
+  state.charts.push(c);
+}
+
+function deckContext(d, cfg) {
+  const notes = d.notes || {};
+  const editable = canEdit();
+  const logo = state.boot.report?.logo;
+  const company = cfg.company || state.boot.report?.company || state.boot.agency_name;
+  const ed = (block, def, cls = '') => `<div class="ed ${cls}" data-note="${esc(block)}" contenteditable="${editable}" spellcheck="false">${esc(notes[block] ?? def)}</div>`;
+  const val = (block, def) => notes[block] ?? def;
+  const charts = [];
+  let n = 0;
+  const logoHtml = logo ? `<img class="s-logo" src="${esc(logo)}" alt="">` : `<div class="s-logo-txt">${esc(company)}</div>`;
+  const slide = (title, body, foot, sub = '') => {
+    n++;
+    return `<section class="slide"><div class="s-top"></div><div class="s-title">${title}</div>${logoHtml}
+      <div class="s-body">${sub ? `<div class="s-sub">${sub}</div>` : ''}${body}</div>
+      <div class="s-foot"><span>${esc(foot)}</span><span>${n}</span></div></section>`;
+  };
+  const cover = (title, sub, note) => {
+    n++;
+    return `<section class="slide cover"><div class="c-logo">${logo ? `<img src="${esc(logo)}" alt="">` : `<span>${esc(company)}</span>`}</div>
+      <div class="c-title">${title}</div><div class="c-sub">${sub}</div><div class="c-note">${note}</div><div class="s-bottom"></div></section>`;
+  };
+  const chartBox = (spec, title = '') => { const id = 'dc' + charts.length; charts.push([id, spec]); return `<div class="s-chart flex flex-col">${title ? `<div class="s-chart-title">${esc(title)}</div>` : ''}<div class="relative flex-1 min-h-0"><canvas id="${id}"></canvas></div></div>`; };
+  const banner = (k, t, dsc) => `<div class="s-banner">${ed(k + '_t', t, 'ed-strong')}${dsc !== undefined ? ed(k + '_d', dsc) : ''}</div>`;
+  return { ed, val, slide, cover, chartBox, banner, charts, company, notes, editable };
+}
+
+function projectionDeck(d, cfg) {
+  const X = deckContext(d, cfg);
+  const B = d.brands;
+  const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
+  const mName = cap(d.month.name), nName = cap(d.next.name);
+  const asOf = dm(d.as_of);
+  const short = (s) => cap(s).slice(0, 3);
+  const foot = `${X.company} · Proyección ${short(d.month.name)}–${short(d.next.name)} ${d.next.year} · Valores con ${tax} de impuestos incluido`;
+  const sum = (f) => B.reduce((s, b) => s + (f(b) || 0), 0);
+  const mLabels = d.months.map((m) => m.label);
+  const out = [];
+
+  out.push(X.cover(X.ed('title', 'Proyección de inversión y ventas'), `${mName} y ${d.next.name} de ${d.next.year}`, `Valores con ${tax} de impuestos incluido`));
+
+  // 2. Cómo venimos
+  const salesByMonth = d.months.map((_, i) => sum((b) => b.history[i].orders));
+  const growth = B.map((b) => ({ b, from: b.history[0].orders, to: b.history[3].orders })).sort((a, z) => (z.to - z.from) - (a.to - a.from))[0];
+  const trendUp = salesByMonth[3] / Math.max(1, d.month.days - d.month.remaining) >= salesByMonth[2] / 30;
+  out.push(X.slide(X.ed('s2_title', trendUp ? 'Cómo venimos: creciendo' : 'Cómo venimos: repuntando'), `
+    <div class="s-row">
+      <div class="flex-1 flex">${X.chartBox({ labels: mLabels, datasets: [{ label: 'Ventas', data: salesByMonth, colors: salesByMonth.map((_, i) => (i === 3 ? '#f0a93b' : '#29a8e0')) }] }, 'Ventas por mes · todas las marcas')}</div>
+      <div class="s-col w-[42%]">
+        <div class="s-card flex-1"><h4>Qué pasó</h4>${X.ed('s2_paso', trendUp ? 'Las ventas vienen subiendo mes a mes y sostuvimos el ritmo de inversión.' : 'Las ventas bajaron contra el mes anterior y estuvimos repuntando las cuentas.')}</div>
+        <div class="s-card flex-1"><h4>Hoy</h4>${X.ed('s2_hoy', 'Estamos encaminados, con perspectivas positivas ante los nuevos avances.')}</div>
+      </div>
+    </div>
+    ${X.banner('s2', growth ? `${growth.b.name} pasó de ${fmt.int(growth.from)} ventas en ${d.months[0].label.toLowerCase()} a ${fmt.int(growth.to)} en ${d.month.name} (al ${asOf}).` : 'Resumen del período', `Entre las ${B.length} marcas llevamos ${fmt.int(salesByMonth[3])} ventas en ${d.month.name}.`)}`, foot));
+
+  // 3. Inversión proyectada
+  const invested = sum((b) => b.invested), projected = sum((b) => b.projected_month), prevSpend = sum((b) => b.history[2].spend_tax);
+  const growthSpend = pctTxt(projected, prevSpend);
+  const sortedB = [...B].sort((a, z) => z.projected_month - a.projected_month);
+  out.push(X.slide(`${mName}: inversión proyectada`, `
+    <div class="s-row">
+      <div class="flex-1 flex">${X.chartBox({ horizontal: true, stacked: true, fmt: moneyM, stackTotal: sortedB.map((b) => b.projected_month),
+        labels: sortedB.map((b) => `${b.name} (${moneyM(b.projected_month)})`),
+        datasets: [{ label: `Invertido al ${asOf}`, data: sortedB.map((b) => b.invested), color: '#1d2862' }, { label: `Estimado ${dm(d.week.from)}–${d.month.days}/${d.month.key.slice(5) * 1}`, data: sortedB.map((b) => b.estimated_rest), color: '#29a8e0' }] },
+      `Por marca ($, proyectado a fin de ${d.month.name})`)}</div>
+      <div class="s-col w-[30%]">
+        <div class="s-kpi"><b>${moneyAR(invested)}</b><span>invertido al ${asOf}</span></div>
+        <div class="s-kpi"><b>${moneyAR(projected)}</b><span>proyectado a fin de ${d.month.name}</span></div>
+        <div class="s-kpi"><b>${growthSpend === null ? '—' : `${growthSpend >= 0 ? '+' : ''}${fmt.dec(growthSpend, 0)}%`}</b><span>contra ${d.months[2].label.toLowerCase()}</span></div>
+      </div>
+    </div>
+    ${X.banner('s3', `Valores con ${tax} de impuestos incluido.`, `Proyección = invertido al ${asOf} + presupuesto diario actual × ${d.month.remaining} días (${dm(d.week.from)}–${d.month.days}/${+d.month.key.slice(5)}), con impuestos.`)}`, foot));
+
+  // 4. Contra meses anteriores
+  const spendSeries = B.map((b) => ({ label: b.name, data: b.history.map((h, i) => (i === 3 ? b.projected_month : h.spend_tax)) }));
+  const monthTotals = d.months.map((_, i) => spendSeries.reduce((s, x) => s + x.data[i], 0));
+  const vsPrev = pctTxt(monthTotals[3], monthTotals[2]);
+  out.push(X.slide(`${mName} contra meses anteriores`, `
+    <div class="flex-1 flex">${X.chartBox({ fmt: moneyM, labels: d.months.map((m, i) => (i === 3 ? `${cap(d.month.name)} (proy.)` : m.label)), datasets: spendSeries }, 'Inversión por mes y marca ($, con impuestos)')}</div>
+    ${X.banner('s4', `Total: ${d.months.map((m, i) => `${i === 3 ? `${cap(d.month.name)} proyectado` : m.label} ${moneyM(monthTotals[i])}`).join(' · ')}`,
+      vsPrev === null ? '' : `${mName} proyectado ${vsPrev >= 0 ? 'supera' : 'queda por debajo de'} ${d.months[2].label.toLowerCase()} en un ${fmt.dec(Math.abs(vsPrev), 0)}%.`)}`, foot));
+
+  // 5. Ventas y costo por venta
+  const costCards = [...B].filter((b) => b.cost_avg).slice(0, 4);
+  const worst = [...B].filter((b) => b.cost_month && b.cost_avg).sort((a, z) => z.cost_month / z.cost_avg - a.cost_month / a.cost_avg)[0];
+  out.push(X.slide('Ventas y costo por venta', `
+    <div class="s-row">
+      <div class="flex-1 flex">${X.chartBox({ labels: mLabels, datasets: B.map((b) => ({ label: b.name, data: b.history.map((h) => h.orders) })) }, 'Ventas brutas por mes')}</div>
+      <div class="s-col w-[30%]">${costCards.map((b) => `<div class="s-kpi"><b>${moneyAR(b.cost_avg)}</b><span>${esc(b.name)} · costo por venta prom.</span></div>`).join('') || '<div class="s-kpi"><span>Cargá las ventas en las planillas para ver el costo por venta.</span></div>'}</div>
+    </div>
+    ${X.banner('s5', worst ? `${worst.name}: el costo por venta de ${d.month.name} es ${moneyAR(worst.cost_month)} contra ${moneyAR(worst.cost_avg)} de promedio.` : 'Costo por venta por marca.', 'Costo por venta promedio = inversión con impuestos ÷ ventas de la planilla de cada marca.')}`, foot));
+
+  // 6. Cierre estimado del mes
+  const rows6 = B.map((b) => [b.name, b.orders_to_date, b.orders_rest]);
+  const t6 = rows6.reduce((s, r) => [s[0] + r[1], s[1] + (r[2] || 0)], [0, 0]);
+  out.push(X.slide(`${mName}: ventas al ${d.as_of.slice(8) * 1} y cierre estimado`, `
+    <table class="s-tbl${B.length > 4 ? ' dense' : ''}"><thead><tr><th>Marca</th><th>Ventas al ${asOf}</th><th>Estimado ${dm(d.week.from)} al ${d.month.days}/${+d.month.key.slice(5)}</th><th>Cierre de ${d.month.name}</th></tr></thead><tbody>
+      ${rows6.map((r) => `<tr><td>${esc(r[0])}</td><td><b>${fmt.int(r[1])}</b></td><td>${r[2] === null ? '—' : '+' + fmt.int(r[2])}</td><td class="hl">${fmt.int(r[1] + (r[2] || 0))}</td></tr>`).join('')}
+      <tr class="tot"><td>Total</td><td>${fmt.int(t6[0])}</td><td>+${fmt.int(t6[1])}</td><td>${fmt.int(t6[0] + t6[1])}</td></tr></tbody></table>
+    <div class="flex-1"></div>
+    ${X.banner('s6', `${mName} cerraría cerca de ${fmt.int(t6[0] + t6[1])} ventas, desde ${fmt.int(t6[0])} al ${asOf}.`, `Estimado: presupuesto diario × ${d.month.remaining} días con impuestos ÷ costo por venta de ${d.month.name} de cada marca.`)}`,
+  foot, 'Ventas actuales de cada marca y cuántas sumamos hasta fin de mes con el presupuesto activo.'));
+
+  // 7. Próxima semana
+  const t7 = [sum((b) => b.next_week_spend), sum((b) => b.next_week_sales_avg), sum((b) => b.next_week_sales_month)];
+  out.push(X.slide(`Próxima semana: ${dm(d.week.from)} al ${dm(d.week.to)}`, `
+    <table class="s-tbl${B.length > 4 ? ' dense' : ''}"><thead><tr><th>Marca</th><th>Inversión estimada</th><th>Ventas esperadas (costo promedio)</th><th>Ventas esperadas (costo de ${d.month.name})</th></tr></thead><tbody>
+      ${B.map((b) => `<tr><td>${esc(b.name)}</td><td>${moneyAR(b.next_week_spend)}</td><td>${b.next_week_sales_avg === null ? '—' : fmt.int(b.next_week_sales_avg)}</td><td>${b.next_week_sales_month === null ? '—' : fmt.int(b.next_week_sales_month)}</td></tr>`).join('')}
+      <tr class="tot-sky"><td>Total</td><td>${moneyAR(t7[0])}</td><td>${fmt.int(t7[1])}</td><td>${fmt.int(t7[2])}</td></tr></tbody></table>
+    <div class="flex-1"></div>
+    ${X.banner('s7', `Entre ${fmt.int(Math.min(t7[1], t7[2]))} y ${fmt.int(Math.max(t7[1], t7[2]))} ventas esperadas, según el costo por venta que se repita.`, `Promedio: inversión total ÷ ventas de los últimos 4 meses. ${mName}: costo por venta de este mes.`)}`,
+  foot, 'Presupuesto diario actual × 7 días, con impuestos. Ventas esperadas según el costo por venta.'));
+
+  // 8. Escenarios del mes siguiente
+  const scen = [1, 1.15, 1.3];
+  const salesRange = (budget, b) => { const a = b.cost_avg ? budget / b.cost_avg : null, m = b.cost_month ? budget / b.cost_month : null; return [a, m].filter((x) => x !== null); };
+  const totRange = (k) => { const v = B.flatMap((b) => [salesRange(b.next_month_base * k, b)]); const lo = v.reduce((s, r) => s + (r.length ? Math.min(...r) : 0), 0), hi = v.reduce((s, r) => s + (r.length ? Math.max(...r) : 0), 0); return `${fmt.int(lo)} a ${fmt.int(hi)}`; };
+  out.push(X.slide(`${nName}: presupuesto y ventas`, `
+    <table class="s-tbl${B.length > 4 ? ' dense' : ''}"><thead><tr><th>Marca</th><th>Mantener ritmo</th><th>${X.val('s8_s2', 'Escalar +15%')}</th><th>${X.val('s8_s3', 'Escalar +30%')}</th></tr></thead><tbody>
+      ${B.map((b) => `<tr><td>${esc(b.name)}</td>${scen.map((k) => `<td>${moneyAR(b.next_month_base * k)}</td>`).join('')}</tr>`).join('')}
+      <tr class="tot-sky"><td>Total presupuesto</td>${scen.map((k) => `<td>${moneyAR(sum((b) => b.next_month_base) * k)}</td>`).join('')}</tr>
+      <tr class="tot"><td>Ventas esperadas</td>${scen.map((k) => `<td>${totRange(k)}</td>`).join('')}</tr></tbody></table>
+    <div class="flex-1"></div>
+    ${X.banner('s8', `${cap(d.next.name)}, ${d.next.days} días, con impuestos incluidos. Elegimos el escenario según cuánto queremos escalar.`, `Ventas: entre el costo por venta de ${d.month.name} y el costo promedio. Escalar puede encarecer la venta.`)}`,
+  foot, X.ed('s8_sub', 'Tres escenarios con el presupuesto diario actual, con costo por venta constante.')));
+
+  // 9. Objetivos del mes siguiente (editables, el presupuesto se recalcula)
+  const goal = (b, kind) => {
+    const saved = X.notes[`goal_${kind}_${b.id}`];
+    if (saved !== undefined && saved !== null && saved !== '') return +saved;
+    const base = b.target_orders || (b.cost_avg ? Math.round(b.next_month_base / b.cost_avg / 10) * 10 : 0);
+    return kind === 'base' ? base : Math.round(base * 1.2 / 10) * 10;
+  };
+  const rows9 = B.map((b) => ({ b, base: goal(b, 'base'), meta: goal(b, 'meta') }));
+  const t9 = rows9.reduce((s, r) => [s[0] + r.base, s[1] + r.base * (r.b.cost_avg || 0), s[2] + r.meta, s[3] + r.meta * (r.b.cost_avg || 0)], [0, 0, 0, 0]);
+  const inp = (b, kind, v) => (X.editable ? `<input class="s-in" data-goal-in="${kind}_${b.id}" data-cost="${b.cost_avg || 0}" value="${v}" inputmode="numeric">` : fmt.int(v));
+  out.push(X.slide(`${nName}: objetivos y presupuesto`, `
+    <table class="s-tbl${B.length > 4 ? ' dense' : ''}" id="goals-tbl"><thead><tr><th>Marca</th><th>Objetivo base</th><th>Presupuesto base</th><th>Meta superadora</th><th>Presupuesto meta</th></tr></thead><tbody>
+      ${rows9.map((r) => `<tr><td>${esc(r.b.name)}</td><td><b>${inp(r.b, 'base', r.base)}</b></td><td data-gb="base_${r.b.id}">${moneyAR(r.base * (r.b.cost_avg || 0))}</td><td class="hl">${inp(r.b, 'meta', r.meta)}</td><td data-gb="meta_${r.b.id}">${moneyAR(r.meta * (r.b.cost_avg || 0))}</td></tr>`).join('')}
+      <tr class="tot"><td>Total</td><td data-gt="base">${fmt.int(t9[0])}</td><td data-gt="base_b">${moneyAR(t9[1])}</td><td data-gt="meta">${fmt.int(t9[2])}</td><td data-gt="meta_b">${moneyAR(t9[3])}</td></tr></tbody></table>
+    <div class="flex-1"></div>
+    ${X.banner('s9', 'Objetivos alcanzables si sostenemos el costo por venta.', `Presupuesto = objetivo × costo por venta histórico, con impuestos. Presupuesto a ritmo actual: ${moneyAR(sum((b) => b.next_month_base))}.`)}`,
+  foot, 'Objetivo base y meta superadora por marca, con el costo por venta histórico. Con impuestos incluidos.'));
+
+  // 10. Cómo vamos a llegar
+  const steps = [['Menos campañas, más creativos', 'Una campaña por objetivo y ángulos creativos distintos.'], ['Equipo de marketing en marcha', 'Más presencia y visualizaciones, con diseño y edición más ágiles.'],
+    ['Presupuesto escalonado', 'Subimos de a poco en cada cuenta, solo si el costo por venta se sostiene.'], ['Seguimiento semanal', 'Cada semana revisamos ventas contra objetivo y ajustamos.']];
+  out.push(X.slide('Cómo vamos a llegar a estos objetivos', `
+    <div class="grid grid-cols-2 gap-[1.6cqw] flex-1">${steps.map(([t, s], i) => `<div class="s-card flex gap-[1.4cqw]"><div class="s-num">${i + 1}</div><div><h4>${X.ed(`s10_${i}_t`, t)}</h4>${X.ed(`s10_${i}_d`, s)}</div></div>`).join('')}</div>
+    ${X.banner('s10', 'Primero el objetivo base, y la meta superadora si el costo se sostiene.', 'El foco es sostener el ritmo y mejorar semana a semana.')}`, foot));
+
+  return { html: out.join(''), charts: X.charts };
+}
+
+function progressDeck(d, cfg) {
+  const X = deckContext(d, cfg);
+  const B = d.brands;
+  const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
+  const foot = `${X.company} · Equipo de marketing · Interno`;
+  const periodName = { semanal: 'la semana', quincenal: 'la quincena', mensual: 'el mes' }[d.period];
+  const out = [];
+  out.push(X.cover(X.ed('title', 'Avances del equipo de marketing'), `Interno · ${esc(d.label)}`, X.ed('cover_note', 'Lo que logramos, lo que falta y cómo lo ajustamos')));
+
+  // Presencia orgánica
+  const social = B.filter((b) => b.has_social);
+  if (social.length) {
+    const views = (b) => (b.social.fb_views || 0) + (b.social.ig_views || 0);
+    const viewsPrev = (b) => (b.social.fb_views_prev || 0) + (b.social.ig_views_prev || 0);
+    const total = social.reduce((s, b) => s + views(b), 0);
+    for (let i = 0; i < social.length; i += 4) {
+      const chunk = social.slice(i, i + 4);
+      const metric = (label, v, prev) => (v === null ? '' : `<div class="s-metric"><small>${label}</small><b>${fmt.compact(v)}</b>${pctBadge(pctTxt(v, prev))}</div>`);
+      out.push(X.slide('Más presencia y visualizaciones', `
+        <div class="flex flex-col gap-[1.1cqw] flex-1">${chunk.map((b) => {
+          const p = pctTxt(views(b), viewsPrev(b));
+          const inter = (b.social.fb_engagement || 0) + (b.social.ig_interactions || 0), interPrev = (b.social.fb_engagement_prev || 0) + (b.social.ig_interactions_prev || 0);
+          return `<div class="s-brandrow"><div class="text-[1.8cqw] font-bold">${esc(b.name)}</div>
+            <div class="grid grid-cols-4 gap-[.8cqw]">${metric('Visualizaciones Facebook', b.social.fb_views, b.social.fb_views_prev)}${metric('Visualizaciones Instagram', b.social.ig_views, b.social.ig_views_prev)}${metric('Interacciones', inter, interPrev)}${metric('Reproducciones de video', b.social.fb_video, null)}</div>
+            <div class="text-right">${p === null ? '<div class="text-[2.6cqw] font-extrabold s-up">Nuevo</div><div class="text-[1.2cqw] text-[#5a6582]">sin período anterior</div>' : `<div class="text-[2.6cqw] font-extrabold ${p >= 0 ? 's-up' : 's-down'}">${p >= 0 ? '+' : ''}${fmt.dec(p, 1)}%</div><div class="text-[1.2cqw] text-[#5a6582]">visualizaciones</div>`}</div></div>`;
+        }).join('')}</div>`, foot, i === 0 ? `Facebook e Instagram, ${esc(d.label)}, contra el período anterior. En total, ${fmt.compact(total)} visualizaciones entre las ${social.length} marcas.` : ''));
+    }
+  }
+
+  // Campañas
+  const ads = B.filter((b) => b.has_ads);
+  if (ads.length) {
+    const conv = ads.map((b) => b.ads.messages), convPrev = ads.reduce((s, b) => s + b.ads_prev.messages, 0), convTot = conv.reduce((s, v) => s + v, 0);
+    const pc = pctTxt(convTot, convPrev);
+    out.push(X.slide('Cómo venimos en campañas', `
+      <div class="s-row">
+        <div class="flex-1 flex">${X.chartBox({ labels: ads.map((b) => b.name), datasets: [{ label: 'Conversaciones', data: conv, colors: ads.map((_, i) => DECK_COLORS[i % DECK_COLORS.length]) }] }, `Conversaciones de ${periodName} (${dm(d.range.since)}–${dm(d.range.until)})`)}</div>
+        <div class="s-col w-[30%]">
+          <div class="s-kpi"><b>${fmt.int(convTot)}</b><span>conversaciones en ${periodName}${pc === null ? '' : ` · ${pc >= 0 ? '+' : ''}${fmt.dec(pc, 0)}%`}</span></div>
+          <div class="s-kpi"><b>${fmt.int(ads.reduce((s, b) => s + b.ads.active_campaigns, 0))}</b><span>campañas activas</span></div>
+          <div class="s-kpi"><b>${ads.filter((b) => b.ads.active_campaigns > 0).length}</b><span>marcas con campañas en marcha</span></div>
+        </div>
+      </div>
+      ${X.banner('p3', pc === null || pc >= 0 ? 'Venimos bien: ordenamos las campañas y hay movimiento todas las semanas.' : 'Bajaron las conversaciones: estamos revisando creativos y presupuestos.', 'Está bien, pero puede estar mejor: ahí están los ajustes.')}`, foot));
+
+    // Inversión y ventas
+    const rows = ads.map((b) => ({ b, inv: b.ads.spend_tax, s: b.sales.orders, sp: b.sales_prev.orders, cps: b.cost_per_sale, cv: b.ads.messages }));
+    const tInv = rows.reduce((s, r) => s + r.inv, 0), tS = rows.reduce((s, r) => s + r.s, 0), tCv = rows.reduce((s, r) => s + r.cv, 0);
+    out.push(X.slide(`Inversión y ventas de ${periodName}`, `
+      <table class="s-tbl${B.length > 4 ? ' dense' : ''}"><thead><tr><th>Marca</th><th>Inversión (+${tax})</th><th>Ventas</th><th>vs. anterior</th><th>Costo por venta</th><th>Conversaciones</th><th>Costo por conversación</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr><td>${esc(r.b.name)}</td><td>${moneyAR(r.inv)}</td><td><b>${fmt.int(r.s)}</b></td><td>${pctBadge(pctTxt(r.s, r.sp)) || '—'}</td><td class="hl">${moneyAR(r.cps)}</td><td>${fmt.int(r.cv)}</td><td>${moneyAR(r.cv ? r.inv / r.cv : null)}</td></tr>`).join('')}
+        <tr class="tot"><td>Total</td><td>${moneyAR(tInv)}</td><td>${fmt.int(tS)}</td><td></td><td>${moneyAR(tS ? tInv / tS : null)}</td><td>${fmt.int(tCv)}</td><td>${moneyAR(tCv ? tInv / tCv : null)}</td></tr></tbody></table>
+      <div class="flex-1"></div>
+      ${X.banner('p4', `${fmt.int(tS)} ventas con ${moneyAR(tInv)} invertidos (con impuestos).`, 'Ventas según las planillas de cada marca; inversión y conversaciones según Meta.')}`, foot, `${esc(cap(d.label))}, contra el período anterior.`));
+  }
+
+  // Lo que hicimos
+  const done = B.filter((b) => b.done.length);
+  if (done.length) {
+    out.push(X.slide('Lo que hicimos', `
+      <div class="grid grid-cols-2 gap-[1.4cqw] flex-1 content-start">${done.slice(0, 4).map((b) => `<div class="s-card"><h4>${esc(b.name)}</h4>${b.done.slice(0, 5).map((u) => `<p>• ${esc(u.title)}</p>`).join('')}</div>`).join('')}</div>`, foot));
+  }
+
+  // Ajustes
+  const adj = [['Más creatividad', 'Ideas y ángulos nuevos para cada marca, en formatos distintos: reels, carruseles y estáticas. Meta premia la variedad.'],
+    ['Menos tiempos', 'Achicar el tiempo de diseño, de creación de contenido y de edición de videos, sin bajar la calidad.'],
+    ['Más autonomía', 'Tener iniciativa: proponer y resolver sin esperar que nos digan, y consultar lo importante.']];
+  out.push(X.slide('Qué tenemos que ajustar', `
+    <div class="grid grid-cols-3 gap-[1.6cqw] flex-1">${adj.map(([t, s], i) => `<div class="s-card"><div class="s-num mb-[1.6cqw]">${i + 1}</div><h4 class="!text-[2cqw]">${X.ed(`adj_${i}_t`, t)}</h4>${X.ed(`adj_${i}_d`, s)}</div>`).join('')}</div>
+    ${X.banner('p6', 'Nunca está perfecto: está bien, pero puede estar mejor. Hay que seguir creando y creciendo.')}`, foot));
+
+  // Objetivos
+  const goals = [['Más ideas creativas', 'Llevar ideas y ángulos nuevos para cada marca todas las semanas'], ['Más variedad de formatos', 'Sumar reels, carruseles y estáticas, no solo gráficas'],
+    ['Menos tiempo de producción', 'Medir cuánto tarda cada diseño, contenido y video, y bajarlo semana a semana'], ['Más autonomía', 'Resolver y proponer antes de preguntar'], ['Más presencia orgánica', 'Que el contenido también crezca solo, no solo con anuncios']];
+  out.push(X.slide('Objetivos que seguimos persiguiendo', `
+    <table class="s-tbl${B.length > 4 ? ' dense' : ''}"><thead><tr><th style="width:35%">Objetivo</th><th style="text-align:left">Cómo avanzamos</th></tr></thead><tbody>
+      ${goals.map(([a, b], i) => `<tr><td>${X.ed(`obj_${i}_a`, a)}</td><td style="text-align:left">${X.ed(`obj_${i}_b`, b)}</td></tr>`).join('')}</tbody></table>`, foot, X.ed('p7_sub', 'Vamos por buen camino y siempre hay algo para mejorar.')));
+
+  return { html: out.join(''), charts: X.charts };
+}
+
+async function viewReports() {
+  crumbs([{ label: 'Reportes' }]);
+  const clients = await api('clients');
+  const cfg = { type: 'progress', period: 'semanal', until: '', as_of: '', clients: clients.map((c) => c.id), company: '', ...store.get('reportCfg', {}) };
+  cfg.clients = cfg.clients.filter((id) => clients.some((c) => c.id === id));
+  if (!cfg.clients.length) cfg.clients = clients.map((c) => c.id);
+  const yest = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  const report = state.boot.report || {};
+  if (!clients.length) return { html: empty('Primero creá tus clientes / marcas', 'Los reportes se arman por marca (Go Celular, Osacra, GetNet, Clover…). Creálas en Clientes y asignales sus campañas, páginas y ventas.', isAdmin() ? '<a class="btn btn-primary" href="#/clients">Ir a Clientes</a>' : '', 'report') };
+
+  const html = `
+    ${pageHead('Reportes', 'Formato presentación, con los datos de Meta y de las planillas de ventas. Los textos se editan haciendo clic.', `<button class="btn btn-primary" id="deck-pdf">${icon('download', 15)}Descargar PDF</button>`)}
+    <div class="card p-5 mb-6 no-print">
+      <div class="flex flex-wrap gap-4 items-end">
+        <div><div class="t3 text-xs mb-1.5">Reporte</div><div class="seg" id="r-type"><button data-v="progress" class="${cfg.type === 'progress' ? 'on' : ''}">Avances del equipo</button><button data-v="projection" class="${cfg.type === 'projection' ? 'on' : ''}">Proyección de inversión y ventas</button></div></div>
+        <div data-for="progress" class="${cfg.type === 'progress' ? '' : 'hidden'}"><div class="t3 text-xs mb-1.5">Período</div><div class="seg" id="r-period">${['semanal', 'quincenal', 'mensual'].map((p) => `<button data-v="${p}" class="${cfg.period === p ? 'on' : ''}">${cap(p)}</button>`).join('')}</div></div>
+        <label data-for="progress" class="field ${cfg.type === 'progress' ? '' : 'hidden'}"><span>Hasta el día</span><input type="date" class="input select-sm" id="r-until" value="${esc(cfg.until || yest)}" max="${yest}"></label>
+        <label data-for="projection" class="field ${cfg.type === 'projection' ? '' : 'hidden'}"><span>Datos al día</span><input type="date" class="input select-sm" id="r-asof" value="${esc(cfg.as_of || yest)}" max="${yest}"></label>
+        <div class="flex-1"></div>
+        <button class="btn btn-accent" id="r-go">${icon('refresh', 14)}Generar</button>
+      </div>
+      <div class="mt-4"><div class="t3 text-xs mb-1.5">Marcas</div><div class="flex flex-wrap gap-2" id="r-brands">${clients.map((c) => `<button class="pill plain !h-7 !px-3 !text-[12.5px]" data-c="${c.id}" style="${cfg.clients.includes(c.id) ? `background:${esc(c.color)};color:#fff` : 'background:var(--sunk);color:var(--t3)'}">${esc(c.name)}</button>`).join('')}</div></div>
+      ${isAdmin() ? `<div class="mt-4 pt-4 hair-t flex flex-wrap gap-3 items-end">
+        <label class="field"><span>Empresa en el pie</span><input class="input select-sm w-56" id="r-company" value="${esc(report.company || '')}" placeholder="Ej: Paylab Gestión"></label>
+        <div><div class="t3 text-xs mb-1.5">Logo del reporte</div><div class="flex items-center gap-2">${report.logo ? `<img src="${esc(report.logo)}" class="h-8 rounded border bd bg-white px-1" alt="">` : '<span class="t3 text-xs">Sin logo</span>'}<label class="btn btn-sm cursor-pointer">${icon('plus', 13)}Subir logo<input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" id="r-logo"></label></div></div>
+      </div>` : ''}
+    </div>
+    <div id="deck" class="deck"><div class="sk aspect-video"></div></div>`;
+
+  return {
+    html,
+    mount() {
+      const save = () => store.set('reportCfg', cfg);
+      const gen = async () => {
+        save();
+        const box = $('#deck');
+        box.innerHTML = '<div class="sk" style="aspect-ratio:16/9"></div>';
+        try {
+          const params = { type: cfg.type, clients: cfg.clients.join(','), period: cfg.period, until: cfg.until || yest, as_of: cfg.as_of || yest };
+          const d = await api('report', params);
+          const deck = d.type === 'projection' ? projectionDeck(d, cfg) : progressDeck(d, cfg);
+          destroyCharts();
+          box.innerHTML = deck.html;
+          deck.charts.forEach(([id, spec]) => deckChart($('#' + id), spec));
+          box.dataset.key = d.key;
+        } catch (e) { box.innerHTML = errorBox(e.message, false); }
+      };
+      $('#r-type').addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (!b) return; cfg.type = b.dataset.v; $$('#r-type [data-v]').forEach((x) => x.classList.toggle('on', x === b)); $$('[data-for]').forEach((x) => x.classList.toggle('hidden', x.dataset.for !== cfg.type)); gen(); });
+      $('#r-period').addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (!b) return; cfg.period = b.dataset.v; $$('#r-period [data-v]').forEach((x) => x.classList.toggle('on', x === b)); gen(); });
+      $('#r-until').addEventListener('change', (e) => { cfg.until = e.target.value; gen(); });
+      $('#r-asof').addEventListener('change', (e) => { cfg.as_of = e.target.value; gen(); });
+      $('#r-brands').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-c]'); if (!b) return;
+        const id = +b.dataset.c, c = clients.find((x) => x.id === id);
+        cfg.clients = cfg.clients.includes(id) ? cfg.clients.filter((x) => x !== id) : [...cfg.clients, id];
+        b.style.cssText = cfg.clients.includes(id) ? `background:${c.color};color:#fff` : 'background:var(--sunk);color:var(--t3)';
+      });
+      $('#r-go').addEventListener('click', gen);
+      $('#r-company')?.addEventListener('change', async (e) => { await post('report_brand_save', { company: e.target.value }, 'Empresa guardada'); state.boot = await api('bootstrap'); gen(); });
+      $('#r-logo')?.addEventListener('change', async (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        const fd = new FormData(); fd.append('file', f); fd.append('target', 'report');
+        try { await post('logo_upload', fd, 'Logo cargado'); state.boot = await api('bootstrap'); render({ silent: true }); } catch { /* toast */ }
+      });
+      // Textos editables: se guardan al salir del campo.
+      $('#deck').addEventListener('focusout', async (e) => {
+        const el = e.target.closest('[data-note]');
+        if (!el || !canEdit()) return;
+        try { await api('report_note_save', {}, { key: `${$('#deck').dataset.key}:${el.dataset.note}`, value: el.innerText.trim() }); } catch (err) { toast(err.message, 'error'); }
+      });
+      $('#deck').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.closest('[data-note]') && !e.shiftKey) { e.preventDefault(); e.target.blur(); } });
+      // Objetivos: recalcula presupuestos y guarda.
+      $('#deck').addEventListener('change', async (e) => {
+        const inp = e.target.closest('[data-goal-in]');
+        if (!inp) return;
+        const v = Math.max(0, Math.round(SalesNum(inp.value)));
+        inp.value = v;
+        $(`[data-gb="${inp.dataset.goalIn}"]`).textContent = moneyAR(v * +inp.dataset.cost);
+        const tot = (k) => $$(`[data-goal-in^="${k}_"]`).reduce((s, x) => s + (+x.value || 0), 0);
+        const totB = (k) => $$(`[data-goal-in^="${k}_"]`).reduce((s, x) => s + (+x.value || 0) * +x.dataset.cost, 0);
+        ['base', 'meta'].forEach((k) => { $(`[data-gt="${k}"]`).textContent = fmt.int(tot(k)); $(`[data-gt="${k}_b"]`).textContent = moneyAR(totB(k)); });
+        try { await api('report_note_save', {}, { key: `${$('#deck').dataset.key}:goal_${inp.dataset.goalIn}`, value: String(v) }); } catch (err) { toast(err.message, 'error'); }
+      });
+      $('#deck-pdf').addEventListener('click', () => {
+        document.body.classList.add('printing-deck');
+        setTimeout(() => { window.print(); document.body.classList.remove('printing-deck'); }, 150);
+      });
+      gen();
+    },
+  };
+}
+const SalesNum = (s) => { const v = parseFloat(String(s).replace(/\./g, '').replace(',', '.')); return Number.isFinite(v) ? v : 0; };
+
+// =========================================================================
 // Navegación
 // =========================================================================
 const ADMIN_NAV = [
-  ['Rendimiento', [['overview', '#/', 'grid', 'Resumen'], ['budgets', '#/budgets', 'calendar', 'Presupuestos'], ['ads', '#/ads', 'target', 'Campañas', 'ad_account'], ['pages', '#/pages', 'page', 'Facebook', 'page'], ['ig', '#/ig', 'instagram', 'Instagram', 'ig_account']]],
+  ['Rendimiento', [['overview', '#/', 'grid', 'Resumen'], ['budgets', '#/budgets', 'calendar', 'Presupuestos'], ['ads', '#/ads', 'target', 'Campañas', 'ad_account'], ['pages', '#/pages', 'page', 'Facebook', 'page'], ['ig', '#/ig', 'instagram', 'Instagram', 'ig_account'], ['reports', '#/reports', 'report', 'Reportes']]],
   ['Agencia', [['clients', '#/clients', 'users', 'Clientes'], ['activity', '#/activity', 'bell', 'Actividad'], ['settings', '#/settings', 'sliders', 'Configuración']]],
 ];
 const CLIENT_NAV = [['home', '#/', 'home', 'Inicio'], ['ads', '#/ads', 'target', 'Campañas'], ['social', '#/social', 'social', 'Redes'], ['work', '#/work', 'briefcase', 'Trabajo'], ['report', '#/report', 'report', 'Reporte']];
@@ -2630,6 +3033,7 @@ async function openPalette() {
 const ADMIN_ROUTES = [
   [/^\/?$/, viewOverview, 'overview'],
   [/^\/budgets$/, viewBudgets, 'budgets'],
+  [/^\/reports$/, viewReports, 'reports'],
   [/^\/ads$/, viewAdAccounts, 'ads'],
   [/^\/ads\/(act_\d+)$/, viewAccount, 'ads'],
   [/^\/ads\/(act_\d+)\/c\/(\d+)$/, viewCampaign, 'ads'],

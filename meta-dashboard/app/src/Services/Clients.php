@@ -68,7 +68,9 @@ final class Clients
             throw new InvalidArgumentException('El cliente necesita un nombre.');
         }
         $color = preg_match('/^#[0-9a-fA-F]{6}$/', (string) ($data['color'] ?? '')) ? $data['color'] : '#0e7c66';
-        $logo = filter_var($data['logo_url'] ?? '', FILTER_VALIDATE_URL) && str_starts_with((string) $data['logo_url'], 'https://') ? $data['logo_url'] : null;
+        $logo = filter_var($data['logo_url'] ?? '', FILTER_VALIDATE_URL)
+            && (str_starts_with((string) $data['logo_url'], 'https://') || str_starts_with((string) $data['logo_url'], \App\Config::url('uploads/')))
+            ? $data['logo_url'] : null;
         $label = fn ($k, $def) => mb_substr(trim((string) ($data[$k] ?? '')), 0, 60) ?: $def;
         $num = fn ($k) => trim((string) ($data[$k] ?? '')) === '' ? null : SalesImport::parseNumber($data[$k]);
         $row = [

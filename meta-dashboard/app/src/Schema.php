@@ -159,6 +159,13 @@ final class Schema
                 created_at DATETIME NOT NULL
             )$suffix",
 
+            // Textos editables de los reportes (qué pasó, ajustes, objetivos, etc.).
+            "CREATE TABLE IF NOT EXISTS report_notes (
+                k VARCHAR(190) NOT NULL PRIMARY KEY,
+                v TEXT NULL,
+                updated_at DATETIME NOT NULL
+            )$suffix",
+
             // Objetivo mensual de ventas por campaña de Meta.
             "CREATE TABLE IF NOT EXISTS campaign_targets (
                 campaign_id VARCHAR(64) NOT NULL,

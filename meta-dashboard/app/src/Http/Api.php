@@ -21,6 +21,7 @@ use App\Services\Clients;
 use App\Services\Connections;
 use App\Services\Instagram;
 use App\Services\Pages;
+use App\Services\Reports;
 use App\Services\Sales;
 use App\Services\Scope;
 use App\Services\Webhooks;
@@ -36,11 +37,11 @@ final class Api
     ];
 
     /** Usuarios internos de solo lectura (ej. gerencia): todo lo del cliente + vistas de agencia. */
-    private const VIEWER_ACTIONS = ['clients', 'client_brand', 'budgets'];
+    private const VIEWER_ACTIONS = ['clients', 'client_brand', 'budgets', 'report'];
 
     /** Equipo: además edita lo operativo (presupuestos, objetivos, ventas, trabajo) de lo que tiene asignado. */
     private const MEMBER_ACTIONS = [
-        'client', 'campaign_names', 'budget_save', 'campaign_target_save', 'update_save', 'update_delete',
+        'client', 'campaign_names', 'budget_save', 'campaign_target_save', 'update_save', 'update_delete', 'report_note_save',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
     ];
 
@@ -50,6 +51,7 @@ final class Api
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
         'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
+        'report_note_save', 'logo_upload', 'report_brand_save',
     ];
 
     public static function handle(): void
@@ -156,6 +158,7 @@ final class Api
                     'kinds'       => Clients::UPDATE_KINDS,
                     'statuses'    => Clients::UPDATE_STATUS,
                     'tax_rate'    => \App\Settings::taxRate(),
+                    'report'      => ['company' => \App\Settings::get('report_company', Config::get('agency_name', '')), 'logo' => \App\Settings::get('report_logo')],
                 ];
 
             case 'assets':
@@ -309,6 +312,25 @@ final class Api
                 $ownClient((int) ($u['client_id'] ?? 0));
                 Clients::deleteUpdate((int) ($body['id'] ?? 0));
                 return null;
+            case 'report':
+                $ids = array_values(array_filter(array_map('intval', explode(',', (string) ($q['clients'] ?? '')))));
+                if ($internal !== null) {
+                    $ids = array_values(array_intersect($ids, $internal['clients']));
+                }
+                if (!$ids) {
+                    throw new InvalidArgumentException('Elegí al menos una marca.');
+                }
+                return ($q['type'] ?? '') === 'projection'
+                    ? Reports::projection($ids, $q['as_of'] ?? null)
+                    : Reports::progress($ids, (string) ($q['period'] ?? 'semanal'), $q['until'] ?? null);
+            case 'report_note_save':
+                Reports::saveNote((string) ($body['key'] ?? ''), isset($body['value']) ? (string) $body['value'] : null);
+                return null;
+            case 'report_brand_save':
+                \App\Settings::set('report_company', mb_substr(trim((string) ($body['company'] ?? '')), 0, 120));
+                return null;
+            case 'logo_upload':
+                return ['url' => self::uploadLogo($_FILES['file'] ?? null, (string) ($_POST['target'] ?? 'report'))];
             case 'user_scope_save':
                 return self::saveUserScope($body);
             case 'sync':
@@ -343,6 +365,35 @@ final class Api
                 return null;
         }
         throw new InvalidArgumentException('Acción desconocida');
+    }
+
+    /** Logo del reporte de agencia o de un cliente. Sólo PNG, JPG o WebP (máx. 2 MB). */
+    private static function uploadLogo(?array $file, string $target): string
+    {
+        if (!$file || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || $file['size'] > 2 * 1024 * 1024) {
+            throw new InvalidArgumentException('Subí una imagen de hasta 2 MB.');
+        }
+        $info = @getimagesize($file['tmp_name']);
+        $ext = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp'][$info['mime'] ?? ''] ?? null;
+        if (!$ext) {
+            throw new InvalidArgumentException('El logo tiene que ser PNG, JPG o WebP.');
+        }
+        $dir = APP_ROOT . '/public/uploads';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
+            throw new InvalidArgumentException('No se pudo crear la carpeta public/uploads.');
+        }
+        $name = 'logo-' . bin2hex(random_bytes(8)) . '.' . $ext;
+        if (!move_uploaded_file($file['tmp_name'], "$dir/$name")) {
+            throw new InvalidArgumentException('No se pudo guardar el archivo.');
+        }
+        $url = Config::url('uploads/' . $name);
+        if ($target === 'report') {
+            \App\Settings::set('report_logo', $url);
+        } else {
+            Clients::find((int) $target);
+            Db::exec('UPDATE clients SET logo_url = ? WHERE id = ?', [$url, (int) $target]);
+        }
+        return $url;
     }
 
     /** Asigna a un usuario interno qué portfolios, cuentas, páginas, Instagram y clientes ve. */

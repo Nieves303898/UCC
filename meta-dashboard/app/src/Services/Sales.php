@@ -292,7 +292,7 @@ final class Sales
         ];
     }
 
-    private static function totals(int $clientId, string $since, string $until): array
+    public static function totals(int $clientId, string $since, string $until): array
     {
         $r = Db::one('SELECT SUM(orders) AS orders, SUM(revenue) AS revenue, SUM(leads) AS leads, COUNT(DISTINCT day) AS days
                       FROM sales_daily WHERE client_id = ? AND day BETWEEN ? AND ?', [$clientId, $since, $until]);
