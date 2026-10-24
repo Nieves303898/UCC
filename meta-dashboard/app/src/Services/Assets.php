@@ -11,11 +11,21 @@ use RuntimeException;
 /** Activos sincronizados: portfolios comerciales, cuentas publicitarias, páginas e Instagram. */
 final class Assets
 {
-    public static function list(string $type, bool $includeHidden = false): array
+    /** $only: lista de IDs permitidos (portal de cliente). null = todos. */
+    public static function list(string $type, bool $includeHidden = false, ?array $only = null): array
     {
-        $sql = 'SELECT id, connection_id, type, external_id, name, parent_id, business_id, data_json, is_hidden, updated_at
-                FROM assets WHERE type = ?' . ($includeHidden ? '' : ' AND is_hidden = 0') . ' ORDER BY name';
-        return array_map([self::class, 'hydrate'], Db::all($sql, [$type]));
+        if ($only !== null && !$only) {
+            return [];
+        }
+        $sql = 'SELECT id, connection_id, type, external_id, name, parent_id, business_id, data_json, is_hidden, updated_at FROM assets WHERE type = ?';
+        $params = [$type];
+        if ($only !== null) {
+            $sql .= ' AND external_id IN (' . implode(',', array_fill(0, count($only), '?')) . ')';
+            $params = [...$params, ...$only];
+        } elseif (!$includeHidden) {
+            $sql .= ' AND is_hidden = 0';
+        }
+        return array_map([self::class, 'hydrate'], Db::all($sql . ' ORDER BY name', $params));
     }
 
     public static function find(string $type, string $externalId): array

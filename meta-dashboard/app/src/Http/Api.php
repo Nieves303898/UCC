@@ -10,25 +10,32 @@ use App\DateRange;
 use App\Db;
 use App\Meta\GraphClient;
 use App\Meta\GraphException;
+use App\Meta\OAuth;
+use App\Services\AccessDenied;
 use App\Services\Ads;
 use App\Services\Assets;
 use App\Services\AssetSync;
+use App\Services\Clients;
 use App\Services\Connections;
 use App\Services\Instagram;
 use App\Services\Pages;
+use App\Services\Scope;
 use App\Services\Webhooks;
 use InvalidArgumentException;
 
 /** Endpoints JSON que consume el panel (public/api.php?action=...). */
 final class Api
 {
-    private const POST_ACTIONS = [
-        'sync', 'connection_add_token', 'connection_delete', 'asset_toggle', 'cache_flush',
-        'user_add', 'user_delete', 'password_change',
+    /** Lo único que puede pedir un usuario cliente. Todo lo demás es sólo para admins. */
+    private const CLIENT_ACTIONS = [
+        'bootstrap', 'assets', 'overview', 'account', 'adsets', 'ads', 'timeseries', 'breakdown',
+        'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change',
     ];
 
-    private const ADMIN_ACTIONS = [
-        'connection_add_token', 'connection_delete', 'asset_toggle', 'cache_flush', 'user_add', 'user_delete',
+    private const POST_ACTIONS = [
+        'sync', 'connection_add_token', 'connection_delete', 'asset_toggle', 'cache_flush',
+        'user_add', 'user_delete', 'user_reset_password', 'password_change',
+        'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
     ];
 
     public static function handle(): void
@@ -44,13 +51,11 @@ final class Api
         $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
         $body = $isPost ? (json_decode((string) file_get_contents('php://input'), true) ?: $_POST) : [];
 
-        if (in_array($action, self::POST_ACTIONS, true)) {
-            if (!$isPost || !Auth::checkCsrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null)) {
-                self::json(['ok' => false, 'error' => 'Solicitud no válida (CSRF).'], 419);
-            }
-            if (in_array($action, self::ADMIN_ACTIONS, true) && (Auth::user()['role'] ?? '') !== 'admin') {
-                self::json(['ok' => false, 'error' => 'Sólo un administrador puede hacer esto.'], 403);
-            }
+        if (!Auth::isAdmin() && !in_array($action, self::CLIENT_ACTIONS, true)) {
+            self::json(['ok' => false, 'error' => 'No tenés permiso para esta acción.'], 403);
+        }
+        if (in_array($action, self::POST_ACTIONS, true) && (!$isPost || !Auth::checkCsrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null))) {
+            self::json(['ok' => false, 'error' => 'Solicitud no válida (CSRF).'], 419);
         }
 
         try {
@@ -61,17 +66,21 @@ final class Api
                 'meta' => [
                     'cached_at' => Cache::$meta['cached_at'] ? date('c', Cache::$meta['cached_at']) : null,
                     'stale'     => Cache::$meta['stale'],
-                    'usage'     => self::usage(),
+                    'usage'     => Auth::isAdmin() ? self::usage() : null,
                 ],
             ]);
+        } catch (AccessDenied $e) {
+            self::json(['ok' => false, 'error' => $e->getMessage()], 403);
         } catch (GraphException $e) {
             $msg = $e->getMessage();
             if ($e->isAuthError()) {
-                $msg = 'Meta rechazó el token o faltan permisos: ' . $msg . ' — Reconectá la cuenta en Configuración.';
+                $msg = Auth::isAdmin()
+                    ? 'Meta rechazó el token o faltan permisos: ' . $msg . ' — Reconectá la cuenta en Configuración.'
+                    : 'La conexión con Meta necesita renovarse. Ya avisamos a la agencia.';
             } elseif ($e->isRateLimit()) {
-                $msg = 'Meta limitó temporalmente las consultas (rate limit). Probá en unos minutos.';
+                $msg = 'Meta limitó temporalmente las consultas. Probá en unos minutos.';
             }
-            self::json(['ok' => false, 'error' => $msg, 'code' => $e->graphCode, 'fbtrace' => $e->fbtraceId], 502);
+            self::json(['ok' => false, 'error' => $msg, 'code' => $e->graphCode], 502);
         } catch (InvalidArgumentException $e) {
             self::json(['ok' => false, 'error' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
@@ -85,56 +94,170 @@ final class Api
         $force = !empty($q['refresh']);
         $range = fn () => DateRange::fromRequest($q);
         $id = fn (string $k = 'id') => self::id($q[$k] ?? '');
+        $client = Scope::clientId($q);
+        $allowed = Scope::allowed($client);
 
-        return match ($action) {
-            'bootstrap' => [
-                'user'        => Auth::user(),
-                'counts'      => Assets::counts(),
-                'connections' => count(Connections::all()),
-                'presets'     => DateRange::PRESETS,
-                'app_name'    => Config::get('app_name'),
-                'refresh_sec' => (int) Config::get('cache.realtime_ttl', 120),
-            ],
-            'assets' => [
-                'businesses'  => Assets::list('business', !empty($q['all'])),
-                'ad_accounts' => Assets::list('ad_account', !empty($q['all'])),
-                'pages'       => Assets::list('page', !empty($q['all'])),
-                'ig_accounts' => Assets::list('ig_account', !empty($q['all'])),
-            ],
-            'overview'    => Ads::overview($range(), $force) + ['range' => $range()->toArray()],
-            'account'     => Ads::account($id(), $range(), $force) + ['range' => $range()->toArray()],
-            'adsets'      => Ads::adsets($id(), $id('account'), $range(), $force),
-            'ads'         => Ads::ads($id(), $id('account'), $range(), $force),
-            'timeseries'  => Ads::timeseries($id(), $id('account'), $range(), $q['objective'] ?? null, $force),
-            'breakdown'   => Ads::breakdown($id(), $id('account'), (string) ($q['type'] ?? 'age_gender'), $range(), $q['objective'] ?? null, $force),
-            'page'        => Pages::summary($id(), $range(), $force) + ['range' => $range()->toArray()],
-            'page_posts'  => Pages::posts($id(), $range(), $force),
-            'ig'          => Instagram::summary($id(), $range(), $force) + ['range' => $range()->toArray()],
-            'ig_media'    => Instagram::media($id(), $range(), $force),
-            'ig_stories'  => Instagram::stories($id(), $force),
-            'ig_audience' => Instagram::audience($id(), $force),
-            'activity'    => Webhooks::recent((int) ($q['limit'] ?? 50)),
-            'settings'    => [
-                'connections'  => Connections::all(),
-                'users'        => Db::all('SELECT id, email, name, role, last_login_at FROM users ORDER BY id'),
-                'oauth_ready'  => Config::get('meta.app_id') && Config::get('meta.app_secret'),
-                'redirect_uri' => \App\Meta\OAuth::redirectUri(),
-                'webhook_url'  => Config::url('webhook.php'),
-                'graph_version' => GraphClient::version(),
-                'log'          => Db::all('SELECT job, status, message, created_at FROM sync_log ORDER BY id DESC LIMIT 15'),
-            ],
-            'sync' => isset($body['connection_id'])
-                ? AssetSync::sync((int) $body['connection_id'])
-                : AssetSync::syncAll(),
-            'connection_add_token' => self::addToken($body),
-            'connection_delete'    => Connections::delete((int) ($body['id'] ?? 0)),
-            'asset_toggle'         => Assets::setHidden((int) ($body['id'] ?? 0), !empty($body['hidden'])),
-            'cache_flush'          => Cache::flush(),
-            'user_add'             => self::addUser($body),
-            'user_delete'          => self::deleteUser((int) ($body['id'] ?? 0)),
-            'password_change'      => self::changePassword($body),
-            default => throw new InvalidArgumentException('Acción desconocida'),
+        // Activos del cliente: valida antes de llamar a Meta.
+        $adAccount = function (string $k = 'account') use ($id, $client) {
+            $acc = $id($k);
+            Scope::assertAsset('ad_account', $acc, $client);
+            return $acc;
         };
+        $inAccount = function () use ($id, $adAccount) {
+            $acc = $adAccount();
+            Scope::assertInAccount($id(), $acc);
+            return [$id(), $acc];
+        };
+        $asset = function (string $type) use ($id, $client) {
+            $v = $id();
+            Scope::assertAsset($type, $v, $client);
+            return $v;
+        };
+
+        switch ($action) {
+            case 'bootstrap':
+                $user = Auth::user();
+                return [
+                    'user'        => ['id' => (int) $user['id'], 'name' => $user['name'], 'username' => $user['username'], 'role' => $user['role']],
+                    'client'      => $client ? Clients::brand($client) : null,
+                    'counts'      => $allowed ? array_map('count', $allowed) : Assets::counts(),
+                    'connections' => Auth::isAdmin() ? count(Connections::all()) : null,
+                    'presets'     => DateRange::PRESETS,
+                    'app_name'    => Config::get('app_name'),
+                    'agency_name' => Config::get('agency_name', Config::get('app_name')),
+                    'refresh_sec' => (int) Config::get('cache.realtime_ttl', 120),
+                    'kinds'       => Clients::UPDATE_KINDS,
+                    'statuses'    => Clients::UPDATE_STATUS,
+                ];
+
+            case 'assets':
+                $all = Auth::isAdmin() && !empty($q['all']);
+                return [
+                    'ad_accounts' => self::publicAssets(Assets::list('ad_account', $all, $allowed['ad_account'] ?? null)),
+                    'pages'       => self::publicAssets(Assets::list('page', $all, $allowed['page'] ?? null)),
+                    'ig_accounts' => self::publicAssets(Assets::list('ig_account', $all, $allowed['ig_account'] ?? null)),
+                    'businesses'  => $allowed ? [] : Assets::list('business', $all),
+                ];
+
+            case 'overview':
+                return Ads::overview($range(), $force, $allowed['ad_account'] ?? null) + ['range' => $range()->toArray()];
+
+            case 'account':
+                $data = Ads::account($adAccount('id'), $range(), $force) + ['range' => $range()->toArray()];
+                if (!Auth::isAdmin()) {
+                    unset($data['account']['payment'], $data['account']['balance']);
+                }
+                return $data;
+
+            case 'adsets':
+                [$obj, $acc] = $inAccount();
+                return Ads::adsets($obj, $acc, $range(), $force);
+            case 'ads':
+                [$obj, $acc] = $inAccount();
+                return Ads::ads($obj, $acc, $range(), $force);
+            case 'timeseries':
+                [$obj, $acc] = $inAccount();
+                return Ads::timeseries($obj, $acc, $range(), $q['objective'] ?? null, $force);
+            case 'breakdown':
+                [$obj, $acc] = $inAccount();
+                return Ads::breakdown($obj, $acc, (string) ($q['type'] ?? 'age_gender'), $range(), $q['objective'] ?? null, $force);
+
+            case 'page':
+                return Pages::summary($asset('page'), $range(), $force) + ['range' => $range()->toArray()];
+            case 'page_posts':
+                return Pages::posts($asset('page'), $range(), $force);
+            case 'ig':
+                return Instagram::summary($asset('ig_account'), $range(), $force) + ['range' => $range()->toArray()];
+            case 'ig_media':
+                return Instagram::media($asset('ig_account'), $range(), $force);
+            case 'ig_stories':
+                return Instagram::stories($asset('ig_account'), $force);
+            case 'ig_audience':
+                return Instagram::audience($asset('ig_account'), $force);
+
+            case 'activity':
+                return Webhooks::recent((int) ($q['limit'] ?? 50), $allowed ? [...$allowed['page'], ...$allowed['ig_account']] : null);
+
+            case 'updates':
+                if ($client === null) {
+                    throw new InvalidArgumentException('Indicá el cliente.');
+                }
+                return Clients::updates($client);
+
+            case 'password_change':
+                return self::changePassword($body);
+
+            // ---------- sólo admin ----------
+            case 'settings':
+                return [
+                    'connections'   => Connections::all(),
+                    'users'         => Db::all("SELECT id, username, email, name, role, last_login_at FROM users WHERE role = 'admin' ORDER BY id"),
+                    'oauth_ready'   => Config::get('meta.app_id') && Config::get('meta.app_secret'),
+                    'redirect_uri'  => OAuth::redirectUri(),
+                    'webhook_url'   => Config::url('webhook.php'),
+                    'graph_version' => GraphClient::version(),
+                    'log'           => Db::all('SELECT job, status, message, created_at FROM sync_log ORDER BY id DESC LIMIT 15'),
+                ];
+            case 'clients':
+                return Clients::all();
+            case 'client':
+                return Clients::detail((int) ($q['id'] ?? 0));
+            case 'client_save':
+                return ['id' => Clients::save($body)];
+            case 'client_delete':
+                Clients::delete((int) ($body['id'] ?? 0));
+                return null;
+            case 'client_assets':
+                Clients::setAssets((int) ($body['id'] ?? 0), (array) ($body['assets'] ?? []));
+                return null;
+            case 'update_save':
+                return ['id' => Clients::saveUpdate($body)];
+            case 'update_delete':
+                Clients::deleteUpdate((int) ($body['id'] ?? 0));
+                return null;
+            case 'sync':
+                return isset($body['connection_id']) ? AssetSync::sync((int) $body['connection_id']) : AssetSync::syncAll();
+            case 'connection_add_token':
+                return self::addToken($body);
+            case 'connection_delete':
+                Connections::delete((int) ($body['id'] ?? 0));
+                return null;
+            case 'asset_toggle':
+                Assets::setHidden((int) ($body['id'] ?? 0), !empty($body['hidden']));
+                return null;
+            case 'cache_flush':
+                Cache::flush();
+                return null;
+            case 'user_add':
+                $role = ($body['role'] ?? '') === 'client' ? 'client' : 'admin';
+                $clientId = $role === 'client' ? Clients::find((int) ($body['client_id'] ?? 0))['id'] : null;
+                return ['id' => Auth::createUser((string) ($body['username'] ?? ''), (string) ($body['name'] ?? ''), (string) ($body['password'] ?? ''), $role, $clientId)];
+            case 'user_delete':
+                if ((int) ($body['id'] ?? 0) === (int) Auth::user()['id']) {
+                    throw new InvalidArgumentException('No podés borrar tu propio usuario.');
+                }
+                Db::exec('DELETE FROM users WHERE id = ?', [(int) ($body['id'] ?? 0)]);
+                return null;
+            case 'user_reset_password':
+                if (strlen((string) ($body['password'] ?? '')) < 8) {
+                    throw new InvalidArgumentException('La contraseña debe tener al menos 8 caracteres.');
+                }
+                Db::exec('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash((string) $body['password'], PASSWORD_DEFAULT), (int) ($body['id'] ?? 0)]);
+                return null;
+        }
+        throw new InvalidArgumentException('Acción desconocida');
+    }
+
+    /** Quita del listado datos que el cliente no necesita. */
+    private static function publicAssets(array $list): array
+    {
+        if (Auth::isAdmin()) {
+            return $list;
+        }
+        return array_map(function ($a) {
+            unset($a['data']['balance'], $a['data']['spend_cap'], $a['connection_id']);
+            return $a;
+        }, $list);
     }
 
     private static function addToken(array $body): array
@@ -147,34 +270,12 @@ final class Api
         if ($source === 'manual' && Config::get('meta.app_secret')) {
             // Si es un token corto de usuario lo extendemos a 60 días.
             try {
-                $token = \App\Meta\OAuth::longLived($token)['access_token'];
+                $token = OAuth::longLived($token)['access_token'];
             } catch (\Throwable) {
             }
         }
         $id = Connections::save($token, $source, trim((string) ($body['label'] ?? '')) ?: null);
         return ['id' => $id, 'sync' => AssetSync::sync($id)];
-    }
-
-    private static function addUser(array $body): array
-    {
-        $email = trim((string) ($body['email'] ?? ''));
-        $password = (string) ($body['password'] ?? '');
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8) {
-            throw new InvalidArgumentException('Email inválido o contraseña menor a 8 caracteres.');
-        }
-        if (Db::one('SELECT id FROM users WHERE email = ?', [mb_strtolower($email)])) {
-            throw new InvalidArgumentException('Ya existe un usuario con ese email.');
-        }
-        $role = ($body['role'] ?? '') === 'viewer' ? 'viewer' : 'admin';
-        return ['id' => Auth::createUser($email, (string) ($body['name'] ?? $email), $password, $role)];
-    }
-
-    private static function deleteUser(int $id): void
-    {
-        if ($id === (int) Auth::user()['id']) {
-            throw new InvalidArgumentException('No podés borrar tu propio usuario.');
-        }
-        Db::exec('DELETE FROM users WHERE id = ?', [$id]);
     }
 
     private static function changePassword(array $body): void

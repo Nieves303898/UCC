@@ -35,9 +35,9 @@ final class Ads
     ];
 
     /** Resumen de TODAS las cuentas visibles: KPIs, variación, serie diaria y alertas. */
-    public static function overview(DateRange $range, bool $force = false): array
+    public static function overview(DateRange $range, bool $force = false, ?array $only = null): array
     {
-        $accounts = Assets::list('ad_account');
+        $accounts = Assets::list('ad_account', false, $only);
         $prev = $range->previous();
 
         $byConnection = [];

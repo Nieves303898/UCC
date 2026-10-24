@@ -1,73 +1,69 @@
-<?php /** @var ?array $flash */ ?><!doctype html>
-<html lang="es" class="h-full">
+<?php /** @var ?array $flash */
+$user = App\Auth::user();
+$isClient = $user['role'] === 'client';
+?><!doctype html>
+<html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+<?php require __DIR__ . '/_head.php'; ?>
   <title><?= e(App\Config::get('app_name', 'Meta Hub')) ?></title>
-  <meta name="robots" content="noindex,nofollow">
   <meta name="csrf" content="<?= e(App\Auth::csrfToken()) ?>">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/tailwind.css?v=1">
   <script src="assets/vendor/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="assets/app.css?v=1">
 </head>
-<body class="h-full bg-slate-950 text-slate-200">
-<div id="shell" class="min-h-full lg:pl-64">
+<body class="<?= $isClient ? 'is-client' : 'is-admin' ?>">
+<div id="shell" class="min-h-screen <?= $isClient ? '' : 'lg:pl-[248px]' ?>">
 
-  <!-- Sidebar -->
-  <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 w-64 -translate-x-full lg:translate-x-0 transition-transform bg-slate-900 border-r border-slate-800 flex flex-col">
-    <div class="h-16 px-5 flex items-center gap-3 border-b border-slate-800">
-      <div class="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-500 to-fuchsia-500 grid place-items-center font-bold text-white">M</div>
-      <div class="min-w-0">
-        <div class="font-semibold text-white truncate"><?= e(App\Config::get('app_name', 'Meta Hub')) ?></div>
-        <div class="text-xs text-slate-500">Métricas Meta en vivo</div>
-      </div>
+<?php if (!$isClient): ?>
+  <aside id="sidebar" class="sidebar fixed inset-y-0 left-0 z-40 w-[248px] -translate-x-full lg:translate-x-0 transition-transform flex flex-col">
+    <div class="h-16 px-4 flex items-center gap-3 hair-b">
+      <div class="mono-avatar w-8 h-8" style="background:var(--t1);color:var(--bg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17V7l7 6 7-6v10"/></svg></div>
+      <div class="min-w-0 leading-tight"><div class="font-semibold t1 truncate"><?= e(App\Config::get('app_name', 'Meta Hub')) ?></div><div class="text-xs t3 truncate"><?= e(App\Config::get('agency_name', '')) ?></div></div>
     </div>
-    <nav class="flex-1 overflow-y-auto p-3 space-y-1 text-sm" id="nav">
-      <a href="#/" data-nav="overview" class="nav-link"><span>📊</span> Resumen general</a>
-      <a href="#/ads" data-nav="ads" class="nav-link"><span>🎯</span> Campañas y anuncios <b class="badge" data-count="ad_account"></b></a>
-      <a href="#/pages" data-nav="pages" class="nav-link"><span>📘</span> Páginas de Facebook <b class="badge" data-count="page"></b></a>
-      <a href="#/ig" data-nav="ig" class="nav-link"><span>📸</span> Instagram <b class="badge" data-count="ig_account"></b></a>
-      <a href="#/activity" data-nav="activity" class="nav-link"><span>🔔</span> Actividad</a>
-      <a href="#/settings" data-nav="settings" class="nav-link"><span>⚙️</span> Configuración</a>
-    </nav>
-    <div class="p-4 border-t border-slate-800 text-xs text-slate-500 flex items-center justify-between">
-      <span id="user-name" class="truncate"></span>
-      <a href="index.php?r=logout" class="text-slate-400 hover:text-white">Salir</a>
+    <button id="palette-btn" class="mx-3 mt-3 btn justify-start t3" style="font-weight:400"><span data-icon="search"></span>Buscar…<kbd class="ml-auto">Ctrl K</kbd></button>
+    <nav id="nav" class="flex-1 overflow-y-auto px-3 pb-3 text-[13.5px]"></nav>
+    <div class="p-3 hair-t flex items-center gap-2">
+      <div class="mono-avatar w-8 h-8 text-xs" style="background:var(--sunk);color:var(--t2)" id="user-initials"></div>
+      <div class="min-w-0 flex-1 leading-tight"><div class="t1 text-[13px] font-medium truncate" id="user-name"></div><div class="t3 text-xs">Administrador</div></div>
+      <button class="btn btn-ghost btn-icon" data-theme-toggle title="Cambiar tema"></button>
+      <a class="btn btn-ghost btn-icon" href="index.php?r=logout" title="Salir" data-icon="logout"></a>
     </div>
   </aside>
-  <div id="backdrop" class="fixed inset-0 z-30 bg-black/50 hidden lg:hidden"></div>
+  <div id="backdrop" class="fixed inset-0 z-30 hidden lg:hidden" style="background:rgba(0,0,0,.35)"></div>
+<?php endif; ?>
 
-  <!-- Topbar -->
-  <header class="sticky top-0 z-20 bg-slate-950/85 backdrop-blur border-b border-slate-800">
-    <div class="px-4 lg:px-8 h-16 flex items-center gap-3">
-      <button id="menu-btn" class="lg:hidden p-2 -ml-2 rounded-lg hover:bg-slate-800" aria-label="Menú">☰</button>
-      <div id="breadcrumbs" class="min-w-0 flex-1 text-sm text-slate-400 truncate"></div>
-      <div class="flex items-center gap-2">
-        <select id="preset" class="ctl"></select>
-        <div id="custom-range" class="hidden items-center gap-1">
-          <input type="date" id="since" class="ctl w-36">
-          <input type="date" id="until" class="ctl w-36">
-        </div>
-        <button id="live-btn" class="ctl flex items-center gap-2" title="Actualización automática">
-          <span class="live-dot"></span><span class="hidden sm:inline">En vivo</span>
-        </button>
-        <button id="refresh-btn" class="ctl" title="Forzar actualización desde Meta">⟳</button>
-      </div>
+  <header class="topbar sticky top-0 z-20">
+    <div class="<?= $isClient ? 'max-w-[1320px] mx-auto' : '' ?> px-4 lg:px-8 h-16 flex items-center gap-3">
+      <?php if ($isClient): ?>
+        <div id="client-brand" class="flex items-center gap-3 min-w-0"></div>
+        <nav id="nav" class="topnav hidden md:flex items-center gap-1 ml-4 text-[13.5px]"></nav>
+      <?php else: ?>
+        <button id="menu-btn" class="lg:hidden btn btn-ghost btn-icon -ml-2" aria-label="Menú" data-icon="menu"></button>
+        <div id="breadcrumbs" class="min-w-0 flex-1 text-[13px] t3 truncate"></div>
+      <?php endif; ?>
+      <div class="flex-1"></div>
+      <div id="range-ctl" class="flex items-center gap-2"></div>
+      <button id="live-btn" class="btn btn-sm hidden sm:inline-flex" title="Actualización automática"><span class="live-dot"></span><span>En vivo</span></button>
+      <button id="refresh-btn" class="btn btn-icon btn-sm" title="Actualizar ahora" data-icon="refresh"></button>
+      <?php if ($isClient): ?>
+        <button class="btn btn-ghost btn-icon btn-sm" data-theme-toggle title="Cambiar tema"></button>
+        <button class="btn btn-ghost btn-sm" id="account-btn"><span data-icon="user"></span><span class="hidden sm:inline" id="user-name"></span></button>
+      <?php endif; ?>
     </div>
-    <div class="px-4 lg:px-8 pb-2 -mt-1 text-[11px] text-slate-500 flex gap-3">
-      <span id="updated-at"></span><span id="usage"></span>
-    </div>
+    <?php if ($isClient): ?>
+      <nav id="nav-mobile" class="topnav md:hidden flex gap-1 px-4 pb-2 overflow-x-auto text-[13px]"></nav>
+    <?php endif; ?>
   </header>
 
-  <main id="view" class="px-4 lg:px-8 py-6 max-w-[1600px]"></main>
+  <div class="<?= $isClient ? 'max-w-[1320px] mx-auto' : 'max-w-[1600px]' ?> px-4 lg:px-8">
+    <div class="pt-3 text-[11.5px] t3 flex flex-wrap gap-x-4 gap-y-1 no-print" id="status-line"><span id="updated-at"></span><span id="usage"></span></div>
+    <main id="view" class="py-5"></main>
+  </div>
 </div>
 
-<div id="toasts" class="fixed bottom-4 right-4 z-50 space-y-2 w-80 max-w-[calc(100vw-2rem)]"></div>
-<div id="modal" class="fixed inset-0 z-50 hidden bg-black/60 p-4 overflow-y-auto"><div class="modal-card"></div></div>
+<div id="toasts" class="fixed bottom-4 right-4 z-[70] space-y-2 w-[340px] max-w-[calc(100vw-2rem)]"></div>
+<div id="modal" class="overlay hidden"><div class="modal-card"></div></div>
+<div id="palette" class="overlay hidden"></div>
 
 <script>window.FLASH = <?= json_encode($flash, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) ?>;</script>
-<script src="assets/app.js?v=1"></script>
+<script src="assets/app.js?v=2"></script>
 </body>
 </html>

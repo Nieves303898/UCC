@@ -9,7 +9,24 @@ Panel propio, instalable en cualquier hosting con PHP + MySQL (cPanel), conectad
 | **Páginas de Facebook** | Seguidores, visualizaciones, interacciones, nuevos seguidores, visitas. Cada posteo con alcance, reacciones, comentarios, compartidos, clics, reproducciones y engagement. |
 | **Instagram** | Visualizaciones, alcance, interacciones, guardados, compartidos, toques en enlaces, seguidores netos. Posts, reels e historias activas con sus métricas. Demografía de seguidores. |
 | **Actividad** | Comentarios, menciones y posteos en tiempo real vía webhook. |
-| **Configuración** | Conexiones (Login con Facebook o token de System User), visibilidad de activos, usuarios (admin / solo lectura para clientes), logs del cron. |
+| **Clientes** | Alta de clientes con color de marca, asignación de cuentas/páginas/Instagram, accesos con usuario y contraseña, y publicación de "trabajo en curso". Botón *Ver como cliente* para revisar su portal. |
+| **Configuración** | Conexiones (Login con Facebook o token de System User), visibilidad de activos, equipo de la agencia, logs del cron. |
+
+### Portal del cliente
+
+Cada cliente entra con **su usuario y contraseña** y ve una interfaz distinta, con su color de marca:
+
+| Sección | Qué ve |
+|---|---|
+| **Inicio** | "Hoy, en vivo" (inversión, resultados y costo del día), KPIs del período con tendencia, rendimiento diario, campañas en marcha, redes y su mejor contenido. |
+| **Campañas** | Sus cuentas → campañas → conjuntos → anuncios con creativos (sin datos de facturación de la cuenta ni medio de pago). |
+| **Redes** | Sus páginas de Facebook e Instagram con métricas de cada posteo, reels e historias. |
+| **Trabajo** | Tablero *Planificado / En curso / Hecho* con lo que la agencia está haciendo, fechas de entrega y links a materiales. |
+| **Reporte** | Reporte del período listo para **descargar en PDF** (KPIs, campañas, Instagram, contenido destacado, trabajo realizado y próximos pasos). |
+
+El aislamiento se valida en el servidor: un cliente sólo puede consultar los activos asignados, y cada campaña, conjunto o anuncio se verifica contra su cuenta antes de pedir datos a Meta.
+
+**Cómo dar acceso:** Clientes → Nuevo cliente → *Activos asignados* (marcá sus cuentas, páginas e Instagram) → *Accesos* (se genera una contraseña segura; copiala o enviala por WhatsApp) → *Trabajo en curso* (publicá avances).
 
 **"Tiempo real":** el modo *En vivo* refresca el panel solo (cada 2 min por defecto). Los rangos que incluyen *hoy* usan una caché de 2 min y los históricos de 15 min. El botón ⟳ fuerza la consulta a Meta. Si Meta falla o limita las consultas, se muestra el último dato guardado con un aviso.
 
@@ -77,7 +94,7 @@ Si tu hosting no permite cron por CLI, definí `cron_key` en `config.php` y llam
 
 - Tokens de Meta guardados **cifrados (AES-256-GCM)**; cada llamada usa `appsecret_proof`.
 - Contraseñas hasheadas, sesión `HttpOnly` + `SameSite`, CSRF en todas las acciones.
-- Rol **solo lectura** para darle acceso a un cliente sin que pueda tocar conexiones.
+- Usuarios **cliente** aislados: no ven otras marcas, conexiones, configuración ni datos de facturación.
 - El panel sólo **lee** datos: no pausa, edita ni crea campañas.
 
 ## 7. Notas sobre los datos
@@ -90,7 +107,9 @@ Si tu hosting no permite cron por CLI, definí `cron_key` en `config.php` y llam
 
 ## 8. Personalización
 
-- Nombre del panel: `app_name` en `config.php`.
+- Nombre del panel y de la agencia: `app_name` y `agency_name` en `config.php`.
+- Tema claro/oscuro: botón en la barra (se recuerda por usuario; por defecto sigue al sistema).
+- Buscador rápido: `Ctrl + K` / `Cmd + K`.
 - Estilos: Tailwind ya viene compilado en `public/assets/tailwind.css`. Si cambiás clases en las vistas o en `app.js`, recompilalo con:
   `npx tailwindcss@3.4.16 -c tailwind.config.js -i resources/tailwind.css -o public/assets/tailwind.css --minify`
 - Umbral de alerta de frecuencia: agregá `'alerts' => ['max_frequency' => 3.5]` en `config.php`.

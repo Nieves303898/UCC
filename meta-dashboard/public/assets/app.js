@@ -1,7 +1,9 @@
-/* Meta Hub — panel de métricas (vanilla JS, sin build). */
+/* Meta Hub — panel de métricas y portal de clientes (vanilla JS, sin build). */
 'use strict';
 
-// ---------- utilidades ----------
+// =========================================================================
+// Utilidades y estado
+// =========================================================================
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -20,43 +22,120 @@ const state = {
   renderId: 0,
   force: false,
   timer: null,
-  lastMeta: null,
+  preview: null, // admin viendo el portal de un cliente
 };
+const isClient = () => state.boot?.user.role === 'client';
+/** ID del cliente cuyo portal se está mostrando (propio o vista previa). */
+const portalClient = () => (isClient() ? state.boot.client?.id : state.preview);
 
-// ---------- formato ----------
+// =========================================================================
+// Íconos (trazos propios, 24x24)
+// =========================================================================
+const ICONS = {
+  home: '<path d="M4 10.5 12 4l8 6.5V20h-5v-5.5H9V20H4z"/>',
+  grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
+  page: '<rect x="4.5" y="3.5" width="15" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  instagram: '<rect x="4" y="4" width="16" height="16" rx="4.5"/><circle cx="12" cy="12" r="3.6"/><circle cx="16.6" cy="7.4" r=".9" fill="currentColor"/>',
+  social: '<circle cx="7" cy="12" r="2.5"/><circle cx="17" cy="6.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="m9.2 10.8 5.6-3M9.2 13.2l5.6 3"/>',
+  bell: '<path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5z"/><path d="M10 20.5h4"/>',
+  sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><path d="M15.5 5.6a3.2 3.2 0 0 1 0 5.8M17.5 14.3c1.6.7 2.6 2.3 3 4.7"/>',
+  user: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/>',
+  briefcase: '<rect x="3.5" y="7" width="17" height="12.5" rx="2"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M3.5 12.5h17"/>',
+  report: '<path d="M6 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20z"/><path d="M14 3.5V8h4M9 16v-2.5M12 16v-5M15 16v-3.5"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
+  moon: '<path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
+  logout: '<path d="M14 4.5h4.5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H14"/><path d="M10 16l-4-4 4-4M6 12h10"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  external: '<path d="M13.5 4.5h6v6M19.5 4.5 11 13"/><path d="M18 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H10"/>',
+  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/>',
+  up: '<path d="M7 14l5-5 5 5"/>',
+  down: '<path d="M7 10l5 5 5-5"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  alert: '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2v.3"/>',
+  key: '<circle cx="8" cy="15" r="3.5"/><path d="m10.5 12.5 8-8M16 7l2.5 2.5"/>',
+  copy: '<rect x="8" y="8" width="11.5" height="11.5" rx="2"/><path d="M5.5 15.5H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9.5a1 1 0 0 1 1 1v.5"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  calendar: '<rect x="4" y="5.5" width="16" height="14.5" rx="2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
+  play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+  layers: '<path d="m12 4 8.5 4.5L12 13 3.5 8.5z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5M3.5 16.5 12 21l8.5-4.5"/>',
+};
+const icon = (name, size = 16, extra = '') => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" ${extra}>${ICONS[name] || ''}</svg>`;
+const hydrateIcons = (root = document) => $$('[data-icon]', root).forEach((el) => { if (!el.dataset.iconDone) { el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)); el.dataset.iconDone = 1; } });
+
+// =========================================================================
+// Tema claro / oscuro y colores de marca
+// =========================================================================
+const theme = () => document.documentElement.getAttribute('data-theme') || 'light';
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  store.set('theme', t);
+  paintThemeButtons();
+  applyChartTheme();
+  render({ silent: true, cachedOnly: true });
+}
+function paintThemeButtons() {
+  $$('[data-theme-toggle]').forEach((b) => { b.innerHTML = icon(theme() === 'dark' ? 'sun' : 'moon'); });
+}
+function setAccent(color) {
+  if (color && /^#[0-9a-f]{6}$/i.test(color)) {
+    document.documentElement.style.setProperty('--accent', color);
+    // Texto legible sobre el color de marca.
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+    document.documentElement.style.setProperty('--on-accent', (r * 299 + g * 587 + b * 114) / 1000 > 160 ? '#111' : '#fff');
+  } else {
+    document.documentElement.style.removeProperty('--accent');
+    document.documentElement.style.removeProperty('--on-accent');
+  }
+}
+
+// =========================================================================
+// Formato (es-AR)
+// =========================================================================
 const LOCALE = 'es-AR';
 const nf0 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
+const bad = (v) => v == null || Number.isNaN(v) || !Number.isFinite(+v);
 const fmt = {
-  int: (v) => (v == null || isNaN(v) ? '—' : nf0.format(Math.round(v))),
-  dec: (v, d = 2) => (v == null || isNaN(v) ? '—' : new Intl.NumberFormat(LOCALE, { minimumFractionDigits: d, maximumFractionDigits: d }).format(v)),
-  pct: (v) => (v == null || isNaN(v) ? '—' : fmt.dec(v, 2) + '%'),
-  x: (v) => (v == null || isNaN(v) ? '—' : fmt.dec(v, 2) + 'x'),
+  int: (v) => (bad(v) ? '—' : nf0.format(Math.round(v))),
+  dec: (v, d = 2) => (bad(v) ? '—' : new Intl.NumberFormat(LOCALE, { minimumFractionDigits: d, maximumFractionDigits: d }).format(v)),
+  pct: (v) => (bad(v) ? '—' : fmt.dec(v, 2) + '%'),
+  x: (v) => (bad(v) ? '—' : fmt.dec(v, 2) + 'x'),
   money(v, cur = 'USD') {
-    if (v == null || isNaN(v)) return '—';
-    try {
-      return new Intl.NumberFormat(LOCALE, { style: 'currency', currency: cur, maximumFractionDigits: Math.abs(v) >= 1000 ? 0 : 2 }).format(v);
-    } catch { return cur + ' ' + fmt.dec(v); }
+    if (bad(v)) return '—';
+    try { return new Intl.NumberFormat(LOCALE, { style: 'currency', currency: cur, maximumFractionDigits: Math.abs(v) >= 1000 ? 0 : 2 }).format(v); } catch { return cur + ' ' + fmt.dec(v); }
   },
-  compact: (v) => (v == null || isNaN(v) ? '—' : new Intl.NumberFormat(LOCALE, { notation: 'compact', maximumFractionDigits: 1 }).format(v)),
-  date: (s) => (s ? new Date(s.length === 10 ? s + 'T12:00:00' : s).toLocaleDateString(LOCALE, { day: '2-digit', month: 'short' }) : '—'),
-  datetime: (s) => (s ? new Date(s).toLocaleString(LOCALE, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'),
+  moneyShort(v, cur = 'USD') {
+    if (bad(v)) return '—';
+    if (Math.abs(v) < 100000) return fmt.money(v, cur);
+    try { return new Intl.NumberFormat(LOCALE, { style: 'currency', currency: cur, notation: 'compact', maximumFractionDigits: 1 }).format(v); } catch { return fmt.compact(v); }
+  },
+  compact: (v) => (bad(v) ? '—' : new Intl.NumberFormat(LOCALE, { notation: 'compact', maximumFractionDigits: 1 }).format(v)),
+  date: (s) => (s ? new Date(s.length === 10 ? s + 'T12:00:00' : s.replace(' ', 'T')).toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' }) : '—'),
+  dateLong: (s) => (s ? new Date(s.length === 10 ? s + 'T12:00:00' : s.replace(' ', 'T')).toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric' }) : '—'),
+  datetime: (s) => (s ? new Date(s.replace(' ', 'T')).toLocaleString(LOCALE, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'),
   ago(iso) {
     if (!iso) return '';
-    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    const s = Math.max(0, (Date.now() - new Date(iso.replace(' ', 'T')).getTime()) / 1000);
     if (s < 60) return 'hace instantes';
     if (s < 3600) return `hace ${Math.round(s / 60)} min`;
     if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
     return `hace ${Math.round(s / 86400)} d`;
   },
-  ms: (v) => (v == null ? '—' : fmt.dec(v / 1000, 1) + ' s'),
 };
 
 function delta(cur, prev, inverse = false) {
-  if (cur == null || prev == null || prev === 0) return '<span class="delta flat">—</span>';
+  if (bad(cur) || bad(prev) || prev === 0) return '';
   const d = ((cur - prev) / Math.abs(prev)) * 100;
-  if (Math.abs(d) < 0.5) return '<span class="delta flat">0%</span>';
+  if (Math.abs(d) < 0.5) return '<span class="delta flat">= 0%</span>';
   const good = inverse ? d < 0 : d > 0;
-  return `<span class="delta ${good ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${fmt.dec(Math.abs(d), Math.abs(d) >= 100 ? 0 : 1)}%</span>`;
+  return `<span class="delta ${good ? 'up' : 'down'}">${icon(d > 0 ? 'up' : 'down', 12)}${fmt.dec(Math.abs(d), Math.abs(d) >= 100 ? 0 : 1)}%</span>`;
 }
 
 const STATUS = {
@@ -73,9 +152,12 @@ const OBJECTIVES = {
   POST_ENGAGEMENT: 'Interacción', PRODUCT_CATALOG_SALES: 'Ventas de catálogo', APP_INSTALLS: 'Instalaciones',
 };
 
-// ---------- API ----------
+// =========================================================================
+// API
+// =========================================================================
 async function api(action, params = {}, body = null) {
-  const q = new URLSearchParams({ action, ...params });
+  const q = new URLSearchParams({ action });
+  Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v); });
   if (state.force && !body) q.set('refresh', '1');
   const opts = body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }, body: JSON.stringify(body) } : {};
   const res = await fetch('api.php?' + q.toString(), opts);
@@ -86,64 +168,93 @@ async function api(action, params = {}, body = null) {
   return json.data;
 }
 const rp = (extra = {}) => ({ ...state.range, ...extra });
+const post = async (action, body, okMsg) => {
+  try { const r = await api(action, {}, body); if (okMsg) toast(okMsg); return r; } catch (e) { toast(e.message, 'error'); throw e; }
+};
 
 function setMeta(meta) {
-  state.lastMeta = meta;
-  const el = $('#updated-at');
   if (meta.cached_at) {
-    el.textContent = `Datos de Meta ${fmt.ago(meta.cached_at)} (${fmt.datetime(meta.cached_at)})${meta.stale ? ' · ⚠ Meta no respondió, mostrando último dato guardado' : ''}`;
+    $('#updated-at').innerHTML = `<span class="inline-flex items-center gap-2"><span class="live-dot ${state.live ? 'on' : ''}"></span>Datos de Meta ${fmt.ago(meta.cached_at)} · ${fmt.datetime(meta.cached_at)}${meta.stale ? ' · <span class="t-warn">Meta no respondió: se muestra el último dato guardado</span>' : ''}</span>`;
   }
-  $('#usage').textContent = meta.usage != null ? `Uso de API: ${meta.usage}%` : '';
+  $('#usage').textContent = meta.usage != null ? `Uso de API ${meta.usage}%` : '';
 }
 
-// ---------- UI helpers ----------
+// =========================================================================
+// Componentes de UI
+// =========================================================================
 function toast(text, type = 'info') {
-  const colors = { info: 'border-blue-500/40', success: 'border-green-500/40', error: 'border-red-500/40' };
   const el = document.createElement('div');
-  el.className = `card px-4 py-3 text-sm shadow-xl ${colors[type] || ''}`;
-  el.textContent = text;
+  el.className = `toast ${type === 'error' ? 'error' : ''}`;
+  el.innerHTML = `${icon(type === 'error' ? 'alert' : 'check', 16)}<span>${esc(text)}</span>`;
   $('#toasts').append(el);
-  setTimeout(() => el.remove(), type === 'error' ? 9000 : 5000);
+  setTimeout(() => el.remove(), type === 'error' ? 8000 : 4000);
 }
 
-function modal(html) {
+function modal(html, size = '') {
   const m = $('#modal');
+  m.firstElementChild.className = `modal-card ${size}`;
   m.firstElementChild.innerHTML = html;
   m.classList.remove('hidden');
-  m.onclick = (e) => { if (e.target === m || e.target.closest('[data-close]')) m.classList.add('hidden'); };
+  m.onclick = (e) => { if (e.target === m || e.target.closest('[data-close]')) closeModal(); };
+  return m.firstElementChild;
 }
+const closeModal = () => $('#modal').classList.add('hidden');
+const modalHead = (title, sub = '') => `<div class="card-h"><div class="min-w-0 flex-1"><div class="h2 truncate">${esc(title)}</div>${sub ? `<div class="t3 text-xs mt-0.5">${sub}</div>` : ''}</div><button class="btn btn-ghost btn-icon" data-close>${icon('x')}</button></div>`;
 
-const skeleton = (n = 4) => `
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">${'<div class="skeleton h-24"></div>'.repeat(n)}</div>
-  <div class="skeleton h-72 mb-6"></div><div class="skeleton h-96"></div>`;
+const skeleton = () => `
+  <div class="sk h-8 w-64 mb-5"></div>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">${'<div class="sk h-[118px]"></div>'.repeat(4)}</div>
+  <div class="sk h-80 mb-5"></div><div class="sk h-96"></div>`;
 
 const errorBox = (msg, retry = true) => `
-  <div class="card p-6 border-red-500/30">
-    <div class="text-red-300 font-medium mb-1">No pudimos cargar los datos</div>
-    <div class="text-sm text-slate-400 mb-4">${esc(msg)}</div>
-    ${retry ? '<button class="btn" onclick="render()">Reintentar</button>' : ''}
-    <a class="btn ml-2" href="#/settings">Ir a Configuración</a>
+  <div class="card p-6 flex gap-4 items-start">
+    <div class="t-bad mt-0.5">${icon('alert', 20)}</div>
+    <div class="flex-1"><div class="h2">No pudimos cargar estos datos</div><div class="t2 mt-1">${esc(msg)}</div>
+      <div class="flex gap-2 mt-4">${retry ? '<button class="btn" onclick="render()">Reintentar</button>' : ''}${!isClient() ? '<a class="btn btn-ghost" href="#/settings">Configuración</a>' : ''}</div></div>
   </div>`;
 
-const empty = (title, text = '', action = '') => `
-  <div class="card p-10 text-center">
-    <div class="text-4xl mb-3">🗂️</div>
-    <div class="font-semibold text-slate-100">${esc(title)}</div>
-    <div class="text-sm text-slate-400 mt-1 max-w-lg mx-auto">${text}</div>
+const empty = (title, text = '', action = '', ic = 'layers') => `
+  <div class="card px-6 py-12 text-center">
+    <div class="mx-auto w-11 h-11 rounded-xl sunk grid place-items-center t3">${icon(ic, 20)}</div>
+    <div class="h2 mt-4">${esc(title)}</div>
+    ${text ? `<div class="t2 mt-1 max-w-md mx-auto">${text}</div>` : ''}
     ${action ? `<div class="mt-5">${action}</div>` : ''}
   </div>`;
 
-const kpi = (label, value, d = '', hint = '') => `
+const pageHead = (title, sub = '', right = '') => `
+  <div class="flex flex-wrap items-end gap-4 mb-6">
+    <div class="min-w-0"><h1 class="h1">${title}</h1>${sub ? `<div class="t2 mt-1">${sub}</div>` : ''}</div>
+    <div class="flex-1"></div>${right}
+  </div>`;
+
+/** Mini gráfico de línea en SVG (sin Chart.js). */
+function sparkline(values, { color = 'var(--accent)', height = 30, fill = true } = {}) {
+  const v = (values || []).map((x) => (bad(x) ? 0 : +x));
+  if (v.length < 2 || v.every((x) => x === 0)) return '';
+  const w = 120, h = height, max = Math.max(...v), min = Math.min(...v), span = max - min || 1;
+  const pts = v.map((y, i) => [(i / (v.length - 1)) * w, h - 3 - ((y - min) / span) * (h - 6)]);
+  const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
+  const last = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    ${fill ? `<path d="${d}L${w},${h}L0,${h}Z" fill="${color}" opacity=".08"/>` : ''}
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="2.2" fill="${color}"/></svg>`;
+}
+
+/** Tarjeta KPI: etiqueta, valor, variación y sparkline. */
+const kpi = (label, value, { d = '', spark = '', hint = '', vs = 'vs. período anterior' } = {}) => `
   <div class="kpi" ${hint ? `title="${esc(hint)}"` : ''}>
     <div class="lbl">${esc(label)}</div>
     <div class="val">${value}</div>
-    <div class="mt-1 h-5">${d}</div>
+    <div class="foot">${d ? `<div class="leading-tight">${d}<div class="vs">${vs}</div></div>` : ''}${spark}</div>
   </div>`;
 
 function crumbs(items) {
-  $('#breadcrumbs').innerHTML = items.map((c, i) => (c.href && i < items.length - 1
-    ? `<a class="hover:text-white" href="${c.href}">${esc(c.label)}</a>`
-    : `<span class="${i === items.length - 1 ? 'text-slate-100 font-medium' : ''}">${esc(c.label)}</span>`)).join('<span class="mx-2 text-slate-600">/</span>');
+  const el = $('#breadcrumbs');
+  if (!el) return;
+  el.innerHTML = items.map((c, i) => (c.href && i < items.length - 1
+    ? `<a class="hover:underline" href="${c.href}">${esc(c.label)}</a>`
+    : `<span class="${i === items.length - 1 ? 't1 font-medium' : ''}">${esc(c.label)}</span>`)).join('<span class="mx-2 opacity-50">/</span>');
 }
 
 function downloadCsv(name, cols, rows) {
@@ -161,10 +272,20 @@ function downloadCsv(name, cols, rows) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-// ---------- tablas ordenables ----------
+const initials = (s) => String(s || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+const genPassword = () => {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const a = new Uint32Array(12); crypto.getRandomValues(a);
+  return [...a].map((n) => chars[n % chars.length]).join('');
+};
+const copyText = (t) => { navigator.clipboard?.writeText(t).then(() => toast('Copiado al portapapeles')); };
+
+// =========================================================================
+// Tablas ordenables
+// =========================================================================
 /**
  * cols: [{key, label, value:(r)=>num|string, html:(r)=>string, csv:(r)=>any, left:bool, total:(rows)=>string}]
- * opts: {onClick:(r)=>void, sort:'key', dir:'desc', csvName, search:true, filters:[{label, fn}]}
+ * opts: {title, onClick, sort, dir, csvName, search, filters:[{label, fn}], actions:html}
  */
 function tableHtml(id, cols, rows, opts = {}) {
   state.tables[id] = { cols, rows, opts, sort: opts.sort || null, dir: opts.dir || 'desc', q: '', filter: 0 };
@@ -172,15 +293,18 @@ function tableHtml(id, cols, rows, opts = {}) {
   return `
     <div class="card overflow-hidden" id="tbl-${id}">
       <div class="card-h">
-        <h2>${esc(opts.title || '')}</h2>
-        ${filters.length ? `<div class="tabs" data-filters>${filters.map((f, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-f="${i}">${esc(f.label)}</button>`).join('')}</div>` : ''}
+        ${opts.title ? `<div class="h2">${opts.title}</div>` : ''}
+        ${filters.length ? `<div class="tabs">${filters.map((f, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-f="${i}">${esc(f.label)}</button>`).join('')}</div>` : ''}
         <div class="flex-1"></div>
-        ${opts.search !== false ? '<input class="ctl w-48" placeholder="Buscar…" data-search>' : ''}
-        ${opts.csvName ? '<button class="btn" data-csv>⬇ CSV</button>' : ''}
+        ${opts.search !== false ? `<div class="relative"><span class="absolute left-2.5 top-1/2 -translate-y-1/2 t3">${icon('search', 14)}</span><input class="input select-sm !pl-8 w-48" placeholder="Buscar" data-search></div>` : ''}
+        ${opts.csvName ? `<button class="btn btn-sm" data-csv>${icon('download', 14)}CSV</button>` : ''}
+        ${opts.actions || ''}
       </div>
-      <div class="scroll-x max-h-[70vh]"><table class="tbl"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+      <div class="scroll-x" style="max-height:${opts.maxHeight || '72vh'}"><table class="tbl"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
     </div>`;
 }
+
+const cellText = (v) => (typeof v === 'number' ? (Number.isInteger(v) ? fmt.int(v) : fmt.dec(v)) : esc(v ?? '—'));
 
 function tableVisibleRows(t) {
   let rows = t.rows;
@@ -205,20 +329,19 @@ function tableVisibleRows(t) {
   return rows;
 }
 
-const cellText = (v) => (typeof v === 'number' ? (Number.isInteger(v) ? fmt.int(v) : fmt.dec(v)) : esc(v ?? '—'));
-
 function mountTable(id) {
   const t = state.tables[id];
   const root = $(`#tbl-${id}`);
   if (!t || !root) return;
+  const align = (c) => (c.left ? 'text-align:left' : '');
   const draw = () => {
     const rows = tableVisibleRows(t);
-    $('thead', root).innerHTML = '<tr>' + t.cols.map((c) => `<th data-k="${c.key}" class="${t.sort === c.key ? 'sorted' : ''}" style="${c.left ? 'text-align:left' : ''}">${esc(c.label)}${t.sort === c.key ? (t.dir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('') + '</tr>';
+    $('thead', root).innerHTML = '<tr>' + t.cols.map((c) => `<th data-k="${c.key}" class="${t.sort === c.key ? 'sorted' : ''}" style="${align(c)}">${esc(c.label)}${t.sort === c.key ? (t.dir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('') + '</tr>';
     $('tbody', root).innerHTML = rows.length
-      ? rows.map((r, i) => `<tr data-i="${i}" class="${t.opts.onClick ? 'clickable' : ''}">${t.cols.map((c) => `<td style="${c.left ? 'text-align:left' : ''}">${c.html ? c.html(r) : cellText(c.value ? c.value(r) : r[c.key])}</td>`).join('')}</tr>`).join('')
-      : `<tr><td colspan="${t.cols.length}" class="text-center text-slate-500 py-8" style="text-align:center">Sin datos para este período o filtro</td></tr>`;
-    $('tfoot', root).innerHTML = t.cols.some((c) => c.total) && rows.length
-      ? '<tr>' + t.cols.map((c, i) => `<td style="${c.left ? 'text-align:left' : ''}">${c.total ? c.total(rows) : (i === 0 ? 'Total' : '')}</td>`).join('') + '</tr>'
+      ? rows.map((r, i) => `<tr data-i="${i}" class="${t.opts.onClick ? 'clickable' : ''}">${t.cols.map((c) => `<td style="${align(c)}">${c.html ? c.html(r) : cellText(c.value ? c.value(r) : r[c.key])}</td>`).join('')}</tr>`).join('')
+      : `<tr><td colspan="${t.cols.length}" style="text-align:center" class="t3 !py-10">Sin datos para este período o filtro</td></tr>`;
+    $('tfoot', root).innerHTML = t.cols.some((c) => c.total) && rows.length > 1
+      ? '<tr>' + t.cols.map((c, i) => `<td style="${align(c)}">${c.total ? c.total(rows) : (i === 0 ? `Total · ${rows.length}` : '')}</td>`).join('') + '</tr>'
       : '';
     t.visible = rows;
   };
@@ -237,7 +360,7 @@ function mountTable(id) {
       return draw();
     }
     if (e.target.closest('[data-csv]')) return downloadCsv(t.opts.csvName, t.cols, t.visible);
-    if (e.target.closest('a,button')) return;
+    if (e.target.closest('a,button,input,label')) return;
     const tr = e.target.closest('tbody tr[data-i]');
     if (tr && t.opts.onClick) t.opts.onClick(t.visible[+tr.dataset.i]);
   });
@@ -246,32 +369,39 @@ function mountTable(id) {
   draw();
 }
 
-// ---------- gráficos ----------
-const PALETTE = ['#3b82f6', '#d946ef', '#22c55e', '#f59e0b', '#06b6d4', '#ef4444', '#a855f7', '#84cc16'];
-Chart.defaults.color = '#94a3b8';
-Chart.defaults.borderColor = '#1e293b';
-Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
-Chart.defaults.font.size = 11;
-
-function destroyCharts() {
-  state.charts.forEach((c) => c.destroy());
-  state.charts = [];
+// =========================================================================
+// Gráficos (Chart.js, colores tomados del tema)
+// =========================================================================
+const palette = () => ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6', '--c7', '--c8'].map(cssVar);
+function applyChartTheme() {
+  Chart.defaults.color = cssVar('--t3');
+  Chart.defaults.borderColor = cssVar('--grid');
+  Chart.defaults.font.family = 'Geist, Inter, system-ui, sans-serif';
+  Chart.defaults.font.size = 11.5;
 }
+function destroyCharts() { state.charts.forEach((c) => c.destroy()); state.charts = []; }
+const tooltip = () => ({
+  backgroundColor: cssVar('--panel'), titleColor: cssVar('--t1'), bodyColor: cssVar('--t2'), borderColor: cssVar('--t3'),
+  borderWidth: 1, padding: 11, boxPadding: 5, usePointStyle: true, titleFont: { weight: '600' }, cornerRadius: 10,
+});
 
-/** datasets: [{label, data, type:'bar'|'line', axis:'y'|'y1', fmt}] */
+/** datasets: [{label, data, type:'bar'|'line', axis:'y'|'y1', fmt, color}] */
 function chart(canvas, labels, datasets, { fmtY, fmtY1, stacked = false, horizontal = false } = {}) {
   if (!canvas) return null;
+  const pal = palette();
   const hasY1 = datasets.some((d) => d.axis === 'y1');
   const c = new Chart(canvas, {
     data: {
       labels,
       datasets: datasets.map((d, i) => {
-        const color = d.color || PALETTE[i % PALETTE.length];
+        const color = d.color || pal[i % pal.length];
+        const isBar = d.type === 'bar';
         return {
-          type: d.type || 'line', label: d.label, data: d.data, yAxisID: d.axis || 'y',
-          borderColor: color, backgroundColor: d.type === 'bar' ? color + 'b3' : color + '22',
-          fill: d.type !== 'bar' && datasets.length === 1, tension: 0.35, pointRadius: labels.length > 45 ? 0 : 2.5,
-          borderWidth: 2, borderRadius: 4, order: d.type === 'bar' ? 2 : 1, _fmt: d.fmt,
+          type: d.type || 'line', label: d.label, data: d.data, yAxisID: horizontal ? undefined : (d.axis || 'y'),
+          borderColor: color, backgroundColor: isBar ? color + (datasets.length > 1 ? '55' : 'cc') : color + '14',
+          hoverBackgroundColor: color, fill: !isBar && datasets.filter((x) => x.type !== 'bar').length === 1,
+          tension: 0.35, pointRadius: 0, pointHoverRadius: 4, pointBackgroundColor: color,
+          borderWidth: isBar ? 0 : 2, borderRadius: 5, maxBarThickness: 34, order: isBar ? 2 : 1, _fmt: d.fmt,
         };
       }),
     },
@@ -279,18 +409,15 @@ function chart(canvas, labels, datasets, { fmtY, fmtY1, stacked = false, horizon
       indexAxis: horizontal ? 'y' : 'x',
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true } },
-        tooltip: {
-          backgroundColor: '#0b1222', borderColor: '#334155', borderWidth: 1, padding: 10,
-          callbacks: { label: (ctx) => `${ctx.dataset.label}: ${(ctx.dataset._fmt || fmt.int)(ctx.parsed[horizontal ? 'x' : 'y'])}` },
-        },
+        legend: { align: 'end', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'circle', padding: 14 } },
+        tooltip: { ...tooltip(), callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${(ctx.dataset._fmt || fmt.int)(ctx.parsed[horizontal ? 'x' : 'y'])}` } },
       },
       scales: horizontal
-        ? { x: { stacked, ticks: { callback: (v) => (fmtY || fmt.compact)(v) }, grid: { color: '#131c2e' } }, y: { stacked, grid: { display: false } } }
+        ? { x: { stacked, border: { display: false }, ticks: { callback: (v) => (fmtY || fmt.compact)(v) } }, y: { stacked, grid: { display: false }, border: { display: false } } }
         : {
-          x: { stacked, grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
-          y: { stacked, beginAtZero: true, ticks: { callback: (v) => (fmtY || fmt.compact)(v) }, grid: { color: '#131c2e' } },
-          ...(hasY1 ? { y1: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { callback: (v) => (fmtY1 || fmt.compact)(v) } } } : {}),
+          x: { stacked, grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 16 } },
+          y: { stacked, beginAtZero: true, border: { display: false }, ticks: { callback: (v) => (fmtY || fmt.compact)(v), maxTicksLimit: 6 } },
+          ...(hasY1 ? { y1: { position: 'right', beginAtZero: true, grid: { display: false }, border: { display: false }, ticks: { callback: (v) => (fmtY1 || fmt.compact)(v), maxTicksLimit: 6 } } } : {}),
         },
     },
   });
@@ -298,45 +425,20 @@ function chart(canvas, labels, datasets, { fmtY, fmtY1, stacked = false, horizon
   return c;
 }
 
-/** Selector de métrica + gráfico diario para Ads. */
-const AD_CHART_METRICS = {
-  results: ['Resultados', fmt.int], cost_per_result: ['Costo por resultado', null], purchases: ['Compras', fmt.int],
-  purchase_value: ['Valor de compras', null], roas: ['ROAS', fmt.x], messages: ['Conversaciones', fmt.int], leads: ['Leads', fmt.int],
-  impressions: ['Impresiones', fmt.int], reach: ['Alcance', fmt.int], link_clicks: ['Clics en enlace', fmt.int],
-  link_ctr: ['CTR enlace', fmt.pct], cpc: ['CPC', null], cpm: ['CPM', null], frequency: ['Frecuencia', (v) => fmt.dec(v)],
-};
-
-function adsChartBlock(id) {
-  return `
-    <div class="card mb-6">
-      <div class="card-h"><h2>Evolución diaria</h2><div class="flex-1"></div>
-        <span class="text-xs text-slate-500">Inversión vs.</span>
-        <select class="ctl" id="${id}-metric">${Object.entries(AD_CHART_METRICS).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select>
-      </div>
-      <div class="p-4 h-72"><canvas id="${id}"></canvas></div>
-    </div>`;
+function doughnut(canvas, labels, values, fmtV = fmt.int) {
+  if (!canvas || !values.length) return;
+  state.charts.push(new Chart(canvas, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: palette(), borderColor: cssVar('--panel'), borderWidth: 3, hoverOffset: 4 }] },
+    options: { maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, padding: 12 } }, tooltip: { ...tooltip(), callbacks: { label: (c) => ` ${c.label}: ${fmtV(c.parsed)}` } } } },
+  }));
 }
 
-function mountAdsChart(id, daily, currency) {
-  const sel = $(`#${id}-metric`);
-  if (!sel) return;
-  sel.value = store.get('chartMetric', 'results');
-  let c;
-  const draw = () => {
-    if (c) { c.destroy(); state.charts = state.charts.filter((x) => x !== c); }
-    const m = sel.value;
-    const [label, f] = AD_CHART_METRICS[m];
-    const money = (v) => fmt.money(v, currency);
-    c = chart($('#' + id), daily.map((d) => fmt.date(d.date)), [
-      { label: 'Inversión', data: daily.map((d) => d.spend), type: 'bar', fmt: money, color: '#3b82f6' },
-      { label, data: daily.map((d) => d[m]), axis: 'y1', fmt: f || money, color: '#d946ef' },
-    ], { fmtY: (v) => fmt.compact(v), fmtY1: f ? undefined : (v) => fmt.compact(v) });
-  };
-  sel.addEventListener('change', () => { store.set('chartMetric', sel.value); draw(); });
-  draw();
-}
+function dropChart(c) { if (c) { c.destroy(); state.charts = state.charts.filter((x) => x !== c); } }
 
-// ---------- columnas y KPIs de Ads ----------
+// =========================================================================
+// Ads: métricas, columnas, KPIs
+// =========================================================================
 function sumMetrics(rows) {
   const keys = ['spend', 'impressions', 'reach', 'clicks', 'link_clicks', 'purchases', 'purchase_value', 'messages', 'leads', 'results', 'add_to_cart', 'initiate_checkout'];
   const t = Object.fromEntries(keys.map((k) => [k, rows.reduce((s, r) => s + (r[k] || 0), 0)]));
@@ -344,21 +446,19 @@ function sumMetrics(rows) {
   return {
     ...t, cost_per_result: div(t.spend, t.results), link_ctr: div(t.link_clicks * 100, t.impressions), cpc: div(t.spend, t.link_clicks),
     cpm: div(t.spend * 1000, t.impressions), roas: div(t.purchase_value, t.spend), frequency: div(t.impressions, t.reach),
-    cost_per_purchase: div(t.spend, t.purchases), cost_per_message: div(t.spend, t.messages), cost_per_lead: div(t.spend, t.leads),
   };
 }
 
-/** Columnas de métricas para tablas de campañas/conjuntos/anuncios. get(r) devuelve el objeto de métricas. */
-function metricCols(cur, get = (r) => r.metrics) {
+function metricCols(cur, get = (r) => r.metrics, { compact = false } = {}) {
   const money = (v) => fmt.money(v, cur);
   const col = (key, label, f, opts = {}) => ({
     key, label, value: (r) => get(r)[key], html: (r) => f(get(r)[key]),
     total: opts.noTotal ? null : (rows) => f(sumMetrics(rows.map(get))[key]), ...opts,
   });
-  return [
+  const cols = [
     col('spend', 'Inversión', money),
     { key: 'results', label: 'Resultados', value: (r) => get(r).results,
-      html: (r) => `${fmt.int(get(r).results)} <span class="text-slate-500 text-[10px]">${esc(get(r).result_label || '')}</span>`,
+      html: (r) => `${fmt.int(get(r).results)} <span class="sub">${esc(get(r).result_label || '')}</span>`,
       total: (rows) => fmt.int(sumMetrics(rows.map(get)).results) },
     col('cost_per_result', 'Costo/resultado', money),
     col('purchases', 'Compras', fmt.int),
@@ -374,42 +474,115 @@ function metricCols(cur, get = (r) => r.metrics) {
     col('cpc', 'CPC', money),
     col('cpm', 'CPM', money),
   ];
+  return compact ? cols.filter((c) => ['spend', 'results', 'cost_per_result', 'roas', 'reach', 'link_ctr'].includes(c.key)) : cols;
 }
 
-function adsKpis(m, p, cur) {
-  const money = (v) => fmt.money(v, cur);
+/** Elige KPIs relevantes: siempre los base y los de conversión sólo si hay datos. */
+function adsKpis(m, p, cur, daily = [], { client = false } = {}) {
+  const money = (v) => fmt.moneyShort(v, cur);
   const P = p || {};
+  const s = (k) => sparkline(daily.map((d) => d[k]));
+  const has = (k) => (m[k] || 0) > 0 || (P[k] || 0) > 0;
   const items = [
-    ['Inversión', money(m.spend), delta(m.spend, P.spend)],
-    ['Resultados', fmt.int(m.results), delta(m.results, P.results)],
-    ['Costo por resultado', money(m.cost_per_result), delta(m.cost_per_result, P.cost_per_result, true)],
-    ['Compras', fmt.int(m.purchases), delta(m.purchases, P.purchases)],
-    ['Facturación (Meta)', money(m.purchase_value), delta(m.purchase_value, P.purchase_value)],
-    ['ROAS', fmt.x(m.roas), delta(m.roas, P.roas)],
-    ['Conversaciones', fmt.int(m.messages), delta(m.messages, P.messages)],
-    ['Leads', fmt.int(m.leads), delta(m.leads, P.leads)],
-    ['Alcance', fmt.compact(m.reach), delta(m.reach, P.reach)],
-    ['Impresiones', fmt.compact(m.impressions), delta(m.impressions, P.impressions)],
-    ['CTR enlace', fmt.pct(m.link_ctr), delta(m.link_ctr, P.link_ctr)],
-    ['CPM', money(m.cpm), delta(m.cpm, P.cpm, true)],
-  ];
-  return `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6 gap-3 mb-6">${items.map(([l, v, d]) => kpi(l, v, p ? d : '')).join('')}</div>`;
+    ['Inversión', money(m.spend), delta(m.spend, P.spend), s('spend')],
+    ['Resultados', fmt.int(m.results), delta(m.results, P.results), s('results')],
+    ['Costo por resultado', money(m.cost_per_result), delta(m.cost_per_result, P.cost_per_result, true), s('cost_per_result')],
+    has('purchases') && ['Compras', fmt.int(m.purchases), delta(m.purchases, P.purchases), s('purchases')],
+    has('purchase_value') && ['Facturación atribuida', money(m.purchase_value), delta(m.purchase_value, P.purchase_value), s('purchase_value')],
+    has('purchase_value') && ['ROAS', fmt.x(m.roas), delta(m.roas, P.roas), s('roas')],
+    has('messages') && ['Conversaciones', fmt.int(m.messages), delta(m.messages, P.messages), s('messages')],
+    has('leads') && ['Leads', fmt.int(m.leads), delta(m.leads, P.leads), s('leads')],
+    ['Alcance', fmt.compact(m.reach), delta(m.reach, P.reach), s('reach')],
+    ['Impresiones', fmt.compact(m.impressions), delta(m.impressions, P.impressions), s('impressions')],
+    ['CTR enlace', fmt.pct(m.link_ctr), delta(m.link_ctr, P.link_ctr), s('link_ctr')],
+    !client && ['CPM', money(m.cpm), delta(m.cpm, P.cpm, true), s('cpm')],
+    !client && ['Clics en enlace', fmt.compact(m.link_clicks), delta(m.link_clicks, P.link_clicks), s('link_clicks')],
+  ].filter(Boolean).slice(0, 12);
+  return `<div class="kpi-row grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 mb-6" style="display:grid">${items.map(([l, v, d, sp]) => kpi(l, v, { d: p ? d : '', spark: sp })).join('')}</div>`;
 }
 
-const alertsBlock = (alerts) => (alerts && alerts.length ? `
-  <div class="card mb-6"><div class="card-h"><h2>Alertas y oportunidades</h2><span class="pill amber">${alerts.length}</span></div>
-    <ul class="divide-y divide-slate-800 text-sm max-h-64 overflow-y-auto">${alerts.map((a) => `
-      <li class="px-5 py-2.5 flex items-start gap-3">
-        <span>${{ danger: '🔴', warning: '🟠', info: '🔵' }[a.level] || '•'}</span>
-        <span class="flex-1">${esc(a.text)}</span>
-        ${a.account ? `<a class="text-blue-400 text-xs hover:underline" href="#/ads/${esc(a.account)}">Ver</a>` : ''}
-      </li>`).join('')}</ul></div>` : '');
+const AD_CHART_METRICS = {
+  results: ['Resultados', fmt.int], cost_per_result: ['Costo por resultado', null], purchases: ['Compras', fmt.int],
+  purchase_value: ['Facturación', null], roas: ['ROAS', fmt.x], messages: ['Conversaciones', fmt.int], leads: ['Leads', fmt.int],
+  impressions: ['Impresiones', fmt.int], reach: ['Alcance', fmt.int], link_clicks: ['Clics en enlace', fmt.int],
+  link_ctr: ['CTR enlace', fmt.pct], cpc: ['CPC', null], cpm: ['CPM', null], frequency: ['Frecuencia', (v) => fmt.dec(v)],
+};
 
-// ---------- Vista: resumen general ----------
+const adsChartBlock = (id, title = 'Evolución diaria') => `
+  <div class="card mb-6">
+    <div class="card-h"><div class="h2">${title}</div><div class="flex-1"></div>
+      <span class="t3 text-xs">Inversión vs.</span>
+      <select class="select select-sm" id="${id}-metric">${Object.entries(AD_CHART_METRICS).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select>
+    </div>
+    <div class="p-4 h-[300px]"><canvas id="${id}"></canvas></div>
+  </div>`;
+
+function mountAdsChart(id, daily, currency) {
+  const sel = $(`#${id}-metric`);
+  if (!sel) return;
+  sel.value = store.get('chartMetric', 'results');
+  let c;
+  const draw = () => {
+    dropChart(c);
+    const [label, f] = AD_CHART_METRICS[sel.value];
+    const money = (v) => fmt.money(v, currency);
+    c = chart($('#' + id), daily.map((d) => fmt.date(d.date)), [
+      { label: 'Inversión', data: daily.map((d) => d.spend), type: 'bar', fmt: money, color: cssVar('--t3') },
+      { label, data: daily.map((d) => d[sel.value]), axis: 'y1', fmt: f || money, color: cssVar('--accent') },
+    ]);
+  };
+  sel.addEventListener('change', () => { store.set('chartMetric', sel.value); draw(); });
+  draw();
+}
+
+const ALERT_ICON = { danger: ['alert', 't-bad'], warning: ['alert', 't-warn'], info: ['eye', 't-accent'] };
+const alertsBlock = (alerts) => (alerts && alerts.length ? `
+  <div class="card mb-6"><div class="card-h"><div class="h2">Alertas y oportunidades</div><span class="pill amber plain">${alerts.length}</span></div>
+    <ul class="divide max-h-72 overflow-y-auto">${alerts.map((a) => { const [ic, cls] = ALERT_ICON[a.level] || ALERT_ICON.info; return `
+      <li class="px-5 py-3 flex items-start gap-3"><span class="${cls} mt-0.5">${icon(ic, 15)}</span><span class="flex-1 t1">${esc(a.text)}</span>
+        ${a.account ? `<a class="link text-xs" href="#/ads/${esc(a.account)}">Abrir</a>` : ''}</li>`; }).join('')}</ul></div>` : '');
+
+// =========================================================================
+// Bloque "Hoy, en vivo"
+// =========================================================================
+const liveTodayBlock = (id) => `<div id="${id}" class="card mb-6"><div class="sk h-[104px]" style="border-radius:var(--radius)"></div></div>`;
+
+async function mountLiveToday(id, clientId) {
+  const box = $('#' + id);
+  if (!box) return;
+  try {
+    const params = { preset: 'today', client: clientId };
+    const d = await api('overview', params);
+    if (!d.totals.length) { box.remove(); return; }
+    const t = d.totals[0];
+    const m = t.metrics, cur = t.currency;
+    const items = [
+      ['Inversión hoy', fmt.money(m.spend, cur)],
+      ['Resultados hoy', fmt.int(m.results)],
+      ['Costo por resultado', fmt.money(m.cost_per_result, cur)],
+      m.purchase_value > 0 ? ['Facturación hoy', fmt.money(m.purchase_value, cur)] : ['Conversaciones hoy', fmt.int(m.messages)],
+      ['Personas alcanzadas', fmt.compact(m.reach)],
+    ];
+    const active = d.accounts.reduce((s, a) => s + a.active_campaigns, 0);
+    const prev = box.dataset.spend;
+    box.innerHTML = `
+      <div class="card-h" style="min-height:48px"><span class="live-dot on"></span><div class="h2">Hoy, en vivo</div>
+        <span class="t3 text-xs">${active} campañas activas · ${cur}${d.totals.length > 1 ? ' · otras monedas en el detalle' : ''}</span></div>
+      <div class="ticker">${items.map(([l, v]) => `<div><div class="t2 text-[12.5px] font-medium">${l}</div><div class="hero-num t1 mt-2" style="font-size:30px">${v}</div></div>`).join('')}</div>`;
+    if (prev !== undefined && prev !== String(m.spend)) box.classList.add('flash');
+    box.dataset.spend = String(m.spend);
+  } catch {
+    box.remove();
+  }
+}
+
+// =========================================================================
+// Admin · Resumen general
+// =========================================================================
 async function viewOverview() {
   crumbs([{ label: 'Resumen general' }]);
   if (!state.boot.connections) {
-    return { html: empty('Conectá tu cuenta de Meta', 'Para ver campañas, páginas e Instagram primero conectá un usuario de Facebook o un token de System User con acceso a tus portfolios comerciales.', '<a class="btn btn-primary" href="#/settings">Ir a Configuración</a>') };
+    return { html: empty('Conectá tu cuenta de Meta', 'Para ver campañas, páginas e Instagram primero conectá un usuario de Facebook o un token de System User con acceso a tus portfolios comerciales.', '<a class="btn btn-primary" href="#/settings">Ir a Configuración</a>', 'link') };
   }
   const d = await api('overview', rp());
   if (!d.accounts.length) {
@@ -419,95 +592,81 @@ async function viewOverview() {
   let cur = store.get('ovCurrency', currencies[0]);
   if (!currencies.includes(cur)) cur = currencies[0];
   const total = d.totals.find((t) => t.currency === cur);
+  const series = d.daily[cur] || {};
+  const daily = Object.entries(series).map(([date, v]) => ({ date, ...v, cost_per_result: v.results ? v.spend / v.results : null }));
 
   const cols = [
     { key: 'name', label: 'Cuenta', left: true, value: (r) => r.name,
-      html: (r) => `<div class="font-medium text-slate-100">${esc(r.name)}</div><div class="text-[11px] text-slate-500">${esc(r.business || 'Sin portfolio')} · ${esc(r.currency)}</div>` },
+      html: (r) => `<div class="font-medium">${esc(r.name)}</div><div class="sub">${esc(r.business || 'Sin portfolio')} · ${esc(r.currency)}</div>` },
     { key: 'status', label: 'Estado', value: (r) => r.status_label, html: (r) => `<span class="pill ${[1, 201].includes(r.status) ? 'green' : 'red'}">${esc(r.status_label)}</span>` },
-    { key: 'active_campaigns', label: 'Campañas activas', value: (r) => r.active_campaigns, html: (r) => fmt.int(r.active_campaigns) },
-    { key: 'spend', label: 'Inversión', value: (r) => r.metrics.spend, html: (r) => `${fmt.money(r.metrics.spend, r.currency)} ${delta(r.metrics.spend, r.previous.spend)}` },
-    { key: 'results', label: 'Resultados', value: (r) => r.metrics.results, html: (r) => `${fmt.int(r.metrics.results)} <span class="text-[10px] text-slate-500">${esc(r.metrics.result_label)}</span>` },
-    { key: 'cpr', label: 'Costo/resultado', value: (r) => r.metrics.cost_per_result, html: (r) => `${fmt.money(r.metrics.cost_per_result, r.currency)} ${delta(r.metrics.cost_per_result, r.previous.cost_per_result, true)}` },
-    { key: 'purchases', label: 'Compras', value: (r) => r.metrics.purchases, html: (r) => fmt.int(r.metrics.purchases) },
+    { key: 'active_campaigns', label: 'Activas', value: (r) => r.active_campaigns },
+    { key: 'spend', label: 'Inversión', value: (r) => r.metrics.spend, html: (r) => `${fmt.money(r.metrics.spend, r.currency)}<div>${delta(r.metrics.spend, r.previous.spend)}</div>` },
+    { key: 'results', label: 'Resultados', value: (r) => r.metrics.results, html: (r) => `${fmt.int(r.metrics.results)} <span class="sub">${esc(r.metrics.result_label)}</span>` },
+    { key: 'cpr', label: 'Costo/resultado', value: (r) => r.metrics.cost_per_result, html: (r) => `${fmt.money(r.metrics.cost_per_result, r.currency)}<div>${delta(r.metrics.cost_per_result, r.previous.cost_per_result, true)}</div>` },
+    { key: 'purchases', label: 'Compras', value: (r) => r.metrics.purchases },
     { key: 'roas', label: 'ROAS', value: (r) => r.metrics.roas, html: (r) => fmt.x(r.metrics.roas) },
-    { key: 'messages', label: 'Conversaciones', value: (r) => r.metrics.messages, html: (r) => fmt.int(r.metrics.messages) },
+    { key: 'messages', label: 'Conversaciones', value: (r) => r.metrics.messages },
     { key: 'ctr', label: 'CTR enlace', value: (r) => r.metrics.link_ctr, html: (r) => fmt.pct(r.metrics.link_ctr) },
     { key: 'cpm', label: 'CPM', value: (r) => r.metrics.cpm, html: (r) => fmt.money(r.metrics.cpm, r.currency) },
   ];
 
   const html = `
-    <div class="flex flex-wrap items-end gap-3 mb-5">
-      <div><h1 class="text-xl font-semibold text-white">Resumen general</h1>
-        <p class="text-sm text-slate-400">${d.accounts.length} cuentas publicitarias · ${esc(d.range.since)} → ${esc(d.range.until)} · comparado con los ${d.range.days} días anteriores</p></div>
-      <div class="flex-1"></div>
-      ${currencies.length > 1 ? `<div class="tabs" id="cur-tabs">${currencies.map((c) => `<button class="tab ${c === cur ? 'active' : ''}" data-cur="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : ''}
-    </div>
-    ${adsKpis(total.metrics, total.previous, cur)}
+    ${pageHead('Resumen general', `${d.accounts.length} cuentas publicitarias · ${fmt.dateLong(d.range.since)} → ${fmt.dateLong(d.range.until)} · vs. ${d.range.days} días anteriores`,
+      currencies.length > 1 ? `<div class="seg" id="cur-seg">${currencies.map((c) => `<button class="${c === cur ? 'on' : ''}" data-cur="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : '')}
+    ${state.range.preset !== 'today' ? liveTodayBlock('live-today') : ''}
+    ${adsKpis(total.metrics, total.previous, cur, daily)}
     <div class="grid xl:grid-cols-3 gap-6 mb-6">
-      <div class="card xl:col-span-2"><div class="card-h"><h2>Inversión y resultados por día (${esc(cur)})</h2></div><div class="p-4 h-72"><canvas id="ov-chart"></canvas></div></div>
-      <div class="card"><div class="card-h"><h2>Distribución de inversión</h2></div><div class="p-4 h-72"><canvas id="ov-pie"></canvas></div></div>
+      <div class="card xl:col-span-2"><div class="card-h"><div class="h2">Inversión, resultados y facturación</div><span class="t3 text-xs">${esc(cur)}</span></div><div class="p-4 h-[300px]"><canvas id="ov-chart"></canvas></div></div>
+      <div class="card"><div class="card-h"><div class="h2">Distribución de inversión</div></div><div class="p-4 h-[300px]"><canvas id="ov-pie"></canvas></div></div>
     </div>
     ${alertsBlock(d.alerts)}
     ${tableHtml('ov', cols, d.accounts, { title: 'Cuentas publicitarias', sort: 'spend', csvName: 'cuentas', onClick: (r) => (location.hash = `#/ads/${r.id}`),
-      filters: [{ label: 'Todas' }, { label: 'Con inversión', fn: (r) => r.metrics.spend > 0 }, { label: 'Con problemas', fn: (r) => ![1, 201].includes(r.status) || r.error }] })}
-    <div class="grid sm:grid-cols-2 gap-3 mt-6">
-      <a href="#/pages" class="card p-5 hover:border-blue-500/50 transition"><div class="text-sm text-slate-400">Páginas de Facebook</div><div class="text-2xl font-bold text-white mt-1">${state.boot.counts.page}</div></a>
-      <a href="#/ig" class="card p-5 hover:border-fuchsia-500/50 transition"><div class="text-sm text-slate-400">Cuentas de Instagram</div><div class="text-2xl font-bold text-white mt-1">${state.boot.counts.ig_account}</div></a>
-    </div>`;
+      filters: [{ label: 'Todas' }, { label: 'Con inversión', fn: (r) => r.metrics.spend > 0 }, { label: 'Con problemas', fn: (r) => ![1, 201].includes(r.status) || r.error }] })}`;
 
   return {
     html,
     mount() {
       mountTable('ov');
-      const series = d.daily[cur] || {};
-      const days = Object.keys(series);
-      chart($('#ov-chart'), days.map(fmt.date), [
-        { label: 'Inversión', data: days.map((k) => series[k].spend), type: 'bar', fmt: (v) => fmt.money(v, cur) },
-        { label: 'Resultados', data: days.map((k) => series[k].results), axis: 'y1', color: '#d946ef' },
-        { label: 'Facturación', data: days.map((k) => series[k].purchase_value), fmt: (v) => fmt.money(v, cur), color: '#22c55e' },
+      mountLiveToday('live-today');
+      const days = daily.map((x) => fmt.date(x.date));
+      chart($('#ov-chart'), days, [
+        { label: 'Inversión', data: daily.map((x) => x.spend), type: 'bar', fmt: (v) => fmt.money(v, cur), color: cssVar('--t3') },
+        { label: 'Facturación', data: daily.map((x) => x.purchase_value), fmt: (v) => fmt.money(v, cur), color: cssVar('--c2') },
+        { label: 'Resultados', data: daily.map((x) => x.results), axis: 'y1', color: cssVar('--accent') },
       ]);
-      const top = d.accounts.filter((a) => a.currency === cur && a.metrics.spend > 0).slice(0, 7);
-      const rest = d.accounts.filter((a) => a.currency === cur && a.metrics.spend > 0).slice(7).reduce((s, a) => s + a.metrics.spend, 0);
-      const labels = [...top.map((a) => a.name), ...(rest ? ['Otras'] : [])];
-      const values = [...top.map((a) => a.metrics.spend), ...(rest ? [rest] : [])];
-      if (values.length) {
-        state.charts.push(new Chart($('#ov-pie'), {
-          type: 'doughnut',
-          data: { labels, datasets: [{ data: values, backgroundColor: PALETTE, borderColor: '#0f172a', borderWidth: 2 }] },
-          options: { maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } },
-            tooltip: { callbacks: { label: (c) => `${c.label}: ${fmt.money(c.parsed, cur)}` } } } },
-        }));
-      }
-      $$('#cur-tabs [data-cur]').forEach((b) => b.addEventListener('click', () => { store.set('ovCurrency', b.dataset.cur); render({ silent: true }); }));
+      const withSpend = d.accounts.filter((a) => a.currency === cur && a.metrics.spend > 0);
+      const top = withSpend.slice(0, 6);
+      const rest = withSpend.slice(6).reduce((s, a) => s + a.metrics.spend, 0);
+      doughnut($('#ov-pie'), [...top.map((a) => a.name), ...(rest ? ['Otras'] : [])], [...top.map((a) => a.metrics.spend), ...(rest ? [rest] : [])], (v) => fmt.money(v, cur));
+      $$('#cur-seg [data-cur]').forEach((b) => b.addEventListener('click', () => { store.set('ovCurrency', b.dataset.cur); render({ silent: true }); }));
     },
   };
 }
 
-// ---------- Vista: listado de cuentas publicitarias ----------
+// =========================================================================
+// Cuentas publicitarias
+// =========================================================================
 async function viewAdAccounts() {
-  crumbs([{ label: 'Campañas y anuncios' }]);
-  const a = await api('assets');
-  if (!a.ad_accounts.length) return { html: empty('Sin cuentas publicitarias', 'Conectá Meta o sincronizá desde Configuración.', '<a class="btn btn-primary" href="#/settings">Configuración</a>') };
+  crumbs([{ label: 'Campañas' }]);
+  const a = await api('assets', { client: portalClient() });
+  if (!a.ad_accounts.length) return { html: empty('Sin cuentas publicitarias', isClient() ? 'Todavía no hay cuentas publicitarias asignadas.' : 'Conectá Meta o sincronizá desde Configuración.', isClient() ? '' : '<a class="btn btn-primary" href="#/settings">Configuración</a>', 'target') };
+  if (isClient() && a.ad_accounts.length === 1) { location.replace('#/ads/' + a.ad_accounts[0].external_id); return { html: '' }; }
   const groups = {};
-  a.ad_accounts.forEach((acc) => {
-    const b = acc.data.business?.name || 'Sin portfolio comercial';
-    (groups[b] ||= []).push(acc);
-  });
-  const statusOk = (s) => [1, 201].includes(+s);
+  a.ad_accounts.forEach((acc) => { (groups[acc.data.business?.name || 'Sin portfolio comercial'] ||= []).push(acc); });
+  const ok = (s) => [1, 201].includes(+s);
   const html = `
-    <div class="flex flex-wrap items-center gap-3 mb-5">
-      <h1 class="text-xl font-semibold text-white">Cuentas publicitarias</h1><span class="text-sm text-slate-500">${a.ad_accounts.length} cuentas en ${Object.keys(groups).length} portfolios</span>
-      <div class="flex-1"></div><input class="ctl w-64" placeholder="Buscar cuenta…" id="acc-search">
-    </div>
+    ${pageHead('Cuentas publicitarias', `${a.ad_accounts.length} cuentas${isClient() ? '' : ` en ${Object.keys(groups).length} portfolios`}`, `<input class="input w-64" placeholder="Buscar cuenta" id="acc-search">`)}
     ${Object.entries(groups).sort(([x], [y]) => x.localeCompare(y)).map(([biz, list]) => `
-      <section class="mb-7" data-group>
-        <h2 class="text-xs uppercase tracking-wider text-slate-500 mb-2">🏢 ${esc(biz)}</h2>
+      <section class="mb-8" data-group>
+        <div class="eyebrow mb-3 flex items-center gap-2">${icon('briefcase', 13)}${esc(biz)}<span class="opacity-60">· ${list.length}</span></div>
         <div class="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">${list.map((acc) => `
-          <a href="#/ads/${esc(acc.external_id)}" data-name="${esc(acc.name.toLowerCase())} ${esc(acc.external_id)}" class="card p-4 hover:border-blue-500/50 transition block">
-            <div class="flex items-start gap-2"><div class="font-medium text-slate-100 flex-1 line-clamp-2">${esc(acc.name)}</div>
-              <span class="pill ${statusOk(acc.data.account_status) ? 'green' : 'red'}">${statusOk(acc.data.account_status) ? 'Activa' : 'Revisar'}</span></div>
-            <div class="text-xs text-slate-500 mt-2">${esc(acc.external_id)} · ${esc(acc.data.currency || '')} · ${esc(acc.data.timezone_name || '')}</div>
-            <div class="text-xs text-slate-400 mt-1">Gasto histórico: ${fmt.money((acc.data.amount_spent || 0) / 100, acc.data.currency)}</div>
+          <a href="#/ads/${esc(acc.external_id)}" data-name="${esc(acc.name.toLowerCase())} ${esc(acc.external_id)}" class="card card-link p-4 block">
+            <div class="flex items-start gap-3">
+              <div class="mono-avatar w-9 h-9 text-xs" style="background:var(--sunk);color:var(--t2)">${esc(initials(acc.name))}</div>
+              <div class="min-w-0 flex-1"><div class="font-medium t1 truncate">${esc(acc.name)}</div><div class="t3 text-xs mt-0.5 mono">${esc(acc.external_id)}</div></div>
+              <span class="pill ${ok(acc.data.account_status) ? 'green' : 'red'}">${ok(acc.data.account_status) ? 'Activa' : 'Revisar'}</span>
+            </div>
+            <div class="flex text-xs t2 mt-4 pt-3 hair-t"><span>${esc(acc.data.currency || '')}</span><span class="flex-1"></span><span>Histórico ${fmt.moneyShort((acc.data.amount_spent || 0) / 100, acc.data.currency)}</span></div>
           </a>`).join('')}</div>
       </section>`).join('')}`;
   return {
@@ -522,58 +681,62 @@ async function viewAdAccounts() {
   };
 }
 
-// ---------- desgloses ----------
-const BREAKDOWNS = { age_gender: 'Edad y género', age: 'Edad', gender: 'Género', platform: 'Plataforma', placement: 'Ubicación', device: 'Dispositivo', region: 'Provincia/región', country: 'País', hour: 'Hora del día' };
+// =========================================================================
+// Desgloses
+// =========================================================================
+const BREAKDOWNS = { age_gender: 'Edad y género', age: 'Edad', gender: 'Género', platform: 'Plataforma', placement: 'Ubicación', device: 'Dispositivo', region: 'Provincia', country: 'País', hour: 'Hora del día' };
 
-function breakdownBlock(id) {
-  return `
-    <div class="card mb-6" id="${id}">
-      <div class="card-h"><h2>Desgloses</h2><div class="tabs">${Object.entries(BREAKDOWNS).map(([k, l], i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-bd="${k}">${l}</button>`).join('')}</div></div>
-      <div class="grid lg:grid-cols-5 gap-0">
-        <div class="lg:col-span-2 p-4 h-80 border-b lg:border-b-0 lg:border-r border-slate-800"><canvas></canvas></div>
-        <div class="lg:col-span-3 scroll-x max-h-80" data-bd-table><div class="p-6 text-sm text-slate-500">Cargando…</div></div>
-      </div>
-    </div>`;
-}
+const breakdownBlock = (id) => `
+  <div class="card mb-6" id="${id}">
+    <div class="card-h"><div class="h2">¿Quién y dónde responde mejor?</div><div class="flex-1"></div>
+      <select class="select select-sm" data-bd-sel>${Object.entries(BREAKDOWNS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+    <div class="grid lg:grid-cols-5">
+      <div class="lg:col-span-2 p-4 h-[340px] hair-b lg:border-b-0 lg:hair-r"><canvas></canvas></div>
+      <div class="lg:col-span-3 scroll-x max-h-[340px]" data-bd-table><div class="p-6 t3">Cargando…</div></div>
+    </div>
+  </div>`;
 
 function mountBreakdown(id, objectId, accountId, currency, objective) {
   const root = $('#' + id);
   if (!root) return;
   let c;
+  const sel = $('[data-bd-sel]', root);
   const load = async (type) => {
-    $$('[data-bd]', root).forEach((b) => b.classList.toggle('active', b.dataset.bd === type));
-    $('[data-bd-table]', root).innerHTML = '<div class="p-6 text-sm text-slate-500">Cargando…</div>';
+    $('[data-bd-table]', root).innerHTML = '<div class="p-6 t3">Cargando…</div>';
     try {
-      const rows = await api('breakdown', rp({ id: objectId, account: accountId, type, objective: objective || '' }));
-      if (type === 'hour') rows.sort((a, b) => a.label.localeCompare(b.label));
-      if (type === 'age' || type === 'age_gender') rows.sort((a, b) => a.label.localeCompare(b.label));
-      if (c) { c.destroy(); state.charts = state.charts.filter((x) => x !== c); }
-      const top = type === 'hour' || type.startsWith('age') ? rows : rows.slice(0, 12);
-      c = chart($('canvas', root), top.map((r) => r.label), [
-        { label: 'Inversión', data: top.map((r) => r.spend), type: 'bar', fmt: (v) => fmt.money(v, currency) },
-        { label: 'Resultados', data: top.map((r) => r.results), type: 'bar', axis: type === 'hour' ? 'y1' : undefined, color: '#d946ef' },
-      ], { horizontal: type !== 'hour' });
+      const rows = await api('breakdown', rp({ id: objectId, account: accountId, type, objective }));
+      if (['hour', 'age', 'age_gender'].includes(type)) rows.sort((a, b) => a.label.localeCompare(b.label));
+      dropChart(c);
+      const top = ['hour', 'age', 'age_gender'].includes(type) ? rows : rows.slice(0, 12);
+      c = chart($('canvas', root), top.map((r) => r.label), type === 'hour'
+        ? [{ label: 'Inversión', data: top.map((r) => r.spend), type: 'bar', fmt: (v) => fmt.money(v, currency), color: cssVar('--t3') }, { label: 'Resultados', data: top.map((r) => r.results), axis: 'y1', color: cssVar('--accent') }]
+        : [{ label: 'Inversión', data: top.map((r) => r.spend), type: 'bar', fmt: (v) => fmt.money(v, currency), color: cssVar('--accent') }],
+      { horizontal: type !== 'hour' });
       const money = (v) => fmt.money(v, currency);
-      $('[data-bd-table]', root).innerHTML = `<table class="tbl"><thead><tr><th>Segmento</th><th>Inversión</th><th>Resultados</th><th>Costo/res.</th><th>Impresiones</th><th>CTR enlace</th><th>CPM</th><th>ROAS</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td>${esc(r.label)}</td><td>${money(r.spend)}</td><td>${fmt.int(r.results)}</td><td>${money(r.cost_per_result)}</td><td>${fmt.int(r.impressions)}</td><td>${fmt.pct(r.link_ctr)}</td><td>${money(r.cpm)}</td><td>${fmt.x(r.roas)}</td></tr>`).join('') || '<tr><td colspan="8" style="text-align:center" class="py-6 text-slate-500">Sin datos</td></tr>'}
+      const best = rows.filter((r) => r.results > 0).sort((a, b) => a.cost_per_result - b.cost_per_result)[0];
+      $('[data-bd-table]', root).innerHTML = `<table class="tbl"><thead><tr><th>Segmento</th><th>Inversión</th><th>Resultados</th><th>Costo/res.</th><th>CTR enlace</th><th>CPM</th><th>ROAS</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr><td>${esc(r.label)}${best && r === best ? ' <span class="pill accent plain">Mejor costo</span>' : ''}</td><td>${money(r.spend)}</td><td>${fmt.int(r.results)}</td><td>${money(r.cost_per_result)}</td><td>${fmt.pct(r.link_ctr)}</td><td>${money(r.cpm)}</td><td>${fmt.x(r.roas)}</td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center" class="t3 !py-8">Sin datos</td></tr>'}
       </tbody></table>`;
     } catch (e) {
-      $('[data-bd-table]', root).innerHTML = `<div class="p-6 text-sm text-red-300">${esc(e.message)}</div>`;
+      $('[data-bd-table]', root).innerHTML = `<div class="p-6 t-bad">${esc(e.message)}</div>`;
     }
   };
-  root.addEventListener('click', (e) => { const b = e.target.closest('[data-bd]'); if (b) load(b.dataset.bd); });
+  sel.addEventListener('change', () => load(sel.value));
   load('age_gender');
 }
 
-// ---------- Vista: cuenta publicitaria ----------
-const entityName = (r, sub = '') => `<div class="font-medium text-slate-100 max-w-[340px] truncate" title="${esc(r.name)}">${esc(r.name)}</div><div class="text-[11px] text-slate-500 flex gap-2 items-center">${statusPill(r.effective_status)} ${sub}</div>`;
-const budgetText = (r, cur) => (r.budget ? `${fmt.money(r.budget, cur)} <span class="text-[10px] text-slate-500">${esc(r.budget_type)}</span>` : '<span class="text-slate-600">—</span>');
+// =========================================================================
+// Cuenta / campaña / conjunto
+// =========================================================================
+const entityName = (r, sub = '') => `<div class="font-medium max-w-[360px] truncate" title="${esc(r.name)}">${esc(r.name)}</div><div class="flex gap-2 items-center mt-1">${statusPill(r.effective_status)}<span class="sub truncate max-w-[260px]">${sub}</span></div>`;
+const budgetText = (r, cur) => (r.budget ? `${fmt.money(r.budget, cur)} <span class="sub">${esc(r.budget_type)}</span>` : '<span class="t3">—</span>');
 const liveFilters = [
   { label: 'Todas' },
   { label: 'Activas', fn: (r) => r.effective_status === 'ACTIVE' },
   { label: 'Con inversión', fn: (r) => r.metrics.spend > 0 },
   { label: 'Con problemas', fn: (r) => ['WITH_ISSUES', 'DISAPPROVED', 'PENDING_BILLING_INFO'].includes(r.effective_status) },
 ];
+const backLink = (href, label) => `<a href="${href}" class="inline-flex items-center gap-1 t3 hover:underline text-[13px] mb-3"><span style="transform:rotate(90deg);display:inline-flex">${icon('down', 14)}</span>${esc(label)}</a>`;
 
 async function viewAccount(accountId) {
   const d = await api('account', rp({ id: accountId }));
@@ -583,52 +746,48 @@ async function viewAccount(accountId) {
   const cols = [
     { key: 'name', label: 'Campaña', left: true, value: (r) => r.name, html: (r) => entityName(r, esc(OBJECTIVES[r.objective] || r.objective || '')) },
     { key: 'budget', label: 'Presupuesto', value: (r) => r.budget, html: (r) => budgetText(r, cur) },
-    ...metricCols(cur),
+    ...metricCols(cur, undefined, { compact: isClient() }),
   ];
   const capPct = a.spend_cap ? Math.min(100, (a.amount_spent / a.spend_cap) * 100) : null;
   const html = `
-    <div class="flex flex-wrap items-start gap-4 mb-5">
-      <div class="min-w-0">
-        <h1 class="text-xl font-semibold text-white">${esc(a.name)}</h1>
-        <div class="text-sm text-slate-400 mt-1 flex flex-wrap gap-x-4 gap-y-1">
-          <span class="pill ${[1, 201].includes(a.status) ? 'green' : 'red'}">${esc(a.status_label)}</span>
-          <span>${esc(a.id)}</span><span>${esc(a.business || 'Sin portfolio')}</span><span>${esc(cur)} · ${esc(a.timezone || '')}</span>
-          ${a.payment ? `<span>💳 ${esc(a.payment)}</span>` : ''}
-        </div>
-      </div>
-      <div class="flex-1"></div>
-      <a class="btn" target="_blank" rel="noopener" href="https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${esc(a.id.replace('act_', ''))}">Abrir en Ads Manager ↗</a>
-    </div>
-    ${capPct !== null ? `<div class="card p-4 mb-6"><div class="flex text-xs text-slate-400 mb-2"><span>Límite de gasto de la cuenta</span><span class="flex-1"></span><span>${fmt.money(a.amount_spent, cur)} / ${fmt.money(a.spend_cap, cur)}</span></div><div class="h-2 bg-slate-800 rounded-full overflow-hidden"><div class="h-full ${capPct > 90 ? 'bg-red-500' : 'bg-blue-500'}" style="width:${capPct}%"></div></div></div>` : ''}
-    ${adsKpis(d.metrics, d.previous, cur)}
+    ${isClient() ? backLink('#/', 'Inicio') : ''}
+    ${pageHead(esc(a.name), `<span class="inline-flex flex-wrap items-center gap-x-3 gap-y-1"><span class="pill ${[1, 201].includes(a.status) ? 'green' : 'red'}">${esc(a.status_label)}</span><span class="mono t3">${esc(a.id)}</span>${a.business ? `<span>${esc(a.business)}</span>` : ''}<span>${esc(cur)}</span>${a.payment ? `<span>${esc(a.payment)}</span>` : ''}</span>`,
+      isClient() ? '' : `<a class="btn" target="_blank" rel="noopener" href="https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${esc(a.id.replace('act_', ''))}">${icon('external', 14)}Ads Manager</a>`)}
+    ${capPct !== null && !isClient() ? `<div class="card p-4 mb-6"><div class="flex text-xs t2 mb-2"><span>Límite de gasto de la cuenta</span><span class="flex-1"></span><span class="num">${fmt.money(a.amount_spent, cur)} de ${fmt.money(a.spend_cap, cur)}</span></div><div class="bar"><i style="width:${capPct}%;${capPct > 90 ? 'background:var(--bad)' : ''}"></i></div></div>` : ''}
+    ${adsKpis(d.metrics, d.previous, cur, d.daily, { client: isClient() })}
     ${adsChartBlock('acc-chart')}
-    ${alertsBlock(d.alerts)}
-    ${tableHtml('camps', cols, d.campaigns, { title: `Campañas (${d.campaigns.length})`, sort: 'spend', csvName: 'campanas', filters: liveFilters,
+    ${isClient() ? '' : alertsBlock(d.alerts)}
+    ${tableHtml('camps', cols, d.campaigns, { title: `Campañas <span class="t3 font-normal">${d.campaigns.length}</span>`, sort: 'spend', csvName: 'campanas', filters: liveFilters,
       onClick: (r) => (location.hash = `#/ads/${accountId}/c/${r.id}`) })}
     <div class="mt-6">${breakdownBlock('acc-bd')}</div>`;
   return { html, mount() { mountTable('camps'); mountAdsChart('acc-chart', d.daily, cur); mountBreakdown('acc-bd', accountId, accountId, cur); } };
 }
 
-// ---------- Vista: campaña ----------
+function entityHeader(e, cur, sub) {
+  return pageHead(esc(e.name), `<span class="inline-flex flex-wrap items-center gap-x-3 gap-y-1">${statusPill(e.effective_status)}${sub ? `<span>${esc(sub)}</span>` : ''}
+    ${e.budget ? `<span>Presupuesto ${budgetText(e, cur)}</span>` : ''}${e.start_time ? `<span>Desde ${fmt.date(e.start_time)}</span>` : ''}${e.stop_time ? `<span>Hasta ${fmt.date(e.stop_time)}</span>` : ''}</span>`);
+}
+
 async function viewCampaign(accountId, campaignId) {
   const [acc, adsets] = await Promise.all([api('account', rp({ id: accountId })), api('adsets', rp({ id: campaignId, account: accountId }))]);
   const camp = acc.campaigns.find((c) => c.id === campaignId);
   if (!camp) return { html: empty('Campaña no encontrada', 'Puede estar archivada o eliminada.') };
   const cur = acc.account.currency;
-  const daily = await api('timeseries', rp({ id: campaignId, account: accountId, objective: camp.objective || '' }));
+  const daily = await api('timeseries', rp({ id: campaignId, account: accountId, objective: camp.objective }));
   crumbs([{ label: 'Campañas', href: '#/ads' }, { label: acc.account.name, href: `#/ads/${accountId}` }, { label: camp.name }]);
   const cols = [
-    { key: 'name', label: 'Conjunto de anuncios', left: true, value: (r) => r.name, html: (r) => entityName(r, `<span class="truncate max-w-[220px]" title="${esc(r.targeting)}">${esc(r.targeting)}</span>`) },
+    { key: 'name', label: 'Conjunto de anuncios', left: true, value: (r) => r.name, html: (r) => entityName(r, esc(r.targeting)) },
     { key: 'budget', label: 'Presupuesto', value: (r) => r.budget, html: (r) => budgetText(r, cur) },
-    ...metricCols(cur),
+    ...metricCols(cur, undefined, { compact: isClient() }),
   ];
   const html = `
+    ${isClient() ? backLink(`#/ads/${accountId}`, acc.account.name) : ''}
     ${entityHeader(camp, cur, `Objetivo: ${OBJECTIVES[camp.objective] || camp.objective || '—'}`)}
-    ${adsKpis(camp.metrics, null, cur)}
+    ${adsKpis(camp.metrics, null, cur, daily, { client: isClient() })}
     ${adsChartBlock('camp-chart')}
-    ${tableHtml('adsets', cols, adsets, { title: `Conjuntos de anuncios (${adsets.length})`, sort: 'spend', csvName: 'conjuntos', filters: liveFilters,
+    <div id="camp-ads" class="mb-6"></div>
+    ${tableHtml('adsets', cols, adsets, { title: `Conjuntos de anuncios <span class="t3 font-normal">${adsets.length}</span>`, sort: 'spend', csvName: 'conjuntos', filters: liveFilters,
       onClick: (r) => (location.hash = `#/ads/${accountId}/c/${campaignId}/s/${r.id}`) })}
-    <div class="mt-6" id="camp-ads"></div>
     <div class="mt-6">${breakdownBlock('camp-bd')}</div>`;
   return {
     html,
@@ -641,21 +800,21 @@ async function viewCampaign(accountId, campaignId) {
   };
 }
 
-// ---------- Vista: conjunto de anuncios ----------
 async function viewAdset(accountId, campaignId, adsetId) {
   const [acc, adsets] = await Promise.all([api('account', rp({ id: accountId })), api('adsets', rp({ id: campaignId, account: accountId }))]);
   const set = adsets.find((s) => s.id === adsetId);
   const camp = acc.campaigns.find((c) => c.id === campaignId);
   if (!set) return { html: empty('Conjunto no encontrado') };
   const cur = acc.account.currency;
-  const daily = await api('timeseries', rp({ id: adsetId, account: accountId, objective: set.objective || '' }));
+  const daily = await api('timeseries', rp({ id: adsetId, account: accountId, objective: set.objective }));
   crumbs([{ label: 'Campañas', href: '#/ads' }, { label: acc.account.name, href: `#/ads/${accountId}` }, { label: camp ? camp.name : 'Campaña', href: `#/ads/${accountId}/c/${campaignId}` }, { label: set.name }]);
   const html = `
+    ${isClient() ? backLink(`#/ads/${accountId}/c/${campaignId}`, camp ? camp.name : 'Campaña') : ''}
     ${entityHeader(set, cur, set.targeting)}
-    ${adsKpis(set.metrics, null, cur)}
+    ${adsKpis(set.metrics, null, cur, daily, { client: isClient() })}
     ${adsChartBlock('set-chart')}
-    <div id="set-ads"></div>
-    <div class="mt-6">${breakdownBlock('set-bd')}</div>`;
+    <div id="set-ads" class="mb-6"></div>
+    ${breakdownBlock('set-bd')}`;
   return {
     html,
     mount() {
@@ -666,67 +825,59 @@ async function viewAdset(accountId, campaignId, adsetId) {
   };
 }
 
-function entityHeader(e, cur, sub) {
-  return `
-    <div class="flex flex-wrap items-start gap-4 mb-5">
-      <div class="min-w-0"><h1 class="text-xl font-semibold text-white">${esc(e.name)}</h1>
-        <div class="text-sm text-slate-400 mt-1 flex flex-wrap gap-x-4 gap-y-1 items-center">${statusPill(e.effective_status)}
-          <span>${esc(sub || '')}</span>
-          ${e.budget ? `<span>Presupuesto ${budgetText(e, cur)}</span>` : ''}
-          ${e.start_time ? `<span>Inicio ${fmt.date(e.start_time)}</span>` : ''}${e.stop_time ? `<span>Fin ${fmt.date(e.stop_time)}</span>` : ''}
-          <span class="text-slate-600">ID ${esc(e.id)}</span>
-        </div></div>
-    </div>`;
-}
-
-// ---------- anuncios (creativos) ----------
+// =========================================================================
+// Anuncios (creativos)
+// =========================================================================
 async function loadAds(containerId, parentId, accountId, cur) {
   const box = $('#' + containerId);
-  box.innerHTML = '<div class="skeleton h-64"></div>';
+  box.innerHTML = '<div class="sk h-72"></div>';
   let ads;
   try { ads = await api('ads', rp({ id: parentId, account: accountId })); } catch (e) { box.innerHTML = errorBox(e.message, false); return; }
-  const sortKeys = { spend: 'Inversión', results: 'Resultados', cost_per_result: 'Costo/resultado', link_ctr: 'CTR', roas: 'ROAS' };
+  const sortKeys = { spend: 'Inversión', results: 'Resultados', cost_per_result: 'Menor costo/resultado', link_ctr: 'CTR', roas: 'ROAS' };
   let sortBy = store.get('adsSort', 'spend');
   let viewMode = store.get('adsView', 'cards');
   const money = (v) => fmt.money(v, cur);
   const cols = [
-    { key: 'name', label: 'Anuncio', left: true, value: (r) => r.name, html: (r) => `<div class="flex items-center gap-3">${r.creative.thumbnail ? `<img src="${esc(r.creative.thumbnail)}" class="w-10 h-10 rounded object-cover" loading="lazy" alt="">` : ''}${entityName(r)}</div>` },
-    ...metricCols(cur),
+    { key: 'name', label: 'Anuncio', left: true, value: (r) => r.name, html: (r) => `<div class="flex items-center gap-3">${r.creative.thumbnail ? `<img src="${esc(r.creative.thumbnail)}" class="w-10 h-10 rounded-lg object-cover" loading="lazy" alt="">` : '<div class="w-10 h-10 rounded-lg sunk"></div>'}<div>${entityName(r)}</div></div>` },
+    ...metricCols(cur, undefined, { compact: isClient() }),
   ];
   const draw = () => {
     const sorted = [...ads].sort((a, b) => {
-      const va = a.metrics[sortBy] ?? (sortBy === 'cost_per_result' ? Infinity : -Infinity);
-      const vb = b.metrics[sortBy] ?? (sortBy === 'cost_per_result' ? Infinity : -Infinity);
-      return sortBy === 'cost_per_result' ? va - vb : vb - va;
+      const inv = sortBy === 'cost_per_result';
+      const va = a.metrics[sortBy] ?? (inv ? Infinity : -Infinity);
+      const vb = b.metrics[sortBy] ?? (inv ? Infinity : -Infinity);
+      return inv ? va - vb : vb - va;
     });
+    const maxSpend = Math.max(1, ...ads.map((x) => x.metrics.spend));
     const header = `
       <div class="flex flex-wrap items-center gap-2 mb-3">
-        <h2 class="font-semibold text-slate-100">Anuncios (${ads.length})</h2><div class="flex-1"></div>
-        <span class="text-xs text-slate-500">Ordenar por</span>
-        <select class="ctl" data-sort>${Object.entries(sortKeys).map(([k, l]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <div class="tabs"><button class="tab ${viewMode === 'cards' ? 'active' : ''}" data-mode="cards">Tarjetas</button><button class="tab ${viewMode === 'table' ? 'active' : ''}" data-mode="table">Tabla</button></div>
+        <div class="h2">Anuncios <span class="t3 font-normal">${ads.length}</span></div><div class="flex-1"></div>
+        <select class="select select-sm" data-sort>${Object.entries(sortKeys).map(([k, l]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <div class="seg"><button class="${viewMode === 'cards' ? 'on' : ''}" data-mode="cards">Creativos</button><button class="${viewMode === 'table' ? 'on' : ''}" data-mode="table">Tabla</button></div>
       </div>`;
     if (viewMode === 'table') {
       box.innerHTML = header + tableHtml('ads-' + containerId, cols, sorted, { csvName: 'anuncios', filters: liveFilters, onClick: (r) => adModal(r, cur) });
       mountTable('ads-' + containerId);
     } else {
       box.innerHTML = header + (sorted.length ? `<div class="grid sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">${sorted.map((ad, i) => `
-        <div class="card overflow-hidden flex flex-col cursor-pointer hover:border-blue-500/50 transition" data-ad="${i}">
-          <div class="relative bg-slate-800 aspect-square">${ad.creative.thumbnail ? `<img src="${esc(ad.creative.thumbnail)}" class="w-full h-full object-cover" loading="lazy" alt="">` : '<div class="grid place-items-center h-full text-slate-600">Sin vista previa</div>'}
-            <div class="absolute top-2 left-2">${statusPill(ad.effective_status)}</div>${i < 3 && ad.metrics.spend > 0 ? `<div class="absolute top-2 right-2 pill blue">#${i + 1}</div>` : ''}</div>
-          <div class="p-4 flex-1 flex flex-col">
-            <div class="font-medium text-slate-100 text-sm line-clamp-2">${esc(ad.name)}</div>
-            ${ad.creative.body ? `<div class="text-xs text-slate-500 mt-1 line-clamp-2">${esc(ad.creative.body)}</div>` : ''}
-            <div class="grid grid-cols-3 gap-2 mt-3 text-center">
-              <div><div class="text-[10px] text-slate-500 uppercase">Inversión</div><div class="text-sm font-semibold">${money(ad.metrics.spend)}</div></div>
-              <div><div class="text-[10px] text-slate-500 uppercase">${esc(ad.metrics.result_label)}</div><div class="text-sm font-semibold">${fmt.int(ad.metrics.results)}</div></div>
-              <div><div class="text-[10px] text-slate-500 uppercase">Costo/res.</div><div class="text-sm font-semibold">${money(ad.metrics.cost_per_result)}</div></div>
-              <div><div class="text-[10px] text-slate-500 uppercase">CTR</div><div class="text-sm">${fmt.pct(ad.metrics.link_ctr)}</div></div>
-              <div><div class="text-[10px] text-slate-500 uppercase">CPM</div><div class="text-sm">${money(ad.metrics.cpm)}</div></div>
-              <div><div class="text-[10px] text-slate-500 uppercase">ROAS</div><div class="text-sm">${fmt.x(ad.metrics.roas)}</div></div>
+        <button class="card card-link overflow-hidden flex flex-col text-left" data-ad="${i}">
+          <div class="relative w-full thumb-wrap">${ad.creative.thumbnail ? `<img src="${esc(ad.creative.thumbnail)}" class="thumb" loading="lazy" alt="">` : '<div class="thumb-ph">Sin vista previa</div>'}
+            <div class="absolute top-2.5 left-2.5">${statusPill(ad.effective_status)}</div>
+            ${i < 3 && ad.metrics.spend > 0 ? `<div class="absolute top-2.5 right-2.5 pill plain" style="background:var(--panel);color:var(--t1)">Top ${i + 1}</div>` : ''}</div>
+          <div class="p-4 flex-1 flex flex-col w-full">
+            <div class="font-medium t1 line-clamp-2">${esc(ad.name)}</div>
+            ${ad.creative.body ? `<div class="t3 text-xs mt-1 line-clamp-2">${esc(ad.creative.body)}</div>` : ''}
+            <div class="grid grid-cols-3 gap-3 mt-4 pt-3 hair-t">
+              <div><div class="t3 text-[11px]">Inversión</div><div class="num font-semibold t1">${fmt.moneyShort(ad.metrics.spend, cur)}</div></div>
+              <div><div class="t3 text-[11px] truncate">${esc(ad.metrics.result_label)}</div><div class="num font-semibold t1">${fmt.int(ad.metrics.results)}</div></div>
+              <div><div class="t3 text-[11px]">Costo/res.</div><div class="num font-semibold t1">${fmt.moneyShort(ad.metrics.cost_per_result, cur)}</div></div>
+              <div><div class="t3 text-[11px]">CTR</div><div class="num t2">${fmt.pct(ad.metrics.link_ctr)}</div></div>
+              <div><div class="t3 text-[11px]">CPM</div><div class="num t2">${fmt.moneyShort(ad.metrics.cpm, cur)}</div></div>
+              <div><div class="t3 text-[11px]">ROAS</div><div class="num t2">${fmt.x(ad.metrics.roas)}</div></div>
             </div>
+            <div class="bar mt-3"><i style="width:${(ad.metrics.spend / maxSpend) * 100}%"></i></div>
           </div>
-        </div>`).join('')}</div>` : empty('Sin anuncios en este período'));
+        </button>`).join('')}</div>` : empty('Sin anuncios en este período'));
       $$('[data-ad]', box).forEach((el) => el.addEventListener('click', () => adModal(sorted[+el.dataset.ad], cur)));
     }
     $('[data-sort]', box).addEventListener('change', (e) => { sortBy = e.target.value; store.set('adsSort', sortBy); draw(); });
@@ -742,62 +893,89 @@ function adModal(ad, cur) {
     ['Inversión', money(m.spend)], [m.result_label, fmt.int(m.results)], ['Costo por resultado', money(m.cost_per_result)],
     ['Alcance', fmt.int(m.reach)], ['Impresiones', fmt.int(m.impressions)], ['Frecuencia', fmt.dec(m.frequency)],
     ['Clics en enlace', fmt.int(m.link_clicks)], ['CTR enlace', fmt.pct(m.link_ctr)], ['CPC', money(m.cpc)], ['CPM', money(m.cpm)],
-    ['Visitas a landing', fmt.int(m.landing_page_views)], ['Agregados al carrito', fmt.int(m.add_to_cart)], ['Pagos iniciados', fmt.int(m.initiate_checkout)],
+    ['Visitas a la landing', fmt.int(m.landing_page_views)], ['Agregados al carrito', fmt.int(m.add_to_cart)], ['Pagos iniciados', fmt.int(m.initiate_checkout)],
     ['Compras', fmt.int(m.purchases)], ['Valor de compras', money(m.purchase_value)], ['ROAS', fmt.x(m.roas)],
-    ['Conversaciones', fmt.int(m.messages)], ['Leads', fmt.int(m.leads)], ['Reproducciones (3s)', fmt.int(m.video_views)],
+    ['Conversaciones', fmt.int(m.messages)], ['Leads', fmt.int(m.leads)], ['Reproducciones (3 s)', fmt.int(m.video_views)],
   ];
   const postUrl = ad.creative.post_id ? `https://www.facebook.com/${ad.creative.post_id}` : null;
   modal(`
-    <div class="card-h"><h2 class="flex-1">${esc(ad.name)}</h2>${statusPill(ad.effective_status)}<button class="btn" data-close>✕</button></div>
+    ${modalHead(ad.name, statusPill(ad.effective_status))}
     <div class="grid md:grid-cols-2 gap-6 p-5">
       <div>
-        ${ad.creative.thumbnail ? `<img src="${esc(ad.creative.thumbnail)}" class="w-full rounded-xl bg-slate-800" alt="">` : ''}
-        ${ad.creative.title ? `<div class="mt-3 font-semibold text-slate-100">${esc(ad.creative.title)}</div>` : ''}
-        ${ad.creative.body ? `<p class="mt-2 text-sm text-slate-300 whitespace-pre-line">${esc(ad.creative.body)}</p>` : ''}
-        ${ad.creative.cta ? `<div class="mt-2 text-xs text-slate-500">CTA: ${esc(ad.creative.cta)}</div>` : ''}
-        ${ad.review_feedback ? `<div class="mt-3 text-xs text-red-300 bg-red-500/10 rounded-lg p-3">Revisión: ${esc(JSON.stringify(ad.review_feedback))}</div>` : ''}
+        ${ad.creative.thumbnail ? `<img src="${esc(ad.creative.thumbnail)}" class="w-full rounded-xl sunk" alt="">` : '<div class="thumb-ph rounded-xl">Sin vista previa</div>'}
+        ${ad.creative.title ? `<div class="mt-4 font-semibold t1">${esc(ad.creative.title)}</div>` : ''}
+        ${ad.creative.body ? `<p class="mt-2 t2 whitespace-pre-line leading-relaxed">${esc(ad.creative.body)}</p>` : ''}
+        ${ad.creative.cta ? `<div class="mt-2"><span class="pill plain">CTA · ${esc(ad.creative.cta.replace(/_/g, ' ').toLowerCase())}</span></div>` : ''}
+        ${ad.review_feedback ? `<div class="mt-3 pill red plain" style="height:auto;padding:8px 10px;border-radius:10px;white-space:normal">Revisión de Meta: ${esc(Object.values(ad.review_feedback).join(' · '))}</div>` : ''}
         <div class="flex flex-wrap gap-2 mt-4">
-          ${ad.preview_link ? `<a class="btn" target="_blank" rel="noopener" href="${esc(ad.preview_link)}">Vista previa ↗</a>` : ''}
-          ${postUrl ? `<a class="btn" target="_blank" rel="noopener" href="${esc(postUrl)}">Publicación en Facebook ↗</a>` : ''}
-          ${ad.creative.ig_link ? `<a class="btn" target="_blank" rel="noopener" href="${esc(ad.creative.ig_link)}">Ver en Instagram ↗</a>` : ''}
+          ${ad.preview_link ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${esc(ad.preview_link)}">${icon('eye', 14)}Vista previa</a>` : ''}
+          ${postUrl ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${esc(postUrl)}">${icon('external', 14)}Facebook</a>` : ''}
+          ${ad.creative.ig_link ? `<a class="btn btn-sm" target="_blank" rel="noopener" href="${esc(ad.creative.ig_link)}">${icon('instagram', 14)}Instagram</a>` : ''}
         </div>
       </div>
-      <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm content-start">${rows.map(([k, v]) => `<dt class="text-slate-500">${esc(k)}</dt><dd class="text-right font-medium text-slate-100">${v}</dd>`).join('')}</dl>
+      <dl class="grid grid-cols-2 content-start">${rows.map(([k, v]) => `<dt class="t2 py-2 hair-b">${esc(k)}</dt><dd class="text-right num font-medium t1 py-2 hair-b">${v}</dd>`).join('')}</dl>
     </div>`);
 }
 
-// ---------- Páginas de Facebook ----------
-function assetGrid(list, hrefFn, sub) {
-  return `<div class="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">${list.map((x) => `
-    <a href="${hrefFn(x)}" class="card p-4 flex items-center gap-3 hover:border-blue-500/50 transition" data-name="${esc(x.name.toLowerCase())}">
-      ${x.data.picture || x.data.profile_picture_url ? `<img src="${esc(x.data.picture || x.data.profile_picture_url)}" class="w-12 h-12 rounded-full object-cover bg-slate-800" loading="lazy" alt="">` : '<div class="w-12 h-12 rounded-full bg-slate-800"></div>'}
-      <div class="min-w-0"><div class="font-medium text-slate-100 truncate">${esc(x.name)}</div><div class="text-xs text-slate-500 truncate">${sub(x)}</div></div>
-    </a>`).join('')}</div>`;
+// =========================================================================
+// Redes: páginas de Facebook e Instagram
+// =========================================================================
+const assetAvatar = (url, size = 44, label = '') => (url
+  ? `<img src="${esc(url)}" class="avatar" style="width:${size}px;height:${size}px" loading="lazy" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'mono-avatar',style:'width:${size}px;height:${size}px;background:var(--sunk);color:var(--t2);border-radius:999px',textContent:'${esc(initials(label))}'}))">`
+  : `<div class="mono-avatar" style="width:${size}px;height:${size}px;background:var(--sunk);color:var(--t2);border-radius:999px">${esc(initials(label))}</div>`);
+
+function assetCards(list, kind) {
+  return `<div class="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">${list.map((x) => {
+    const ig = kind === 'ig';
+    return `
+    <a href="#/${ig ? 'ig' : 'pages'}/${x.external_id}" class="card card-link p-4 flex items-center gap-3" data-name="${esc(x.name.toLowerCase())}">
+      ${assetAvatar(x.data.picture || x.data.profile_picture_url, 46, x.name)}
+      <div class="min-w-0 flex-1"><div class="font-medium t1 truncate">${esc(x.name)}</div>
+        <div class="t3 text-xs truncate mt-0.5 flex items-center gap-1.5">${icon(ig ? 'instagram' : 'page', 12)}${ig ? 'Instagram' : esc(x.data.category || 'Facebook')}</div></div>
+      <div class="text-right"><div class="num font-semibold t1">${fmt.compact(x.data.followers_count)}</div><div class="t3 text-[11px]">seguidores</div></div>
+    </a>`;
+  }).join('')}</div>`;
+}
+
+async function viewSocial() {
+  crumbs([{ label: 'Redes sociales' }]);
+  const a = await api('assets', { client: portalClient() });
+  if (!a.pages.length && !a.ig_accounts.length) return { html: empty('Sin redes conectadas', 'Todavía no hay páginas ni cuentas de Instagram asignadas.', '', 'social') };
+  return {
+    html: `${isClient() ? backLink('#/', 'Inicio') : ''}${pageHead('Redes sociales', 'Facebook e Instagram')}
+      ${a.ig_accounts.length ? `<div class="eyebrow mb-3">Instagram</div>${assetCards(a.ig_accounts, 'ig')}` : ''}
+      ${a.pages.length ? `<div class="eyebrow mb-3 mt-8">Páginas de Facebook</div>${assetCards(a.pages, 'page')}` : ''}`,
+  };
 }
 
 async function viewPages() {
   crumbs([{ label: 'Páginas de Facebook' }]);
   const a = await api('assets');
-  if (!a.pages.length) return { html: empty('Sin páginas', 'El usuario conectado necesita rol en las páginas (o el System User tenerlas asignadas).', '<a class="btn" href="#/settings">Configuración</a>') };
-  return {
-    html: `<div class="flex items-center gap-3 mb-5"><h1 class="text-xl font-semibold text-white">Páginas de Facebook</h1><span class="text-sm text-slate-500">${a.pages.length}</span><div class="flex-1"></div><input class="ctl w-64" placeholder="Buscar…" id="pg-search"></div>
-      ${assetGrid(a.pages, (p) => `#/pages/${p.external_id}`, (p) => `${fmt.int(p.data.followers_count)} seguidores · ${esc(p.data.category || '')}`)}`,
-    mount: () => searchCards('#pg-search'),
-  };
+  if (!a.pages.length) return { html: empty('Sin páginas', 'El usuario conectado necesita rol en las páginas (o el System User tenerlas asignadas).', '<a class="btn" href="#/settings">Configuración</a>', 'page') };
+  return { html: pageHead('Páginas de Facebook', `${a.pages.length} páginas`, '<input class="input w-64" placeholder="Buscar" id="as-search">') + assetCards(a.pages, 'page'), mount: () => searchCards('#as-search') };
+}
+
+async function viewIgList() {
+  crumbs([{ label: 'Instagram' }]);
+  const a = await api('assets');
+  if (!a.ig_accounts.length) return { html: empty('Sin cuentas de Instagram', 'Las cuentas deben ser profesionales y estar vinculadas a una página de Facebook.', '<a class="btn" href="#/settings">Configuración</a>', 'instagram') };
+  return { html: pageHead('Instagram', `${a.ig_accounts.length} cuentas`, '<input class="input w-64" placeholder="Buscar" id="as-search">') + assetCards(a.ig_accounts, 'ig'), mount: () => searchCards('#as-search') };
 }
 
 function searchCards(sel) {
-  $(sel).addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('[data-name]').forEach((el) => { el.style.display = el.dataset.name.includes(q) ? '' : 'none'; }); });
+  $(sel)?.addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('[data-name]').forEach((el) => { el.style.display = el.dataset.name.includes(q) ? '' : 'none'; }); });
 }
 
 function seriesChartBlock(id, title, series, labels, preferred) {
   const keys = Object.keys(series);
   if (!keys.length) return '';
   const sel = preferred.filter((k) => keys.includes(k)).slice(0, 2);
-  return `<div class="card mb-6"><div class="card-h"><h2>${esc(title)}</h2><div class="flex-1"></div>
-    <select class="ctl" id="${id}-a">${keys.map((k) => `<option value="${k}" ${k === sel[0] ? 'selected' : ''}>${esc(labels[k] || k)}</option>`).join('')}</select>
-    <select class="ctl" id="${id}-b"><option value="">—</option>${keys.map((k) => `<option value="${k}" ${k === sel[1] ? 'selected' : ''}>${esc(labels[k] || k)}</option>`).join('')}</select>
-    </div><div class="p-4 h-72"><canvas id="${id}"></canvas></div></div>`;
+  if (!sel.length) sel.push(keys[0]);
+  return `<div class="card mb-6"><div class="card-h"><div class="h2">${esc(title)}</div><div class="flex-1"></div>
+    <select class="select select-sm" id="${id}-a">${keys.map((k) => `<option value="${k}" ${k === sel[0] ? 'selected' : ''}>${esc(labels[k] || k)}</option>`).join('')}</select>
+    <span class="t3 text-xs">vs.</span>
+    <select class="select select-sm" id="${id}-b"><option value="">—</option>${keys.map((k) => `<option value="${k}" ${k === sel[1] ? 'selected' : ''}>${esc(labels[k] || k)}</option>`).join('')}</select>
+    </div><div class="p-4 h-[300px]"><canvas id="${id}"></canvas></div></div>`;
 }
 
 function mountSeriesChart(id, series, labels) {
@@ -805,10 +983,10 @@ function mountSeriesChart(id, series, labels) {
   if (!a) return;
   let c;
   const draw = () => {
-    if (c) { c.destroy(); state.charts = state.charts.filter((x) => x !== c); }
+    dropChart(c);
     const days = [...new Set(Object.values(series).flatMap((s) => Object.keys(s)))].sort();
-    const ds = [{ label: labels[a.value] || a.value, data: days.map((d) => series[a.value]?.[d] ?? null), type: 'bar' }];
-    if (b.value) ds.push({ label: labels[b.value] || b.value, data: days.map((d) => series[b.value]?.[d] ?? null), axis: 'y1', color: '#d946ef' });
+    const ds = [{ label: labels[a.value] || a.value, data: days.map((d) => series[a.value]?.[d] ?? null), type: 'bar', color: cssVar('--t3') }];
+    if (b.value) ds.push({ label: labels[b.value] || b.value, data: days.map((d) => series[b.value]?.[d] ?? null), axis: 'y1', color: cssVar('--accent') });
     c = chart($('#' + id), days.map(fmt.date), ds);
   };
   a.addEventListener('change', draw);
@@ -817,17 +995,19 @@ function mountSeriesChart(id, series, labels) {
 }
 
 function followersBlock(id, history) {
-  if (!history || history.length < 2) {
-    return `<div class="card p-4 mb-6 text-xs text-slate-500">📈 La evolución de seguidores se arma con la foto diaria del cron. Aparecerá a partir del segundo día de funcionamiento.</div>`;
-  }
-  return `<div class="card mb-6"><div class="card-h"><h2>Evolución de seguidores</h2><span class="text-xs text-slate-500">${history.length} días registrados</span></div><div class="p-4 h-60"><canvas id="${id}"></canvas></div></div>`;
+  if (!history || history.length < 2) return '';
+  const first = history[0].followers, last = history[history.length - 1].followers;
+  return `<div class="card mb-6"><div class="card-h"><div class="h2">Evolución de seguidores</div>
+    <span class="t3 text-xs">${history.length} días registrados</span><div class="flex-1"></div>
+    ${first != null && last != null ? `<span class="num font-semibold ${last >= first ? 't-pos' : 't-bad'}">${last >= first ? '+' : ''}${fmt.int(last - first)}</span>` : ''}</div>
+    <div class="p-4 h-[240px]"><canvas id="${id}"></canvas></div></div>`;
 }
 
 function mountFollowers(id, history) {
   if (!$('#' + id)) return;
-  chart($('#' + id), history.map((h) => fmt.date(h.date)), [{ label: 'Seguidores', data: history.map((h) => h.followers), color: '#22c55e' }]);
-  state.charts.at(-1).options.scales.y.beginAtZero = false;
-  state.charts.at(-1).update();
+  const c = chart($('#' + id), history.map((h) => fmt.date(h.date)), [{ label: 'Seguidores', data: history.map((h) => h.followers), color: cssVar('--accent') }]);
+  c.options.scales.y.beginAtZero = false;
+  c.update();
 }
 
 async function viewPage(pageId) {
@@ -836,72 +1016,79 @@ async function viewPage(pageId) {
   crumbs([{ label: 'Páginas', href: '#/pages' }, { label: p.name }]);
   const t = d.totals;
   const pick = (...keys) => keys.map((k) => t[k]).find((v) => v != null);
-  const interactionsPosts = posts.reduce((s, x) => s + x.interactions, 0);
+  const s = (...keys) => { const k = keys.find((x) => d.series[x]); return k ? sparkline(Object.values(d.series[k])) : ''; };
   const kpis = [
-    ['Seguidores', fmt.int(p.followers)],
-    ['Visualizaciones', fmt.compact(pick('page_media_view', 'page_impressions'))],
-    ['Espectadores / alcance', fmt.compact(pick('page_total_media_view_unique', 'page_impressions_unique'))],
-    ['Interacciones', fmt.int(pick('page_post_engagements') ?? interactionsPosts)],
-    ['Nuevos seguidores', fmt.int(t.page_daily_follows_unique)],
-    ['Dejaron de seguir', fmt.int(t.page_daily_unfollows_unique)],
-    ['Visitas a la página', fmt.int(t.page_views_total)],
-    ['Posteos en el período', fmt.int(posts.length)],
+    ['Seguidores', fmt.int(p.followers), ''],
+    ['Visualizaciones', fmt.compact(pick('page_media_view', 'page_impressions')), s('page_media_view', 'page_impressions')],
+    ['Espectadores', fmt.compact(pick('page_total_media_view_unique', 'page_impressions_unique')), s('page_total_media_view_unique', 'page_impressions_unique')],
+    ['Interacciones', fmt.int(pick('page_post_engagements') ?? posts.reduce((x, y) => x + y.interactions, 0)), s('page_post_engagements')],
+    ['Nuevos seguidores', fmt.int(t.page_daily_follows_unique), s('page_daily_follows_unique')],
+    ['Visitas a la página', fmt.int(t.page_views_total), s('page_views_total')],
+    ['Reproducciones de video', fmt.compact(t.page_video_views), s('page_video_views')],
+    ['Publicaciones', fmt.int(posts.length), ''],
   ].filter(([, v]) => v !== '—');
 
   const cols = [
     { key: 'message', label: 'Publicación', left: true, value: (r) => r.message,
-      html: (r) => `<div class="flex items-center gap-3 max-w-[420px]">${r.picture ? `<img src="${esc(r.picture)}" class="w-12 h-12 rounded object-cover shrink-0" loading="lazy" alt="">` : '<div class="w-12 h-12 rounded bg-slate-800 shrink-0"></div>'}<div class="min-w-0"><div class="truncate text-slate-100">${esc(r.message || '(sin texto)')}</div><div class="text-[11px] text-slate-500">${fmt.datetime(r.created_time)} · ${r.permalink ? `<a class="text-blue-400 hover:underline" target="_blank" rel="noopener" href="${esc(r.permalink)}">ver ↗</a>` : ''}</div></div></div>` },
-    { key: 'views', label: 'Visualizaciones', value: (r) => r.views, html: (r) => fmt.int(r.views) },
-    { key: 'reach', label: 'Alcance', value: (r) => r.reach, html: (r) => fmt.int(r.reach) },
-    { key: 'reactions', label: 'Reacciones', value: (r) => r.reactions, html: (r) => fmt.int(r.reactions), total: (rows) => fmt.int(rows.reduce((s, r) => s + r.reactions, 0)) },
-    { key: 'comments', label: 'Comentarios', value: (r) => r.comments, html: (r) => fmt.int(r.comments), total: (rows) => fmt.int(rows.reduce((s, r) => s + r.comments, 0)) },
-    { key: 'shares', label: 'Compartidos', value: (r) => r.shares, html: (r) => fmt.int(r.shares), total: (rows) => fmt.int(rows.reduce((s, r) => s + r.shares, 0)) },
-    { key: 'clicks', label: 'Clics', value: (r) => r.clicks, html: (r) => fmt.int(r.clicks) },
-    { key: 'video_views', label: 'Reproducciones', value: (r) => r.video_views, html: (r) => fmt.int(r.video_views) },
+      html: (r) => `<div class="flex items-center gap-3 max-w-[440px]">${r.picture ? `<img src="${esc(r.picture)}" class="w-11 h-11 rounded-lg object-cover shrink-0" loading="lazy" alt="">` : '<div class="w-11 h-11 rounded-lg sunk shrink-0"></div>'}<div class="min-w-0"><div class="truncate">${esc(r.message || '(sin texto)')}</div><div class="sub">${fmt.datetime(r.created_time)}${r.permalink ? ` · <a class="link" target="_blank" rel="noopener" href="${esc(r.permalink)}">ver</a>` : ''}</div></div></div>` },
+    { key: 'views', label: 'Visualizaciones', value: (r) => r.views },
+    { key: 'reach', label: 'Alcance', value: (r) => r.reach },
+    { key: 'reactions', label: 'Reacciones', value: (r) => r.reactions, total: (rows) => fmt.int(rows.reduce((x, r) => x + r.reactions, 0)) },
+    { key: 'comments', label: 'Comentarios', value: (r) => r.comments, total: (rows) => fmt.int(rows.reduce((x, r) => x + r.comments, 0)) },
+    { key: 'shares', label: 'Compartidos', value: (r) => r.shares, total: (rows) => fmt.int(rows.reduce((x, r) => x + r.shares, 0)) },
+    { key: 'clicks', label: 'Clics', value: (r) => r.clicks },
     { key: 'engagement_rate', label: 'Engagement', value: (r) => r.engagement_rate, html: (r) => fmt.pct(r.engagement_rate) },
   ];
 
   const html = `
-    <div class="flex items-center gap-4 mb-5">
-      ${p.picture ? `<img src="${esc(p.picture)}" class="w-14 h-14 rounded-full" alt="">` : ''}
-      <div><h1 class="text-xl font-semibold text-white">${esc(p.name)}</h1><div class="text-sm text-slate-400">${esc(p.category || '')}</div></div>
-      <div class="flex-1"></div>${p.link ? `<a class="btn" target="_blank" rel="noopener" href="${esc(p.link)}">Abrir página ↗</a>` : ''}
+    ${isClient() ? backLink('#/social', 'Redes sociales') : ''}
+    <div class="flex flex-wrap items-center gap-4 mb-6">
+      ${assetAvatar(p.picture, 56, p.name)}
+      <div class="min-w-0"><h1 class="h1">${esc(p.name)}</h1><div class="t2 mt-0.5">${esc(p.category || 'Página de Facebook')} · ${fmt.int(p.followers)} seguidores</div></div>
+      <div class="flex-1"></div>${p.link ? `<a class="btn" target="_blank" rel="noopener" href="${esc(p.link)}">${icon('external', 14)}Abrir página</a>` : ''}
     </div>
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">${kpis.map(([l, v]) => kpi(l, v)).join('')}</div>
-    ${seriesChartBlock('pg-chart', 'Métricas diarias de la página', d.series, d.labels, ['page_media_view', 'page_impressions', 'page_post_engagements', 'page_daily_follows_unique'])}
+    <div class="kpi-row grid-cols-2 sm:grid-cols-4 mb-6" style="display:grid">${kpis.map(([l, v, sp]) => kpi(l, v, { spark: sp })).join('')}</div>
+    ${seriesChartBlock('pg-chart', 'Métricas diarias', d.series, d.labels, ['page_media_view', 'page_impressions', 'page_post_engagements', 'page_daily_follows_unique'])}
     ${followersBlock('pg-followers', d.followers_history)}
-    ${tableHtml('posts', cols, posts, { title: `Publicaciones (${posts.length})`, sort: 'reach', csvName: 'posteos-facebook', onClick: (r) => r.permalink && window.open(r.permalink, '_blank', 'noopener') })}`;
+    ${topPosts(posts.map((x) => ({ ...x, thumbnail: x.picture, caption: x.message, timestamp: x.created_time, likes: x.reactions })), 'Publicaciones con mejor rendimiento')}
+    ${tableHtml('posts', cols, posts, { title: `Todas las publicaciones <span class="t3 font-normal">${posts.length}</span>`, sort: 'reach', csvName: 'posteos-facebook', onClick: (r) => r.permalink && window.open(r.permalink, '_blank', 'noopener') })}`;
   return { html, mount() { mountSeriesChart('pg-chart', d.series, d.labels); mountFollowers('pg-followers', d.followers_history); mountTable('posts'); } };
 }
 
-// ---------- Instagram ----------
-async function viewIgList() {
-  crumbs([{ label: 'Instagram' }]);
-  const a = await api('assets');
-  if (!a.ig_accounts.length) return { html: empty('Sin cuentas de Instagram', 'Las cuentas deben ser profesionales (empresa o creador) y estar vinculadas a una página de Facebook.', '<a class="btn" href="#/settings">Configuración</a>') };
-  return {
-    html: `<div class="flex items-center gap-3 mb-5"><h1 class="text-xl font-semibold text-white">Instagram</h1><span class="text-sm text-slate-500">${a.ig_accounts.length}</span><div class="flex-1"></div><input class="ctl w-64" placeholder="Buscar…" id="ig-search"></div>
-      ${assetGrid(a.ig_accounts, (x) => `#/ig/${x.external_id}`, (x) => `${fmt.int(x.data.followers_count)} seguidores · ${fmt.int(x.data.media_count)} posteos`)}`,
-    mount: () => searchCards('#ig-search'),
-  };
+/** Podio de las 3 mejores publicaciones por alcance. */
+function topPosts(items, title) {
+  const top = [...items].filter((x) => x.reach || x.interactions).sort((a, b) => (b.reach || 0) - (a.reach || 0)).slice(0, 3);
+  if (!top.length) return '';
+  return `<div class="mb-6"><div class="h2 mb-3">${esc(title)}</div><div class="grid md:grid-cols-3 gap-4">${top.map((m, i) => `
+    <a href="${esc(m.permalink || '#')}" target="_blank" rel="noopener" class="card card-link overflow-hidden flex">
+      <div class="w-28 shrink-0">${m.thumbnail ? `<img src="${esc(m.thumbnail)}" class="thumb h-full" loading="lazy" alt="">` : '<div class="thumb-ph h-full"></div>'}</div>
+      <div class="p-3.5 min-w-0 flex flex-col">
+        <div class="flex items-center gap-2"><span class="pill accent plain">#${i + 1}</span><span class="t3 text-xs">${fmt.date(m.timestamp)}</span></div>
+        <div class="t2 text-xs mt-2 line-clamp-2">${esc(m.caption || '')}</div>
+        <div class="flex gap-4 mt-auto pt-2"><div><div class="t3 text-[11px]">Alcance</div><div class="num font-semibold t1">${fmt.compact(m.reach)}</div></div>
+          <div><div class="t3 text-[11px]">Interacciones</div><div class="num font-semibold t1">${fmt.compact(m.interactions)}</div></div>
+          <div><div class="t3 text-[11px]">Eng.</div><div class="num font-semibold t1">${fmt.pct(m.engagement_rate)}</div></div></div>
+      </div>
+    </a>`).join('')}</div></div>`;
 }
 
 function mediaGrid(items, kind) {
-  if (!items.length) return empty(kind === 'STORY' ? 'No hay historias activas' : 'Sin publicaciones en este período', kind === 'STORY' ? 'Meta sólo expone las historias de las últimas 24 h.' : '');
-  return `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6 gap-3">${items.map((m) => `
-    <a href="${esc(m.permalink || '#')}" target="_blank" rel="noopener" class="card overflow-hidden media-card hover:border-fuchsia-500/50 transition block">
-      <div class="relative">${m.thumbnail ? `<img src="${esc(m.thumbnail)}" loading="lazy" alt="">` : '<div class="aspect-square bg-slate-800 grid place-items-center text-slate-600 text-xs">Sin miniatura</div>'}
-        <span class="absolute top-2 left-2 pill ${m.type === 'REELS' ? 'blue' : m.type === 'STORY' ? 'amber' : 'gray'}">${{ REELS: 'Reel', STORY: 'Historia', FEED: m.media_type === 'CAROUSEL_ALBUM' ? 'Carrusel' : 'Post' }[m.type]}</span></div>
+  if (!items.length) return empty(kind === 'STORY' ? 'No hay historias activas' : 'Sin publicaciones en este período', kind === 'STORY' ? 'Meta sólo muestra las historias de las últimas 24 horas.' : '', '', 'instagram');
+  const label = (m) => ({ REELS: 'Reel', STORY: 'Historia', FEED: m.media_type === 'CAROUSEL_ALBUM' ? 'Carrusel' : 'Post' }[m.type]);
+  return `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3">${items.map((m) => `
+    <a href="${esc(m.permalink || '#')}" target="_blank" rel="noopener" class="card card-link overflow-hidden block">
+      <div class="relative thumb-wrap">${m.thumbnail ? `<img src="${esc(m.thumbnail)}" class="thumb" loading="lazy" alt="">` : '<div class="thumb-ph">Sin miniatura</div>'}
+        <span class="absolute top-2 left-2 pill plain" style="background:var(--panel);color:var(--t1)">${m.type === 'REELS' ? icon('play', 11) : ''}${label(m)}</span></div>
       <div class="p-3">
-        <div class="text-[11px] text-slate-500">${fmt.datetime(m.timestamp)}</div>
-        <div class="text-xs text-slate-300 line-clamp-2 h-8 mt-1">${esc(m.caption)}</div>
-        <div class="grid grid-cols-3 gap-1 mt-2 text-center text-[11px]">
-          <div><div class="text-slate-500">Alcance</div><div class="font-semibold text-slate-100">${fmt.compact(m.reach)}</div></div>
-          <div><div class="text-slate-500">Vistas</div><div class="font-semibold text-slate-100">${fmt.compact(m.views)}</div></div>
-          <div><div class="text-slate-500">ER</div><div class="font-semibold text-slate-100">${fmt.pct(m.engagement_rate)}</div></div>
+        <div class="t3 text-[11px]">${fmt.datetime(m.timestamp)}</div>
+        <div class="t2 text-xs line-clamp-2 h-8 mt-1">${esc(m.caption)}</div>
+        <div class="grid grid-cols-3 gap-1 mt-3 pt-2 hair-t text-[11px]">
+          <div><div class="t3">Alcance</div><div class="num font-semibold t1 text-[13px]">${fmt.compact(m.reach)}</div></div>
+          <div><div class="t3">Vistas</div><div class="num font-semibold t1 text-[13px]">${fmt.compact(m.views)}</div></div>
+          <div><div class="t3">Eng.</div><div class="num font-semibold t1 text-[13px]">${fmt.pct(m.engagement_rate)}</div></div>
           ${kind === 'STORY'
-            ? `<div><div class="text-slate-500">Respuestas</div><div>${fmt.int(m.replies)}</div></div><div><div class="text-slate-500">Compart.</div><div>${fmt.int(m.shares)}</div></div><div><div class="text-slate-500">Interac.</div><div>${fmt.int(m.interactions)}</div></div>`
-            : `<div><div class="text-slate-500">❤</div><div>${fmt.int(m.likes)}</div></div><div><div class="text-slate-500">💬</div><div>${fmt.int(m.comments)}</div></div><div><div class="text-slate-500">🔖 / ↗</div><div>${fmt.int(m.saved)} / ${fmt.int(m.shares)}</div></div>`}
+            ? `<div><div class="t3">Respuestas</div><div class="num t2">${fmt.int(m.replies)}</div></div><div><div class="t3">Compart.</div><div class="num t2">${fmt.int(m.shares)}</div></div><div><div class="t3">Interac.</div><div class="num t2">${fmt.int(m.interactions)}</div></div>`
+            : `<div><div class="t3">Me gusta</div><div class="num t2">${fmt.compact(m.likes)}</div></div><div><div class="t3">Coment.</div><div class="num t2">${fmt.int(m.comments)}</div></div><div><div class="t3">Guard.</div><div class="num t2">${fmt.int(m.saved)}</div></div>`}
         </div>
       </div>
     </a>`).join('')}</div>`;
@@ -910,12 +1097,13 @@ function mediaGrid(items, kind) {
 const IG_COLS = [
   { key: 'timestamp', label: 'Fecha', left: true, value: (r) => r.timestamp, html: (r) => fmt.datetime(r.timestamp) },
   { key: 'type', label: 'Tipo', value: (r) => r.type },
-  { key: 'caption', label: 'Texto', value: (r) => (r.caption || '').slice(0, 80) },
+  { key: 'caption', label: 'Texto', value: (r) => (r.caption || '').slice(0, 70) },
   { key: 'reach', label: 'Alcance', value: (r) => r.reach }, { key: 'views', label: 'Visualizaciones', value: (r) => r.views },
   { key: 'likes', label: 'Me gusta', value: (r) => r.likes }, { key: 'comments', label: 'Comentarios', value: (r) => r.comments },
   { key: 'saved', label: 'Guardados', value: (r) => r.saved }, { key: 'shares', label: 'Compartidos', value: (r) => r.shares },
-  { key: 'interactions', label: 'Interacciones', value: (r) => r.interactions }, { key: 'engagement_rate', label: 'Engagement %', value: (r) => r.engagement_rate },
-  { key: 'permalink', label: 'Link', value: (r) => r.permalink },
+  { key: 'interactions', label: 'Interacciones', value: (r) => r.interactions },
+  { key: 'engagement_rate', label: 'Engagement', value: (r) => r.engagement_rate, html: (r) => fmt.pct(r.engagement_rate) },
+  { key: 'permalink', label: 'Link', value: (r) => r.permalink, html: (r) => (r.permalink ? `<a class="link" target="_blank" rel="noopener" href="${esc(r.permalink)}">abrir</a>` : '—') },
 ];
 
 async function viewIg(igId) {
@@ -923,29 +1111,32 @@ async function viewIg(igId) {
   const a = d.account;
   const t = d.totals;
   crumbs([{ label: 'Instagram', href: '#/ig' }, { label: '@' + (a.username || igId) }]);
+  const s = (k) => (d.series[k] ? sparkline(Object.values(d.series[k])) : '');
   const kpis = [
-    ['Seguidores', fmt.int(a.followers)], ['Visualizaciones', fmt.compact(t.views)], ['Alcance', fmt.compact(t.reach)],
-    ['Cuentas que interactuaron', fmt.int(t.accounts_engaged)], ['Interacciones', fmt.int(t.total_interactions)],
-    ['Me gusta', fmt.int(t.likes)], ['Comentarios', fmt.int(t.comments)], ['Compartidos', fmt.int(t.shares)], ['Guardados', fmt.int(t.saves)],
-    ['Seguidores netos', fmt.int(t.follows_and_unfollows)], ['Toques en enlaces', fmt.int(t.profile_links_taps)], ['Visitas al perfil', fmt.int(t.profile_views)],
+    ['Seguidores', fmt.int(a.followers), s('follower_count')], ['Visualizaciones', fmt.compact(t.views), ''], ['Alcance', fmt.compact(t.reach), s('reach')],
+    ['Cuentas que interactuaron', fmt.compact(t.accounts_engaged), ''], ['Interacciones', fmt.compact(t.total_interactions), ''],
+    ['Me gusta', fmt.compact(t.likes), ''], ['Comentarios', fmt.int(t.comments), ''], ['Compartidos', fmt.int(t.shares), ''], ['Guardados', fmt.int(t.saves), ''],
+    ['Seguidores netos', fmt.int(t.follows_and_unfollows), ''], ['Toques en enlaces', fmt.int(t.profile_links_taps), ''], ['Visitas al perfil', fmt.int(t.profile_views), ''],
   ].filter(([, v]) => v !== '—');
-  const tabs = { FEED: 'Publicaciones', REELS: 'Reels', STORY: 'Historias activas', AUD: 'Audiencia', TABLE: 'Tabla y CSV' };
+  const tabs = { FEED: 'Publicaciones', REELS: 'Reels', STORY: 'Historias', AUD: 'Audiencia', TABLE: 'Tabla' };
 
   const html = `
-    <div class="flex flex-wrap items-center gap-4 mb-5">
-      ${a.picture ? `<img src="${esc(a.picture)}" class="w-16 h-16 rounded-full ring-2 ring-fuchsia-500/60" alt="">` : ''}
-      <div class="min-w-0"><h1 class="text-xl font-semibold text-white">@${esc(a.username)}</h1>
-        <div class="text-sm text-slate-400">${esc(a.name || '')} · ${fmt.int(a.followers)} seguidores · ${fmt.int(a.follows)} seguidos · ${fmt.int(a.media_count)} publicaciones</div>
-        ${a.biography ? `<div class="text-xs text-slate-500 mt-1 max-w-2xl line-clamp-2">${esc(a.biography)}</div>` : ''}</div>
-      <div class="flex-1"></div><a class="btn" target="_blank" rel="noopener" href="https://instagram.com/${esc(a.username)}">Abrir perfil ↗</a>
+    ${isClient() ? backLink('#/social', 'Redes sociales') : ''}
+    <div class="flex flex-wrap items-center gap-4 mb-6">
+      ${assetAvatar(a.picture, 60, a.username)}
+      <div class="min-w-0"><h1 class="h1">@${esc(a.username)}</h1>
+        <div class="t2 mt-0.5"><span class="num t1 font-medium">${fmt.int(a.followers)}</span> seguidores · <span class="num">${fmt.int(a.follows)}</span> seguidos · <span class="num">${fmt.int(a.media_count)}</span> publicaciones</div>
+        ${a.biography ? `<div class="t3 text-xs mt-1 max-w-2xl line-clamp-2">${esc(a.biography)}</div>` : ''}</div>
+      <div class="flex-1"></div><a class="btn" target="_blank" rel="noopener" href="https://instagram.com/${esc(a.username)}">${icon('external', 14)}Abrir perfil</a>
     </div>
-    ${d.totals_capped ? '<div class="text-xs text-amber-300/80 mb-3">ℹ Instagram calcula los totales de cuenta sobre un máximo de 30 días: se muestran los últimos 30 días del rango.</div>' : ''}
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">${kpis.map(([l, v]) => kpi(l, v)).join('')}</div>
+    ${d.totals_capped ? '<div class="t3 text-xs mb-3">Instagram calcula los totales de la cuenta sobre 30 días como máximo: se muestran los últimos 30 días del rango.</div>' : ''}
+    <div class="kpi-row grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 mb-6" style="display:grid">${kpis.map(([l, v, sp]) => kpi(l, v, { spark: sp })).join('')}</div>
     ${seriesChartBlock('ig-chart', 'Métricas diarias', d.series, d.labels, ['reach', 'follower_count'])}
     ${followersBlock('ig-followers', d.followers_history)}
-    <div class="card"><div class="card-h"><div class="tabs" id="ig-tabs">${Object.entries(tabs).map(([k, l], i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-t="${k}">${l}</button>`).join('')}</div><div class="flex-1"></div>
-      <select class="ctl" id="ig-sort"><option value="timestamp">Más recientes</option><option value="reach">Mayor alcance</option><option value="views">Más vistas</option><option value="interactions">Más interacciones</option><option value="engagement_rate">Mayor engagement</option><option value="saved">Más guardados</option><option value="shares">Más compartidos</option></select></div>
-      <div class="p-4" id="ig-body"><div class="skeleton h-64"></div></div></div>`;
+    <div id="ig-top"></div>
+    <div class="card"><div class="px-5 flex flex-wrap items-center gap-4 hair-b"><div class="utabs !border-0 flex-1" id="ig-tabs">${Object.entries(tabs).map(([k, l], i) => `<button class="${i === 0 ? 'active' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
+      <select class="select select-sm my-2" id="ig-sort"><option value="timestamp">Más recientes</option><option value="reach">Mayor alcance</option><option value="views">Más vistas</option><option value="interactions">Más interacciones</option><option value="engagement_rate">Mayor engagement</option><option value="saved">Más guardados</option><option value="shares">Más compartidos</option></select></div>
+      <div class="p-4" id="ig-body"><div class="sk h-64"></div></div></div>`;
 
   return {
     html,
@@ -959,10 +1150,10 @@ async function viewIg(igId) {
       const sorted = (list) => [...list].sort((x, y) => (sortSel.value === 'timestamp' ? String(y.timestamp).localeCompare(String(x.timestamp)) : (y[sortSel.value] ?? -1) - (x[sortSel.value] ?? -1)));
       const show = async () => {
         $$('#ig-tabs [data-t]').forEach((b) => b.classList.toggle('active', b.dataset.t === tab));
-        sortSel.style.display = tab === 'AUD' ? 'none' : '';
+        sortSel.style.visibility = tab === 'AUD' ? 'hidden' : '';
         try {
           if (tab === 'AUD') {
-            body.innerHTML = '<div class="skeleton h-64"></div>';
+            body.innerHTML = '<div class="sk h-64"></div>';
             const aud = await api('ig_audience', { id: igId });
             body.innerHTML = audienceHtml(aud);
             mountAudience(aud);
@@ -974,8 +1165,9 @@ async function viewIg(igId) {
             return;
           }
           media ??= await api('ig_media', rp({ id: igId }));
+          if (!$('#ig-top').innerHTML) $('#ig-top').innerHTML = topPosts(media, 'Lo mejor del período');
           if (tab === 'TABLE') {
-            body.innerHTML = tableHtml('igt', IG_COLS, sorted(media), { csvName: 'instagram-' + a.username, sort: null });
+            body.innerHTML = tableHtml('igt', IG_COLS, sorted(media), { csvName: 'instagram-' + a.username });
             mountTable('igt');
             return;
           }
@@ -990,170 +1182,677 @@ async function viewIg(igId) {
 }
 
 function audienceHtml(aud) {
-  const has = Object.values(aud).some((l) => l.length);
-  if (!has) return empty('Sin datos demográficos', 'Instagram los muestra sólo para cuentas con más de 100 seguidores.');
-  return `<div class="grid md:grid-cols-2 gap-6">
-    <div><h3 class="text-sm text-slate-400 mb-2">Edad</h3><div class="h-56"><canvas id="aud-age"></canvas></div></div>
-    <div><h3 class="text-sm text-slate-400 mb-2">Género</h3><div class="h-56"><canvas id="aud-gender"></canvas></div></div>
-    <div><h3 class="text-sm text-slate-400 mb-2">Ciudades principales</h3><div class="h-72"><canvas id="aud-city"></canvas></div></div>
-    <div><h3 class="text-sm text-slate-400 mb-2">Países</h3><div class="h-72"><canvas id="aud-country"></canvas></div></div></div>`;
+  if (!Object.values(aud).some((l) => l.length)) return empty('Sin datos demográficos', 'Instagram los muestra sólo para cuentas con más de 100 seguidores.', '', 'users');
+  return `<div class="grid md:grid-cols-2 gap-8 p-2">
+    <div><div class="eyebrow mb-3">Edad</div><div class="h-56"><canvas id="aud-age"></canvas></div></div>
+    <div><div class="eyebrow mb-3">Género</div><div class="h-56"><canvas id="aud-gender"></canvas></div></div>
+    <div><div class="eyebrow mb-3">Ciudades principales</div><div class="h-72"><canvas id="aud-city"></canvas></div></div>
+    <div><div class="eyebrow mb-3">Países</div><div class="h-72"><canvas id="aud-country"></canvas></div></div></div>`;
 }
 
 function mountAudience(aud) {
-  const bar = (id, rows, horizontal) => rows.length && chart($('#' + id), rows.map((r) => r.label), [{ label: 'Seguidores', data: rows.map((r) => r.value), type: 'bar' }], { horizontal });
+  const bar = (id, rows, horizontal) => rows.length && chart($('#' + id), rows.map((r) => r.label), [{ label: 'Seguidores', data: rows.map((r) => r.value), type: 'bar', color: cssVar('--accent') }], { horizontal });
   bar('aud-age', aud.age || [], false);
   bar('aud-city', (aud.city || []).slice(0, 10), true);
   bar('aud-country', (aud.country || []).slice(0, 10), true);
-  if ((aud.gender || []).length) {
-    state.charts.push(new Chart($('#aud-gender'), { type: 'doughnut', data: { labels: aud.gender.map((g) => g.label), datasets: [{ data: aud.gender.map((g) => g.value), backgroundColor: PALETTE, borderColor: '#0f172a' }] }, options: { maintainAspectRatio: false, cutout: '60%' } }));
-  }
+  doughnut($('#aud-gender'), (aud.gender || []).map((g) => g.label), (aud.gender || []).map((g) => g.value));
 }
 
-// ---------- Actividad (webhooks) ----------
-async function viewActivity() {
-  crumbs([{ label: 'Actividad' }]);
-  const ev = await api('activity', { limit: 100 });
-  const icon = { feed: '📝', comments: '💬', mentions: '📣', messages: '✉️', story_insights: '📸', ratings: '⭐' };
+// =========================================================================
+// Portal del cliente
+// =========================================================================
+function todayLabel() {
+  const s = new Date().toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+const previewBanner = (cid, name) => (state.preview ? `
+  <div class="card mb-5 px-4 py-3 flex flex-wrap items-center gap-3 no-print" style="border-color:var(--accent-line);background:var(--accent-soft)">
+    <span class="t-accent">${icon('eye', 16)}</span><div class="flex-1 t1 text-[13px]">Vista previa del portal de <b>${esc(name)}</b>: así lo ve el cliente.</div>
+    <a class="btn btn-sm" href="#/preview/${cid}">Inicio</a><a class="btn btn-sm" href="#/preview/${cid}/work">Trabajo</a><a class="btn btn-sm" href="#/preview/${cid}/report">Reporte</a>
+    <a class="btn btn-sm btn-primary" href="#/clients/${cid}">Salir de la vista previa</a>
+  </div>` : '');
+
+async function clientBrand(cid) {
+  if (isClient()) return state.boot.client;
+  const c = await api('client', { id: cid });
+  return { id: c.id, name: c.name, color: c.color, logo_url: c.logo_url };
+}
+
+function updateCard(u, compact = false) {
+  return `
+    <div class="tl-item">
+      <div class="tl-dot ${esc(u.status)}">${u.status === 'hecho' ? icon('check', 12) : '<i></i>'}</div>
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2"><span class="t1 font-medium">${esc(u.title)}</span><span class="pill plain">${esc(u.kind_label)}</span></div>
+        ${u.body && !compact ? `<div class="t2 mt-1 whitespace-pre-line leading-relaxed">${esc(u.body)}</div>` : ''}
+        ${u.body && compact ? `<div class="t2 text-xs mt-0.5 line-clamp-2">${esc(u.body)}</div>` : ''}
+        <div class="t3 text-xs mt-1.5 flex flex-wrap gap-x-3">
+          <span>${esc(u.status_label)} · ${fmt.ago(u.updated_at)}</span>
+          ${u.due_date ? `<span class="inline-flex items-center gap-1">${icon('calendar', 12)}${u.status === 'hecho' ? '' : 'Entrega '}${fmt.date(u.due_date)}</span>` : ''}
+          ${u.link ? `<a class="link inline-flex items-center gap-1" href="${esc(u.link)}" target="_blank" rel="noopener">${icon('link', 12)}Ver material</a>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+async function viewClientHome(cid) {
+  cid = +cid || portalClient();
+  const brand = await clientBrand(cid);
+  setAccent(brand.color);
+  const [ov, assets, updates] = await Promise.all([
+    api('overview', rp({ client: cid })), api('assets', { client: cid }), api('updates', { client: cid }),
+  ]);
+  const first = (state.boot.user.name || '').split(' ')[0];
+  const t = ov.totals[0];
+  const cur = t?.currency;
+  const daily = t ? Object.entries(ov.daily[cur] || {}).map(([date, v]) => ({ date, ...v, cost_per_result: v.results ? v.spend / v.results : null })) : [];
+  const open = updates.filter((u) => u.status !== 'hecho');
+  const done = updates.filter((u) => u.status === 'hecho').slice(0, 3);
+  const socials = [...assets.ig_accounts.map((x) => ({ ...x, kind: 'ig' })), ...assets.pages.map((x) => ({ ...x, kind: 'page' }))];
+
+  const html = `
+    ${previewBanner(cid, brand.name)}
+    <div class="flex flex-wrap items-end gap-4 mb-6">
+      <div><div class="eyebrow">${esc(todayLabel())}</div>
+        <h1 class="text-[28px] font-semibold tracking-tight t1 mt-1">${isClient() ? `Hola${first ? ', ' + esc(first) : ''}.` : esc(brand.name)}</h1>
+        <div class="t2 mt-1">Así vienen los resultados de <b class="t1">${esc(brand.name)}</b> · ${fmt.dateLong(ov.range.since)} – ${fmt.dateLong(ov.range.until)}</div></div>
+      <div class="flex-1"></div>
+      <a class="btn" href="${state.preview ? `#/preview/${cid}/report` : '#/report'}">${icon('report', 15)}Reporte PDF</a>
+    </div>
+
+    ${ov.accounts.length ? liveTodayBlock('live-today') : ''}
+    ${t ? adsKpis(t.metrics, t.previous, cur, daily, { client: true }) : ''}
+
+    <div class="grid xl:grid-cols-3 gap-6 mb-6">
+      ${t ? `<div class="card xl:col-span-2"><div class="card-h"><div class="h2">Rendimiento diario</div><span class="t3 text-xs">${esc(cur)}</span></div><div class="p-4 h-[300px]"><canvas id="home-chart"></canvas></div></div>` : ''}
+      <div class="card ${t ? '' : 'xl:col-span-3'} flex flex-col">
+        <div class="card-h"><div class="h2">Trabajo en curso</div><span class="pill accent plain">${open.length}</span><div class="flex-1"></div><a class="link text-[13px]" href="${state.preview ? `#/preview/${cid}/work` : '#/work'}">Ver todo</a></div>
+        <div class="p-5 tl flex-1 overflow-y-auto max-h-[300px]">${open.length || done.length ? [...open.slice(0, 4), ...done.slice(0, Math.max(0, 4 - open.length))].map((u) => updateCard(u, true)).join('') : '<div class="t3">La agencia todavía no cargó novedades.</div>'}</div>
+      </div>
+    </div>
+
+    ${ov.accounts.length ? '<div id="home-camps" class="mb-6"><div class="sk h-64"></div></div>' : ''}
+
+    ${socials.length ? `<div class="flex items-center mb-3"><div class="h2">Redes sociales</div><div class="flex-1"></div><a class="link text-[13px]" href="#/social">Ver detalle</a></div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">${socials.map((x) => `
+        <a href="#/${x.kind === 'ig' ? 'ig' : 'pages'}/${x.external_id}" class="card card-link p-4 flex items-center gap-3">
+          ${assetAvatar(x.data.picture || x.data.profile_picture_url, 42, x.name)}
+          <div class="min-w-0 flex-1"><div class="font-medium t1 truncate">${esc(x.name)}</div><div class="t3 text-xs flex items-center gap-1">${icon(x.kind === 'ig' ? 'instagram' : 'page', 12)}${x.kind === 'ig' ? 'Instagram' : 'Facebook'}</div></div>
+          <div class="text-right"><div class="num font-semibold t1">${fmt.compact(x.data.followers_count)}</div><div class="t3 text-[11px]">seguidores</div></div>
+        </a>`).join('')}</div>
+      <div id="home-top"></div>` : ''}
+
+    <div class="t3 text-xs text-center py-6">Panel preparado por ${esc(state.boot.agency_name)} · Datos oficiales de Meta</div>`;
+
   return {
-    html: `<h1 class="text-xl font-semibold text-white mb-1">Actividad en tiempo real</h1>
-      <p class="text-sm text-slate-400 mb-5">Comentarios, menciones y publicaciones que Meta notifica por webhook (configuralo en Configuración → Webhook).</p>
-      ${ev.length ? `<div class="card divide-y divide-slate-800">${ev.map((e) => `
-        <div class="px-5 py-3 flex gap-3 text-sm">
-          <span class="text-lg">${icon[e.field] || '🔔'}</span>
-          <div class="flex-1 min-w-0"><div class="text-slate-200"><b>${esc(e.asset)}</b> · ${esc(e.field)}${e.item ? ' · ' + esc(e.item) : ''}${e.from ? ' · de ' + esc(e.from) : ''}</div>
-            ${e.text ? `<div class="text-slate-400 truncate">${esc(e.text)}</div>` : ''}</div>
-          <span class="text-xs text-slate-500 whitespace-nowrap">${fmt.datetime(e.received_at.replace(' ', 'T'))}</span>
-        </div>`).join('')}</div>` : empty('Todavía no llegaron eventos', 'Cuando configures el webhook en tu app de Meta, acá vas a ver comentarios y menciones al instante.')}`,
+    html,
+    async mount() {
+      mountLiveToday('live-today', cid);
+      if (t) {
+        chart($('#home-chart'), daily.map((x) => fmt.date(x.date)), [
+          { label: 'Inversión', data: daily.map((x) => x.spend), type: 'bar', fmt: (v) => fmt.money(v, cur), color: cssVar('--t3') },
+          { label: 'Resultados', data: daily.map((x) => x.results), axis: 'y1', color: cssVar('--accent') },
+        ]);
+      }
+      // Campañas activas de todas las cuentas del cliente.
+      if (ov.accounts.length) {
+        const box = $('#home-camps');
+        try {
+          const accs = await Promise.all(ov.accounts.map((a) => api('account', rp({ id: a.id }))));
+          const camps = accs.flatMap((acc) => acc.campaigns.map((c) => ({ ...c, account: acc.account.id, currency: acc.account.currency })))
+            .filter((c) => c.metrics.spend > 0 || c.effective_status === 'ACTIVE')
+            .sort((a, b) => b.metrics.spend - a.metrics.spend);
+          const maxSpend = Math.max(1, ...camps.map((c) => c.metrics.spend));
+          box.innerHTML = camps.length ? `
+            <div class="card overflow-hidden"><div class="card-h"><div class="h2">Campañas en marcha</div><span class="t3 text-xs">${camps.length}</span><div class="flex-1"></div><a class="link text-[13px]" href="#/ads">Ver todas</a></div>
+            <div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Campaña</th><th>Inversión</th><th>Resultados</th><th>Costo por resultado</th><th>Alcance</th><th style="width:140px">Peso en la inversión</th></tr></thead><tbody>
+            ${camps.slice(0, 8).map((c) => `<tr class="clickable" onclick="location.hash='#/ads/${esc(c.account)}/c/${esc(c.id)}'">
+              <td style="text-align:left">${entityName(c, esc(OBJECTIVES[c.objective] || ''))}</td>
+              <td>${fmt.money(c.metrics.spend, c.currency)}</td><td>${fmt.int(c.metrics.results)} <span class="sub">${esc(c.metrics.result_label)}</span></td>
+              <td>${fmt.money(c.metrics.cost_per_result, c.currency)}</td><td>${fmt.compact(c.metrics.reach)}</td>
+              <td><div class="bar"><i style="width:${(c.metrics.spend / maxSpend) * 100}%"></i></div></td></tr>`).join('')}
+            </tbody></table></div></div>` : '';
+        } catch (e) { box.innerHTML = errorBox(e.message, false); }
+      }
+      if (assets.ig_accounts[0] && $('#home-top')) {
+        try { $('#home-top').innerHTML = topPosts(await api('ig_media', rp({ id: assets.ig_accounts[0].external_id })), 'Lo mejor en Instagram'); } catch { /* opcional */ }
+      }
+    },
   };
 }
 
-// ---------- Configuración ----------
+async function viewWork(cid) {
+  cid = +cid || portalClient();
+  const brand = await clientBrand(cid);
+  setAccent(brand.color);
+  const updates = await api('updates', { client: cid });
+  const cols = [['en_curso', 'En curso'], ['planificado', 'Planificado'], ['hecho', 'Hecho']];
+  return {
+    html: `${previewBanner(cid, brand.name)}${isClient() ? backLink('#/', 'Inicio') : ''}
+      ${pageHead('Trabajo en curso', `Todo lo que ${esc(state.boot.agency_name)} está haciendo para ${esc(brand.name)}`)}
+      ${updates.length ? `<div class="kanban">${cols.map(([k, l]) => { const list = updates.filter((u) => u.status === k); return `
+        <div><div class="flex items-center gap-2 mb-3"><span class="tl-dot ${k}" style="width:16px;height:16px">${k === 'hecho' ? icon('check', 10) : '<i></i>'}</span><div class="h2">${l}</div><span class="t3 text-xs">${list.length}</span></div>
+          <div class="space-y-3">${list.map((u) => `
+            <div class="card p-4">
+              <div class="flex items-start gap-2"><div class="t1 font-medium flex-1">${esc(u.title)}</div><span class="pill plain">${esc(u.kind_label)}</span></div>
+              ${u.body ? `<div class="t2 mt-2 whitespace-pre-line leading-relaxed text-[13px]">${esc(u.body)}</div>` : ''}
+              <div class="t3 text-xs mt-3 pt-3 hair-t flex flex-wrap gap-x-3 gap-y-1">
+                <span>Actualizado ${fmt.ago(u.updated_at)}</span>
+                ${u.due_date ? `<span class="inline-flex items-center gap-1">${icon('calendar', 12)}${fmt.date(u.due_date)}</span>` : ''}
+                ${u.link ? `<a class="link inline-flex items-center gap-1" href="${esc(u.link)}" target="_blank" rel="noopener">${icon('link', 12)}Ver material</a>` : ''}
+              </div>
+            </div>`).join('') || '<div class="t3 text-[13px] px-1">Nada por acá.</div>'}</div></div>`; }).join('')}</div>`
+        : empty('Sin novedades todavía', 'Cuando la agencia cargue avances, entregas o reuniones, los vas a ver acá.', '', 'briefcase')}`,
+  };
+}
+
+async function viewReport(cid) {
+  cid = +cid || portalClient();
+  const brand = await clientBrand(cid);
+  setAccent(brand.color);
+  const [ov, assets, updates] = await Promise.all([api('overview', rp({ client: cid })), api('assets', { client: cid }), api('updates', { client: cid })]);
+  const t = ov.totals[0];
+  const cur = t?.currency;
+  const daily = t ? Object.entries(ov.daily[cur] || {}).map(([date, v]) => ({ date, ...v })) : [];
+  const accs = await Promise.all(ov.accounts.map((a) => api('account', rp({ id: a.id })).catch(() => null)));
+  const camps = accs.filter(Boolean).flatMap((acc) => acc.campaigns.map((c) => ({ ...c, currency: acc.account.currency }))).filter((c) => c.metrics.spend > 0).sort((a, b) => b.metrics.spend - a.metrics.spend).slice(0, 10);
+  const igs = await Promise.all(assets.ig_accounts.map((x) => api('ig', rp({ id: x.external_id })).catch(() => null)));
+  const media = assets.ig_accounts[0] ? await api('ig_media', rp({ id: assets.ig_accounts[0].external_id })).catch(() => []) : [];
+  const inRange = (u) => u.updated_at.slice(0, 10) >= ov.range.since;
+  const doneWork = updates.filter((u) => u.status === 'hecho' && inRange(u));
+  const openWork = updates.filter((u) => u.status !== 'hecho');
+
+  const html = `
+    ${previewBanner(cid, brand.name)}
+    <div class="flex flex-wrap items-center gap-3 mb-5 no-print">${isClient() ? backLink('#/', 'Inicio') : ''}<div class="flex-1"></div>
+      <button class="btn btn-primary" onclick="window.print()">${icon('download', 15)}Descargar PDF</button></div>
+    <article class="space-y-6">
+      <header class="card p-6 flex flex-wrap items-center gap-5">
+        <div class="mono-avatar w-14 h-14 text-lg" style="background:var(--accent);color:var(--on-accent)">${brand.logo_url ? `<img src="${esc(brand.logo_url)}" class="w-full h-full object-cover rounded-[10px]" alt="">` : esc(initials(brand.name))}</div>
+        <div class="flex-1 min-w-0"><div class="eyebrow">Reporte de resultados</div><div class="text-2xl font-semibold tracking-tight t1 mt-1">${esc(brand.name)}</div>
+          <div class="t2 mt-0.5">${fmt.dateLong(ov.range.since)} – ${fmt.dateLong(ov.range.until)} · comparado con los ${ov.range.days} días anteriores</div></div>
+        <div class="text-right t3 text-xs">Preparado por<div class="t1 font-medium text-[13px]">${esc(state.boot.agency_name)}</div>${fmt.dateLong(new Date().toISOString().slice(0, 10))}</div>
+      </header>
+      ${t ? `<section><div class="h2 mb-3">Publicidad en Meta</div>${adsKpis(t.metrics, t.previous, cur, daily, { client: true })}
+        <div class="card"><div class="card-h"><div class="h2">Inversión y resultados por día</div></div><div class="p-4 h-[260px]"><canvas id="rep-chart"></canvas></div></div></section>` : ''}
+      ${camps.length ? `<section class="card overflow-hidden"><div class="card-h"><div class="h2">Campañas</div></div><div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Campaña</th><th>Inversión</th><th>Resultados</th><th>Costo/resultado</th><th>Alcance</th><th>CTR</th><th>ROAS</th></tr></thead><tbody>
+        ${camps.map((c) => `<tr><td style="text-align:left"><div class="font-medium max-w-[320px] truncate">${esc(c.name)}</div><div class="sub">${esc(OBJECTIVES[c.objective] || '')}</div></td><td>${fmt.money(c.metrics.spend, c.currency)}</td><td>${fmt.int(c.metrics.results)} <span class="sub">${esc(c.metrics.result_label)}</span></td><td>${fmt.money(c.metrics.cost_per_result, c.currency)}</td><td>${fmt.compact(c.metrics.reach)}</td><td>${fmt.pct(c.metrics.link_ctr)}</td><td>${fmt.x(c.metrics.roas)}</td></tr>`).join('')}
+        </tbody></table></div></section>` : ''}
+      ${igs.filter(Boolean).map((ig) => `<section class="print-break"><div class="h2 mb-3">Instagram · @${esc(ig.account.username)}</div>
+        <div class="kpi-row grid-cols-2 sm:grid-cols-4" style="display:grid">${[['Seguidores', fmt.int(ig.account.followers)], ['Alcance', fmt.compact(ig.totals.reach)], ['Visualizaciones', fmt.compact(ig.totals.views)], ['Interacciones', fmt.compact(ig.totals.total_interactions)]].map(([l, v]) => kpi(l, v)).join('')}</div></section>`).join('')}
+      ${topPosts(media, 'Contenido destacado')}
+      <section class="card"><div class="card-h"><div class="h2">Trabajo realizado en el período</div><span class="pill green plain">${doneWork.length}</span></div>
+        <div class="p-5 tl">${doneWork.length ? doneWork.map((u) => updateCard(u)).join('') : '<div class="t3">Sin entregas registradas en este período.</div>'}</div></section>
+      ${openWork.length ? `<section class="card"><div class="card-h"><div class="h2">Próximos pasos</div></div><div class="p-5 tl">${openWork.map((u) => updateCard(u)).join('')}</div></section>` : ''}
+      <div class="t3 text-xs text-center py-4">Fuente: API oficial de Meta. Las compras pueden ajustarse hasta 28 días por la ventana de atribución.</div>
+    </article>`;
+  return {
+    html,
+    mount() {
+      if (t) chart($('#rep-chart'), daily.map((x) => fmt.date(x.date)), [
+        { label: 'Inversión', data: daily.map((x) => x.spend), type: 'bar', fmt: (v) => fmt.money(v, cur), color: cssVar('--t3') },
+        { label: 'Resultados', data: daily.map((x) => x.results), axis: 'y1', color: cssVar('--accent') },
+      ]);
+    },
+  };
+}
+
+function accountMenu() {
+  const el = modal(`${modalHead(state.boot.user.name, '@' + esc(state.boot.user.username))}
+    <form class="p-5 space-y-3" id="pass-form">
+      <div class="h2">Cambiar contraseña</div>
+      <label class="field"><span>Actual</span><input class="input" type="password" name="current" required></label>
+      <label class="field"><span>Nueva (mínimo 8)</span><input class="input" type="password" name="new" minlength="8" required></label>
+      <div class="flex gap-2 pt-2"><button class="btn btn-primary">Guardar</button><div class="flex-1"></div><a class="btn btn-ghost" href="index.php?r=logout">${icon('logout', 15)}Cerrar sesión</a></div>
+    </form>`, 'sm');
+  $('#pass-form', el).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await post('password_change', Object.fromEntries(new FormData(e.target)), 'Contraseña actualizada'); closeModal(); } catch { /* toast */ }
+  });
+}
+
+// =========================================================================
+// Admin · Clientes
+// =========================================================================
+async function viewClients() {
+  crumbs([{ label: 'Clientes' }]);
+  const list = await api('clients');
+  const html = `
+    ${pageHead('Clientes', 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', `<button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button>`)}
+    ${list.length ? `<div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${list.map((c) => `
+      <a href="#/clients/${c.id}" class="card card-link p-5 block">
+        <div class="flex items-center gap-3">
+          <div class="mono-avatar w-11 h-11" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
+          <div class="min-w-0 flex-1"><div class="h2 truncate">${esc(c.name)}</div><div class="t3 text-xs mt-0.5">Creado ${fmt.date(c.created_at)}</div></div>
+        </div>
+        <div class="grid grid-cols-3 mt-5 pt-4 hair-t text-center">
+          <div><div class="num font-semibold t1 text-lg">${c.assets}</div><div class="t3 text-xs">activos</div></div>
+          <div><div class="num font-semibold t1 text-lg">${c.users}</div><div class="t3 text-xs">accesos</div></div>
+          <div><div class="num font-semibold t1 text-lg">${c.open_updates}</div><div class="t3 text-xs">en curso</div></div>
+        </div>
+      </a>`).join('')}</div>`
+      : empty('Todavía no creaste clientes', 'Creá un cliente, asignale sus cuentas publicitarias, páginas e Instagram y generale un usuario para que vea su portal en tiempo real.', `<button class="btn btn-primary" id="new-client-2">${icon('plus', 15)}Crear el primero</button>`, 'users')}`;
+  return {
+    html,
+    mount() { ['#new-client', '#new-client-2'].forEach((s) => $(s)?.addEventListener('click', () => clientForm())); },
+  };
+}
+
+function clientForm(c = null) {
+  const el = modal(`${modalHead(c ? 'Editar cliente' : 'Nuevo cliente')}
+    <form class="p-5 space-y-4" id="client-form">
+      <label class="field"><span>Nombre de la marca</span><input class="input" name="name" value="${esc(c?.name || '')}" required></label>
+      <div class="flex gap-3 items-end">
+        <label class="field"><span>Color de marca</span><input type="color" name="color" value="${esc(c?.color || '#0e7c66')}"></label>
+        <label class="field flex-1"><span>Logo (URL https, opcional)</span><input class="input" name="logo_url" value="${esc(c?.logo_url || '')}" placeholder="https://…/logo.png"></label>
+      </div>
+      <p class="t3 text-xs">El color se usa como acento en el portal y en los reportes del cliente.</p>
+      <div class="flex gap-2 pt-1"><button class="btn btn-primary">${c ? 'Guardar' : 'Crear cliente'}</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button></div>
+    </form>`, 'sm');
+  $('#client-form', el).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await post('client_save', { ...Object.fromEntries(new FormData(e.target)), id: c?.id }, c ? 'Cliente actualizado' : 'Cliente creado');
+      closeModal();
+      if (c) render(); else location.hash = `#/clients/${r.id}`;
+    } catch { /* toast */ }
+  });
+}
+
+async function viewClient(id, tab = 'assets') {
+  const [c, assets] = await Promise.all([api('client', { id }), api('assets', { all: 1 })]);
+  crumbs([{ label: 'Clientes', href: '#/clients' }, { label: c.name }]);
+  const assigned = new Set(c.assets.map((a) => `${a.asset_type}:${a.external_id}`));
+  const portalUrl = location.origin + location.pathname.replace(/index\.php$/, '');
+  tab = store.get('clientTab', tab);
+
+  const assetList = (type, list, label) => `
+    <div class="card overflow-hidden flex flex-col">
+      <div class="card-h"><div class="h2">${label}</div><span class="t3 text-xs" data-count="${type}"></span></div>
+      <div class="max-h-[420px] overflow-y-auto divide">${list.map((a) => `
+        <label class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-[var(--hover)]" data-name="${esc(a.name.toLowerCase())} ${esc(a.external_id)}">
+          <input type="checkbox" class="check" data-asset="${type}" value="${esc(a.external_id)}" ${assigned.has(`${type}:${a.external_id}`) ? 'checked' : ''}>
+          <div class="min-w-0 flex-1"><div class="t1 truncate">${esc(a.name)}</div><div class="t3 text-xs truncate">${type === 'ad_account' ? esc((a.data.business?.name || 'Sin portfolio') + ' · ' + (a.data.currency || '')) : fmt.compact(a.data.followers_count) + ' seguidores'}</div></div>
+        </label>`).join('') || '<div class="p-4 t3">No hay activos sincronizados.</div>'}</div>
+    </div>`;
+
+  const users = `
+    <div class="grid lg:grid-cols-5 gap-6">
+      <div class="lg:col-span-3 card overflow-hidden">
+        <div class="card-h"><div class="h2">Accesos al portal</div><span class="t3 text-xs">${c.users.length}</span></div>
+        ${c.users.length ? `<table class="tbl"><thead><tr><th style="text-align:left">Usuario</th><th>Último ingreso</th><th></th></tr></thead><tbody>${c.users.map((u) => `
+          <tr><td style="text-align:left"><div class="font-medium">${esc(u.name)}</div><div class="sub mono">${esc(u.username)}</div></td>
+            <td>${u.last_login_at ? fmt.ago(u.last_login_at) : '<span class="t3">Nunca</span>'}</td>
+            <td><div class="flex justify-end gap-1"><button class="btn btn-sm btn-ghost" data-reset="${u.id}" data-user="${esc(u.username)}">${icon('key', 14)}Nueva clave</button><button class="btn btn-sm btn-ghost btn-danger" data-del-user="${u.id}">${icon('x', 14)}</button></div></td></tr>`).join('')}</tbody></table>`
+          : '<div class="p-5 t3">Todavía no hay accesos. Creá uno con el formulario.</div>'}
+      </div>
+      <form class="lg:col-span-2 card p-5 space-y-3 self-start" id="cuser-form">
+        <div class="h2">Nuevo acceso</div>
+        <label class="field"><span>Nombre de la persona</span><input class="input" name="name" placeholder="Ej: Laura (Marketing)" required></label>
+        <label class="field"><span>Usuario</span><input class="input mono" name="username" autocapitalize="none" required pattern="[a-zA-Z0-9._@+\\-]{3,}" placeholder="laura.marca"></label>
+        <label class="field"><span>Contraseña</span><div class="flex gap-2"><input class="input mono" name="password" minlength="8" required><button type="button" class="btn" id="gen-pass" title="Generar">${icon('refresh', 14)}</button></div></label>
+        <button class="btn btn-accent w-full">Crear acceso</button>
+      </form>
+    </div>`;
+
+  const work = `
+    <div class="grid lg:grid-cols-5 gap-6">
+      <div class="lg:col-span-3 card"><div class="card-h"><div class="h2">Novedades publicadas</div><span class="t3 text-xs">${c.updates.length}</span></div>
+        <div class="divide">${c.updates.map((u) => `
+          <div class="px-5 py-3.5 flex items-start gap-3">
+            <span class="tl-dot ${esc(u.status)}" style="flex:none">${u.status === 'hecho' ? icon('check', 12) : '<i></i>'}</span>
+            <div class="min-w-0 flex-1"><div class="t1 font-medium">${esc(u.title)}</div><div class="t3 text-xs mt-0.5">${esc(u.kind_label)} · ${fmt.ago(u.updated_at)}${u.due_date ? ' · ' + fmt.date(u.due_date) : ''}</div></div>
+            <select class="select select-sm" data-status="${u.id}">${Object.entries(state.boot.statuses).map(([k, l]) => `<option value="${k}" ${k === u.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <button class="btn btn-sm btn-ghost" data-edit-update="${u.id}">Editar</button><button class="btn btn-sm btn-ghost btn-danger" data-del-update="${u.id}">${icon('x', 14)}</button>
+          </div>`).join('') || '<div class="p-5 t3">Sin novedades. Cargá la primera: el cliente la ve al instante.</div>'}</div></div>
+      <div class="lg:col-span-2 self-start">${updateForm(c.id)}</div>
+    </div>`;
+
+  const html = `
+    <div class="flex flex-wrap items-center gap-4 mb-6">
+      <div class="mono-avatar w-12 h-12 text-base" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
+      <div class="min-w-0"><h1 class="h1">${esc(c.name)}</h1><div class="t2 mt-0.5">${c.assets.length} activos · ${c.users.length} accesos · portal en <span class="mono text-xs">${esc(portalUrl)}</span></div></div>
+      <div class="flex-1"></div>
+      <a class="btn btn-accent" href="#/preview/${c.id}" style="--accent:${esc(c.color)}">${icon('eye', 15)}Ver como cliente</a>
+      <button class="btn" id="edit-client">Editar</button>
+      <button class="btn btn-ghost btn-danger" id="del-client">Eliminar</button>
+    </div>
+    <div class="utabs mb-6" id="ctabs">${[['assets', 'Activos asignados'], ['users', 'Accesos'], ['work', 'Trabajo en curso']].map(([k, l]) => `<button data-ct="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div>
+    <div data-pane="assets" class="${tab === 'assets' ? '' : 'hidden'}">
+      <div class="flex flex-wrap items-center gap-3 mb-4"><div class="t2 flex-1">Elegí qué puede ver este cliente. Todo lo que no esté marcado queda oculto para él.</div>
+        <input class="input w-64" placeholder="Filtrar" id="asset-filter"><button class="btn btn-primary" id="save-assets">Guardar asignación</button></div>
+      <div class="grid lg:grid-cols-3 gap-4">${assetList('ad_account', assets.ad_accounts, 'Cuentas publicitarias')}${assetList('page', assets.pages, 'Páginas de Facebook')}${assetList('ig_account', assets.ig_accounts, 'Instagram')}</div>
+    </div>
+    <div data-pane="users" class="${tab === 'users' ? '' : 'hidden'}">${users}</div>
+    <div data-pane="work" class="${tab === 'work' ? '' : 'hidden'}">${work}</div>`;
+
+  return {
+    html,
+    mount() {
+      const view = $('#view');
+      const counts = () => ['ad_account', 'page', 'ig_account'].forEach((t) => { const el = $(`[data-count="${t}"]`); if (el) el.textContent = `${$$(`[data-asset="${t}"]:checked`).length} asignados`; });
+      counts();
+      $('#ctabs').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-ct]');
+        if (!b) return;
+        store.set('clientTab', b.dataset.ct);
+        $$('#ctabs [data-ct]').forEach((x) => x.classList.toggle('active', x === b));
+        $$('[data-pane]').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== b.dataset.ct));
+      });
+      $('#asset-filter').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('[data-pane=assets] [data-name]').forEach((el) => { el.style.display = el.dataset.name.includes(q) ? '' : 'none'; }); });
+      view.addEventListener('change', async (e) => {
+        if (e.target.dataset.asset) counts();
+        if (e.target.dataset.status) {
+          const u = c.updates.find((x) => x.id === +e.target.dataset.status);
+          await post('update_save', { ...u, client_id: c.id, status: e.target.value }, 'Estado actualizado');
+          render({ silent: true });
+        }
+      });
+      $('#save-assets').addEventListener('click', async () => {
+        const list = $$('[data-asset]:checked').map((x) => ({ type: x.dataset.asset, id: x.value }));
+        await post('client_assets', { id: c.id, assets: list }, `Asignación guardada (${list.length} activos)`);
+      });
+      $('#edit-client').addEventListener('click', () => clientForm(c));
+      $('#del-client').addEventListener('click', async () => {
+        if (!confirm(`¿Eliminar a ${c.name}? Se borran sus accesos y novedades (no afecta nada en Meta).`)) return;
+        await post('client_delete', { id: c.id }, 'Cliente eliminado');
+        location.hash = '#/clients';
+      });
+      const pass = $('#cuser-form [name=password]');
+      pass.value = genPassword();
+      $('#gen-pass').addEventListener('click', () => { pass.value = genPassword(); });
+      $('#cuser-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(e.target));
+        try {
+          await post('user_add', { ...data, role: 'client', client_id: c.id });
+          credentialsModal(data.username, data.password, portalUrl);
+          render({ silent: true });
+        } catch { /* toast */ }
+      });
+      view.addEventListener('click', async (e) => {
+        const t = e.target.closest('button');
+        if (!t) return;
+        if (t.dataset.delUser && confirm('¿Quitar este acceso?')) { await post('user_delete', { id: +t.dataset.delUser }, 'Acceso eliminado'); render({ silent: true }); }
+        if (t.dataset.reset) {
+          const p = genPassword();
+          if (!confirm(`Se generará una nueva contraseña para ${t.dataset.user}. ¿Continuar?`)) return;
+          await post('user_reset_password', { id: +t.dataset.reset, password: p });
+          credentialsModal(t.dataset.user, p, portalUrl);
+        }
+        if (t.dataset.delUpdate && confirm('¿Eliminar esta novedad?')) { await post('update_delete', { id: +t.dataset.delUpdate }, 'Novedad eliminada'); render({ silent: true }); }
+        if (t.dataset.editUpdate) {
+          const u = c.updates.find((x) => x.id === +t.dataset.editUpdate);
+          const el = modal(modalHead('Editar novedad') + `<div class="p-5">${updateForm(c.id, u, true)}</div>`, 'sm');
+          bindUpdateForm($('form', el), c.id, u);
+        }
+      });
+      bindUpdateForm($('#update-form'), c.id);
+    },
+  };
+}
+
+function updateForm(clientId, u = null, bare = false) {
+  return `<form id="update-form" class="${bare ? '' : 'card p-5'} space-y-3">
+    ${bare ? '' : '<div class="h2">Publicar novedad</div><p class="t3 text-xs -mt-1">El cliente la ve en su portal y en el reporte.</p>'}
+    <div class="grid grid-cols-2 gap-3">
+      <label class="field"><span>Tipo</span><select class="select" name="kind">${Object.entries(state.boot.kinds).map(([k, l]) => `<option value="${k}" ${u?.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="field"><span>Estado</span><select class="select" name="status">${Object.entries(state.boot.statuses).map(([k, l]) => `<option value="${k}" ${(u?.status || 'en_curso') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    </div>
+    <label class="field"><span>Título</span><input class="input" name="title" value="${esc(u?.title || '')}" placeholder="Ej: Nueva campaña de Hot Sale" required></label>
+    <label class="field"><span>Detalle</span><textarea class="input" name="body" rows="4" placeholder="Qué se hizo, por qué y qué sigue">${esc(u?.body || '')}</textarea></label>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="field"><span>Fecha de entrega</span><input class="input" type="date" name="due_date" value="${esc(u?.due_date || '')}"></label>
+      <label class="field"><span>Link (Drive, Canva…)</span><input class="input" name="link" value="${esc(u?.link || '')}" placeholder="https://"></label>
+    </div>
+    <button class="btn btn-accent w-full">${u ? 'Guardar cambios' : 'Publicar'}</button>
+  </form>`;
+}
+
+function bindUpdateForm(form, clientId, u = null) {
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await post('update_save', { ...Object.fromEntries(new FormData(form)), client_id: clientId, id: u?.id }, u ? 'Novedad actualizada' : 'Novedad publicada');
+      closeModal();
+      render({ silent: true });
+    } catch { /* toast */ }
+  });
+}
+
+function credentialsModal(user, pass, url) {
+  const text = `Acceso a tu panel de resultados\n${url}\nUsuario: ${user}\nContraseña: ${pass}`;
+  const el = modal(`${modalHead('Acceso listo', 'Copialo y envíaselo al cliente. La contraseña no se vuelve a mostrar.')}
+    <div class="p-5 space-y-4">
+      <div class="sunk rounded-xl p-4 mono text-[13px] leading-7 t1 whitespace-pre-wrap">${esc(text)}</div>
+      <div class="flex gap-2"><button class="btn btn-primary" id="copy-cred">${icon('copy', 14)}Copiar</button>
+        <a class="btn" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(text)}">Enviar por WhatsApp</a><div class="flex-1"></div><button class="btn btn-ghost" data-close>Listo</button></div>
+    </div>`, 'sm');
+  $('#copy-cred', el).addEventListener('click', () => copyText(text));
+}
+
+// =========================================================================
+// Admin · Actividad
+// =========================================================================
+async function viewActivity() {
+  crumbs([{ label: 'Actividad' }]);
+  const ev = await api('activity', { limit: 100 });
+  const ic = { feed: 'page', comments: 'social', mentions: 'bell', messages: 'social' };
+  return {
+    html: `${pageHead('Actividad en tiempo real', 'Comentarios, menciones y publicaciones que Meta notifica por webhook.')}
+      ${ev.length ? `<div class="card divide">${ev.map((e) => `
+        <div class="px-5 py-3.5 flex gap-3">
+          <span class="w-8 h-8 rounded-lg sunk grid place-items-center t2 shrink-0">${icon(ic[e.field] || 'bell', 15)}</span>
+          <div class="flex-1 min-w-0"><div class="t1"><b class="font-medium">${esc(e.asset)}</b> <span class="t3">· ${esc(e.field)}${e.item ? ' · ' + esc(e.item) : ''}${e.from ? ' · ' + esc(e.from) : ''}</span></div>
+            ${e.text ? `<div class="t2 truncate mt-0.5">${esc(e.text)}</div>` : ''}</div>
+          <span class="t3 text-xs whitespace-nowrap">${fmt.ago(e.received_at)}</span>
+        </div>`).join('')}</div>` : empty('Todavía no llegaron eventos', 'Configurá el webhook en tu app de Meta (Configuración muestra la URL) y vas a ver comentarios y menciones al instante.', '', 'bell')}`,
+  };
+}
+
+// =========================================================================
+// Admin · Configuración
+// =========================================================================
 async function viewSettings() {
   crumbs([{ label: 'Configuración' }]);
   const [s, assets] = await Promise.all([api('settings'), api('assets', { all: 1 })]);
-  const isAdmin = state.boot.user.role === 'admin';
   const conn = s.connections.map((c) => `
-    <div class="card p-4">
-      <div class="flex flex-wrap items-start gap-3">
-        <div class="min-w-0 flex-1">
-          <div class="font-medium text-slate-100">${esc(c.label)} <span class="pill ${c.token_source === 'system_user' ? 'blue' : 'gray'}">${{ oauth: 'Login Facebook', system_user: 'System User', manual: 'Token manual' }[c.token_source] || c.token_source}</span></div>
-          <div class="text-xs text-slate-500 mt-1">${esc(c.meta_user_name || '')} (${esc(c.meta_user_id || '')}) · Última sincronización: ${c.last_sync_at ? esc(c.last_sync_at) : 'nunca'}</div>
-          <div class="text-xs mt-1 ${c.days_left !== null && c.days_left < 10 ? 'text-red-300' : 'text-slate-400'}">${c.days_left === null ? '✅ Token sin vencimiento' : `Token vence en ${c.days_left} días (${esc(c.expires_at)})`}</div>
-          <div class="text-xs text-slate-500 mt-1">${c.assets.map((a) => `${a.total} ${{ business: 'portfolios', ad_account: 'cuentas pub.', page: 'páginas', ig_account: 'Instagram' }[a.type]}`).join(' · ')}</div>
-          ${c.last_error ? `<div class="text-xs text-amber-300 mt-2">⚠ ${esc(c.last_error)}</div>` : ''}
-          ${c.scopes.length ? `<details class="mt-2 text-xs text-slate-500"><summary class="cursor-pointer">Permisos (${c.scopes.length})</summary>${c.scopes.map(esc).join(', ')}</details>` : ''}
-        </div>
-        <div class="flex gap-2"><button class="btn" data-sync="${c.id}">⟳ Sincronizar</button>${isAdmin ? `<button class="btn btn-danger" data-del-conn="${c.id}">Quitar</button>` : ''}</div>
+    <div class="px-5 py-4 flex flex-wrap items-start gap-4">
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-2"><span class="t1 font-medium">${esc(c.label)}</span><span class="pill ${c.token_source === 'system_user' ? 'blue' : 'gray'} plain">${{ oauth: 'Login con Facebook', system_user: 'System User', manual: 'Token manual' }[c.token_source] || c.token_source}</span></div>
+        <div class="t3 text-xs mt-1">${esc(c.meta_user_name || '')} · ${esc(c.meta_user_id || '')} · sincronizado ${c.last_sync_at ? fmt.ago(c.last_sync_at) : 'nunca'}</div>
+        <div class="text-xs mt-1 ${c.days_left !== null && c.days_left < 10 ? 't-bad' : 't2'}">${c.days_left === null ? 'Token sin vencimiento' : `El token vence en ${c.days_left} días`}</div>
+        <div class="t3 text-xs mt-1">${c.assets.map((a) => `${a.total} ${{ business: 'portfolios', ad_account: 'cuentas', page: 'páginas', ig_account: 'Instagram' }[a.type]}`).join(' · ')}</div>
+        ${c.last_error ? `<div class="t-warn text-xs mt-2">${esc(c.last_error)}</div>` : ''}
       </div>
+      <div class="flex gap-2"><button class="btn btn-sm" data-sync="${c.id}">${icon('refresh', 14)}Sincronizar</button><button class="btn btn-sm btn-ghost btn-danger" data-del-conn="${c.id}">Quitar</button></div>
     </div>`).join('');
 
   const assetRows = [
     ...assets.ad_accounts.map((x) => ({ ...x, kind: 'Cuenta publicitaria' })), ...assets.pages.map((x) => ({ ...x, kind: 'Página' })),
     ...assets.ig_accounts.map((x) => ({ ...x, kind: 'Instagram' })),
   ];
-  const copy = (v) => `<button class="btn !py-1 !px-2 text-xs" data-copy="${esc(v)}">Copiar</button>`;
+  const copyRow = (label, v) => `<div><div class="t3 text-xs mb-1">${label}</div><div class="flex gap-2 items-center"><code class="mono text-xs break-all flex-1 sunk rounded-lg px-2.5 py-2">${esc(v)}</code><button class="btn btn-sm" data-copy="${esc(v)}">${icon('copy', 13)}</button></div></div>`;
 
   const html = `
-    <h1 class="text-xl font-semibold text-white mb-5">Configuración</h1>
+    ${pageHead('Configuración')}
     <div class="grid xl:grid-cols-3 gap-6">
       <div class="xl:col-span-2 space-y-6">
         <section class="card">
-          <div class="card-h"><h2>Conexiones con Meta</h2><div class="flex-1"></div>
-            ${isAdmin && s.oauth_ready ? '<a class="btn btn-primary" href="index.php?r=oauth-start">Conectar con Facebook</a>' : ''}
-            <button class="btn" data-sync="all">⟳ Sincronizar todo</button></div>
-          <div class="p-4 space-y-3">${conn || '<div class="text-sm text-slate-400">Todavía no hay conexiones. Usá “Conectar con Facebook” o pegá un token de System User abajo.</div>'}
-            ${!s.oauth_ready ? '<div class="text-xs text-amber-300">Completá meta.app_id y meta.app_secret en config.php para habilitar el login con Facebook.</div>' : ''}</div>
+          <div class="card-h"><div class="h2">Conexiones con Meta</div><div class="flex-1"></div>
+            ${s.oauth_ready ? `<a class="btn btn-primary btn-sm" href="index.php?r=oauth-start">Conectar con Facebook</a>` : ''}
+            <button class="btn btn-sm" data-sync="all">${icon('refresh', 14)}Sincronizar todo</button></div>
+          <div class="divide">${conn || '<div class="p-5 t2">Todavía no hay conexiones. Usá “Conectar con Facebook” o pegá un token de System User.</div>'}</div>
+          ${!s.oauth_ready ? '<div class="px-5 pb-4 t-warn text-xs">Completá meta.app_id y meta.app_secret en config.php para habilitar el login con Facebook.</div>' : ''}
         </section>
-        ${isAdmin ? `<section class="card">
-          <div class="card-h"><h2>Agregar token manualmente</h2></div>
-          <form class="p-4 grid sm:grid-cols-2 gap-3" id="token-form">
-            <input class="input" name="label" placeholder="Nombre (ej: System User Agencia)">
-            <select class="input" name="source"><option value="system_user">Token de System User (recomendado, no vence)</option><option value="manual">Token de usuario (se extiende a 60 días)</option></select>
-            <textarea class="input sm:col-span-2 font-mono text-xs" name="token" rows="3" placeholder="EAAG…" required></textarea>
-            <div class="sm:col-span-2 flex items-center gap-3"><button class="btn btn-primary">Guardar y sincronizar</button><span class="text-xs text-slate-500">El token se guarda cifrado (AES-256).</span></div>
+        <section class="card">
+          <div class="card-h"><div class="h2">Agregar token manualmente</div></div>
+          <form class="p-5 grid sm:grid-cols-2 gap-3" id="token-form">
+            <input class="input" name="label" placeholder="Nombre (ej: System User agencia)">
+            <select class="select" name="source"><option value="system_user">Token de System User (no vence)</option><option value="manual">Token de usuario (se extiende a 60 días)</option></select>
+            <textarea class="input sm:col-span-2 mono text-xs" name="token" rows="3" placeholder="EAAG…" required></textarea>
+            <div class="sm:col-span-2 flex items-center gap-3"><button class="btn btn-primary">Guardar y sincronizar</button><span class="t3 text-xs">Se guarda cifrado con AES-256.</span></div>
           </form>
-        </section>` : ''}
-        <section>${tableHtml('assets', [
-          { key: 'name', label: 'Activo', left: true, value: (r) => r.name, html: (r) => `<div class="text-slate-100">${esc(r.name)}</div><div class="text-[11px] text-slate-500">${esc(r.external_id)}</div>` },
+        </section>
+        ${tableHtml('assets', [
+          { key: 'name', label: 'Activo', left: true, value: (r) => r.name, html: (r) => `<div>${esc(r.name)}</div><div class="sub mono">${esc(r.external_id)}</div>` },
           { key: 'kind', label: 'Tipo', value: (r) => r.kind },
-          { key: 'is_hidden', label: 'Visible en el panel', value: (r) => (r.is_hidden ? 0 : 1),
-            html: (r) => (isAdmin ? `<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" data-asset="${r.id}" ${r.is_hidden ? '' : 'checked'}> ${r.is_hidden ? 'Oculto' : 'Visible'}</label>` : (r.is_hidden ? 'Oculto' : 'Visible')) },
-        ], assetRows, { title: 'Activos sincronizados', sort: 'kind', dir: 'asc', filters: [{ label: 'Todos' }, { label: 'Cuentas', fn: (r) => r.type === 'ad_account' }, { label: 'Páginas', fn: (r) => r.type === 'page' }, { label: 'Instagram', fn: (r) => r.type === 'ig_account' }] })}</section>
+          { key: 'is_hidden', label: 'En mi panel', value: (r) => (r.is_hidden ? 0 : 1),
+            html: (r) => `<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" class="check" data-asset-vis="${r.id}" ${r.is_hidden ? '' : 'checked'}><span class="t2">${r.is_hidden ? 'Oculto' : 'Visible'}</span></label>` },
+        ], assetRows, { title: 'Activos sincronizados', sort: 'kind', dir: 'asc', maxHeight: '440px', filters: [{ label: 'Todos' }, { label: 'Cuentas', fn: (r) => r.type === 'ad_account' }, { label: 'Páginas', fn: (r) => r.type === 'page' }, { label: 'Instagram', fn: (r) => r.type === 'ig_account' }] })}
       </div>
 
       <div class="space-y-6">
-        <section class="card p-4 space-y-3 text-sm">
-          <h2 class="font-semibold text-slate-100">Datos para tu app de Meta</h2>
-          <div><div class="text-xs text-slate-500 mb-1">URI de redirección OAuth válida</div><div class="flex gap-2 items-center"><code class="text-xs break-all flex-1">${esc(s.redirect_uri)}</code>${copy(s.redirect_uri)}</div></div>
-          <div><div class="text-xs text-slate-500 mb-1">URL del webhook</div><div class="flex gap-2 items-center"><code class="text-xs break-all flex-1">${esc(s.webhook_url)}</code>${copy(s.webhook_url)}</div></div>
-          <div class="text-xs text-slate-500">Graph API ${esc(s.graph_version)}</div>
+        <section class="card p-5 space-y-4">
+          <div class="h2">Datos para tu app de Meta</div>
+          ${copyRow('URI de redirección OAuth', s.redirect_uri)}
+          ${copyRow('URL del webhook', s.webhook_url)}
+          <div class="t3 text-xs">Graph API ${esc(s.graph_version)}</div>
         </section>
         <section class="card">
-          <div class="card-h"><h2>Usuarios del panel</h2></div>
-          <ul class="divide-y divide-slate-800 text-sm">${s.users.map((u) => `<li class="px-4 py-2.5 flex items-center gap-2"><div class="flex-1 min-w-0"><div class="text-slate-100 truncate">${esc(u.name)} <span class="pill gray">${esc(u.role)}</span></div><div class="text-xs text-slate-500 truncate">${esc(u.email)}</div></div>${isAdmin && u.id !== state.boot.user.id ? `<button class="text-xs text-red-300 hover:underline" data-del-user="${u.id}">Eliminar</button>` : ''}</li>`).join('')}</ul>
-          ${isAdmin ? `<form class="p-4 space-y-2 border-t border-slate-800" id="user-form">
-            <input class="input" name="name" placeholder="Nombre" required><input class="input" name="email" type="email" placeholder="Email" required>
+          <div class="card-h"><div class="h2">Equipo de la agencia</div></div>
+          <div class="divide">${s.users.map((u) => `<div class="px-5 py-3 flex items-center gap-3"><div class="mono-avatar w-8 h-8 text-xs" style="background:var(--sunk);color:var(--t2)">${esc(initials(u.name))}</div><div class="flex-1 min-w-0"><div class="t1 truncate">${esc(u.name)}</div><div class="t3 text-xs mono truncate">${esc(u.username)}</div></div>${u.id !== state.boot.user.id ? `<button class="btn btn-sm btn-ghost btn-danger" data-del-user="${u.id}">${icon('x', 14)}</button>` : '<span class="pill plain">Vos</span>'}</div>`).join('')}</div>
+          <form class="p-5 space-y-2 hair-t" id="admin-form">
+            <input class="input" name="name" placeholder="Nombre" required><input class="input mono" name="username" placeholder="Usuario o email" autocapitalize="none" required>
             <input class="input" name="password" type="password" minlength="8" placeholder="Contraseña (mín. 8)" required>
-            <select class="input" name="role"><option value="viewer">Solo lectura (ideal para clientes)</option><option value="admin">Administrador</option></select>
-            <button class="btn btn-primary w-full justify-center">Agregar usuario</button></form>` : ''}
+            <button class="btn w-full">Agregar administrador</button>
+            <p class="t3 text-xs">Para clientes usá la sección Clientes.</p>
+          </form>
         </section>
         <section class="card">
-          <div class="card-h"><h2>Cambiar mi contraseña</h2></div>
-          <form class="p-4 space-y-2" id="pass-form"><input class="input" type="password" name="current" placeholder="Actual" required><input class="input" type="password" name="new" minlength="8" placeholder="Nueva (mín. 8)" required><button class="btn w-full justify-center">Actualizar</button></form>
+          <div class="card-h"><div class="h2">Mi contraseña</div></div>
+          <form class="p-5 space-y-2" id="pass-form"><input class="input" type="password" name="current" placeholder="Actual" required><input class="input" type="password" name="new" minlength="8" placeholder="Nueva (mín. 8)" required><button class="btn w-full">Actualizar</button></form>
         </section>
         <section class="card">
-          <div class="card-h"><h2>Mantenimiento</h2><div class="flex-1"></div>${isAdmin ? '<button class="btn" id="flush">Vaciar caché</button>' : ''}</div>
-          <ul class="text-xs divide-y divide-slate-800 max-h-72 overflow-y-auto">${s.log.map((l) => `<li class="px-4 py-2"><span class="pill ${l.status === 'ok' ? 'green' : 'red'}">${esc(l.job)}</span> <span class="text-slate-500">${esc(l.created_at)}</span><div class="text-slate-400 truncate" title="${esc(l.message)}">${esc(l.message)}</div></li>`).join('') || '<li class="px-4 py-3 text-slate-500">El cron todavía no corrió.</li>'}</ul>
+          <div class="card-h"><div class="h2">Mantenimiento</div><div class="flex-1"></div><button class="btn btn-sm" id="flush">Vaciar caché</button></div>
+          <ul class="text-xs divide max-h-72 overflow-y-auto">${s.log.map((l) => `<li class="px-5 py-2.5"><div class="flex items-center gap-2"><span class="pill ${l.status === 'ok' ? 'green' : 'red'}">${esc(l.job)}</span><span class="t3">${fmt.ago(l.created_at)}</span></div><div class="t2 truncate mt-1" title="${esc(l.message)}">${esc(l.message)}</div></li>`).join('') || '<li class="px-5 py-4 t3">El cron todavía no corrió.</li>'}</ul>
         </section>
       </div>
     </div>`;
 
-  const post = async (action, body, okMsg) => {
-    try { const r = await api(action, {}, body); if (okMsg) toast(okMsg, 'success'); return r; } catch (e) { toast(e.message, 'error'); throw e; }
-  };
-  const reload = async () => { state.boot = await api('bootstrap'); updateCounts(); render(); };
-
+  const reload = async () => { state.boot = await api('bootstrap'); renderNav(); render(); };
   return {
     html,
     mount() {
       mountTable('assets');
       const view = $('#view');
       view.addEventListener('click', async (e) => {
-        const t = e.target;
+        const t = e.target.closest('button');
+        if (!t) return;
         if (t.dataset.sync) {
-          t.disabled = true; t.textContent = 'Sincronizando…';
-          try { await post('sync', t.dataset.sync === 'all' ? {} : { connection_id: +t.dataset.sync }, 'Sincronización completa'); await reload(); } catch { t.disabled = false; t.textContent = '⟳ Reintentar'; }
+          t.disabled = true; t.lastChild.textContent = 'Sincronizando…';
+          try { await post('sync', t.dataset.sync === 'all' ? {} : { connection_id: +t.dataset.sync }, 'Sincronización completa'); await reload(); } catch { t.disabled = false; }
         } else if (t.dataset.delConn) {
           if (confirm('¿Quitar esta conexión? Se borran sus activos del panel (no afecta nada en Meta).')) { await post('connection_delete', { id: +t.dataset.delConn }, 'Conexión eliminada'); await reload(); }
         } else if (t.dataset.delUser) {
           if (confirm('¿Eliminar este usuario?')) { await post('user_delete', { id: +t.dataset.delUser }, 'Usuario eliminado'); render(); }
         } else if (t.dataset.copy) {
-          navigator.clipboard?.writeText(t.dataset.copy); toast('Copiado', 'success');
+          copyText(t.dataset.copy);
         } else if (t.id === 'flush') {
           await post('cache_flush', {}, 'Caché vaciada');
         }
       });
       view.addEventListener('change', async (e) => {
-        if (e.target.dataset.asset) { await post('asset_toggle', { id: +e.target.dataset.asset, hidden: !e.target.checked }); state.boot = await api('bootstrap'); updateCounts(); }
+        if (e.target.dataset.assetVis) {
+          await post('asset_toggle', { id: +e.target.dataset.assetVis, hidden: !e.target.checked });
+          e.target.nextElementSibling.textContent = e.target.checked ? 'Visible' : 'Oculto';
+          state.boot = await api('bootstrap'); renderNav();
+        }
       });
-      const form = (id, action, msg, after) => {
+      const form = (id, action, msg, after, extra = {}) => {
         const f = $('#' + id);
-        if (!f) return;
-        f.addEventListener('submit', async (e) => {
+        f?.addEventListener('submit', async (e) => {
           e.preventDefault();
           const btn = $('button', f); btn.disabled = true;
-          try { await post(action, Object.fromEntries(new FormData(f)), msg); f.reset(); if (after) await after(); } catch { /* toast ya mostrado */ } finally { btn.disabled = false; }
+          try { await post(action, { ...Object.fromEntries(new FormData(f)), ...extra }, msg); f.reset(); if (after) await after(); } catch { /* toast */ } finally { btn.disabled = false; }
         });
       };
       form('token-form', 'connection_add_token', 'Token guardado y activos sincronizados', reload);
-      form('user-form', 'user_add', 'Usuario creado', () => render());
+      form('admin-form', 'user_add', 'Administrador creado', () => render(), { role: 'admin' });
       form('pass-form', 'password_change', 'Contraseña actualizada');
     },
   };
 }
 
-// ---------- router ----------
-const ROUTES = [
+// =========================================================================
+// Navegación
+// =========================================================================
+const ADMIN_NAV = [
+  ['Rendimiento', [['overview', '#/', 'grid', 'Resumen'], ['ads', '#/ads', 'target', 'Campañas', 'ad_account'], ['pages', '#/pages', 'page', 'Facebook', 'page'], ['ig', '#/ig', 'instagram', 'Instagram', 'ig_account']]],
+  ['Agencia', [['clients', '#/clients', 'users', 'Clientes'], ['activity', '#/activity', 'bell', 'Actividad'], ['settings', '#/settings', 'sliders', 'Configuración']]],
+];
+const CLIENT_NAV = [['home', '#/', 'home', 'Inicio'], ['ads', '#/ads', 'target', 'Campañas'], ['social', '#/social', 'social', 'Redes'], ['work', '#/work', 'briefcase', 'Trabajo'], ['report', '#/report', 'report', 'Reporte']];
+
+function renderNav() {
+  if (isClient()) {
+    const html = CLIENT_NAV.map(([k, href, ic, l]) => `<a href="${href}" data-nav="${k}">${icon(ic)}${l}</a>`).join('');
+    $('#nav').innerHTML = html;
+    $('#nav-mobile').innerHTML = html;
+    const c = state.boot.client;
+    $('#client-brand').innerHTML = `
+      <div class="mono-avatar w-8 h-8 text-xs" style="background:var(--accent);color:var(--on-accent)">${c?.logo_url ? `<img src="${esc(c.logo_url)}" class="w-full h-full object-cover rounded-[10px]" alt="">` : esc(initials(c?.name))}</div>
+      <div class="leading-tight min-w-0 hidden sm:block"><div class="font-semibold t1 truncate">${esc(c?.name || '')}</div><div class="t3 text-[11px] truncate">por ${esc(state.boot.agency_name)}</div></div>`;
+    return;
+  }
+  const counts = state.boot.counts;
+  $('#nav').innerHTML = ADMIN_NAV.map(([sec, items]) => `<div class="nav-sec">${sec}</div>${items.map(([k, href, ic, l, cnt]) => `
+    <a href="${href}" data-nav="${k}" class="nav-link">${icon(ic)}${l}${cnt && counts[cnt] ? `<span class="nav-count">${counts[cnt]}</span>` : ''}</a>`).join('')}`).join('');
+}
+
+function markNav(key) { $$('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === key)); }
+
+// =========================================================================
+// Buscador rápido (Ctrl/Cmd + K)
+// =========================================================================
+let paletteItems = null;
+async function openPalette() {
+  const root = $('#palette');
+  root.innerHTML = `<div class="palette"><input placeholder="Ir a una cuenta, página, Instagram o cliente…" autofocus><ul class="py-2 max-h-[52vh] overflow-y-auto"></ul><div class="hair-t px-4 py-2 t3 text-[11px] flex gap-3"><span><kbd>↑</kbd> <kbd>↓</kbd> navegar</span><span><kbd>Enter</kbd> abrir</span><span><kbd>Esc</kbd> cerrar</span></div></div>`;
+  root.classList.remove('hidden');
+  const input = $('input', root), ul = $('ul', root);
+  const nav = (isClient() ? CLIENT_NAV.map(([, h, ic, l]) => [l, h, ic, 'Sección']) : ADMIN_NAV.flatMap(([, it]) => it.map(([, h, ic, l]) => [l, h, ic, 'Sección'])));
+  let items = nav;
+  let sel = 0;
+  const draw = () => {
+    const q = input.value.trim().toLowerCase();
+    const list = (q ? items.filter(([l, , , t]) => (l + ' ' + t).toLowerCase().includes(q)) : items).slice(0, 40);
+    sel = Math.min(sel, Math.max(0, list.length - 1));
+    ul.innerHTML = list.map(([l, h, ic, t], i) => `<li data-h="${esc(h)}" class="${i === sel ? 'sel' : ''}">${icon(ic)}<span class="flex-1 truncate">${esc(l)}</span><span class="t3 text-xs">${esc(t)}</span></li>`).join('') || '<li class="t3">Sin resultados</li>';
+    return list;
+  };
+  draw();
+  input.focus();
+  if (!paletteItems) {
+    try {
+      const a = await api('assets', { client: portalClient() });
+      paletteItems = [
+        ...a.ad_accounts.map((x) => [x.name, `#/ads/${x.external_id}`, 'target', 'Cuenta publicitaria']),
+        ...a.pages.map((x) => [x.name, `#/pages/${x.external_id}`, 'page', 'Facebook']),
+        ...a.ig_accounts.map((x) => [x.name, `#/ig/${x.external_id}`, 'instagram', 'Instagram']),
+        ...(isClient() ? [] : (await api('clients')).map((c) => [c.name, `#/clients/${c.id}`, 'users', 'Cliente'])),
+      ];
+    } catch { paletteItems = []; }
+  }
+  items = [...nav, ...paletteItems];
+  draw();
+  const go = (h) => { root.classList.add('hidden'); if (h) location.hash = h; };
+  input.addEventListener('input', () => { sel = 0; draw(); });
+  input.addEventListener('keydown', (e) => {
+    const list = draw();
+    if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, list.length - 1); draw(); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); draw(); e.preventDefault(); }
+    if (e.key === 'Enter' && list[sel]) go(list[sel][1]);
+    if (e.key === 'Escape') go();
+  });
+  ul.onclick = (e) => { const li = e.target.closest('li[data-h]'); if (li) go(li.dataset.h); };
+  root.onclick = (e) => { if (e.target === root) go(); };
+}
+
+// =========================================================================
+// Router
+// =========================================================================
+const ADMIN_ROUTES = [
   [/^\/?$/, viewOverview, 'overview'],
   [/^\/ads$/, viewAdAccounts, 'ads'],
   [/^\/ads\/(act_\d+)$/, viewAccount, 'ads'],
@@ -1163,30 +1862,54 @@ const ROUTES = [
   [/^\/pages\/(\d+)$/, viewPage, 'pages'],
   [/^\/ig$/, viewIgList, 'ig'],
   [/^\/ig\/(\d+)$/, viewIg, 'ig'],
+  [/^\/social$/, viewSocial, 'ig'],
+  [/^\/clients$/, viewClients, 'clients'],
+  [/^\/clients\/(\d+)$/, viewClient, 'clients'],
+  [/^\/preview\/(\d+)$/, viewClientHome, 'clients', true],
+  [/^\/preview\/(\d+)\/work$/, viewWork, 'clients', true],
+  [/^\/preview\/(\d+)\/report$/, viewReport, 'clients', true],
   [/^\/activity$/, viewActivity, 'activity'],
   [/^\/settings$/, viewSettings, 'settings'],
 ];
+const CLIENT_ROUTES = [
+  [/^\/?$/, () => viewClientHome(), 'home'],
+  [/^\/ads$/, viewAdAccounts, 'ads'],
+  [/^\/ads\/(act_\d+)$/, viewAccount, 'ads'],
+  [/^\/ads\/(act_\d+)\/c\/(\d+)$/, viewCampaign, 'ads'],
+  [/^\/ads\/(act_\d+)\/c\/(\d+)\/s\/(\d+)$/, viewAdset, 'ads'],
+  [/^\/social$/, viewSocial, 'social'],
+  [/^\/pages\/(\d+)$/, viewPage, 'social'],
+  [/^\/ig\/(\d+)$/, viewIg, 'social'],
+  [/^\/work$/, () => viewWork(), 'work'],
+  [/^\/report$/, () => viewReport(), 'report'],
+];
+const NO_LIVE = /^#\/(settings|clients)/;
 
 async function render({ silent = false } = {}) {
   const path = location.hash.replace(/^#/, '') || '/';
-  const view = $('#view');
   const id = ++state.renderId;
-  const match = ROUTES.map(([re, fn, nav]) => [path.match(re), fn, nav]).find(([m]) => m);
+  const routes = isClient() ? CLIENT_ROUTES : ADMIN_ROUTES;
+  const match = routes.map(([re, fn, nav, preview]) => [path.match(re), fn, nav, preview]).find(([m]) => m);
   if (!match) { location.hash = '#/'; return; }
-  const [m, fn, nav] = match;
-  $$('#nav [data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === nav));
+  const [m, fn, nav, preview] = match;
+  if (!isClient()) {
+    state.preview = preview ? +m[1] : null;
+    if (!preview) setAccent(null);
+  }
+  markNav(nav);
   closeMenu();
   const scroll = window.scrollY;
-  if (!silent) { view.innerHTML = skeleton(); window.scrollTo(0, 0); }
-  // Reemplazamos #view para soltar listeners de la vista anterior.
+  if (!silent) { $('#view').innerHTML = skeleton(); window.scrollTo(0, 0); }
   try {
     const out = await fn(...m.slice(1));
     if (id !== state.renderId) return;
     destroyCharts();
-    const fresh = view.cloneNode(false);
-    view.replaceWith(fresh);
+    // Reemplazamos #view para soltar los listeners de la vista anterior.
+    const fresh = $('#view').cloneNode(false);
+    $('#view').replaceWith(fresh);
     fresh.innerHTML = out.html;
-    out.mount?.();
+    hydrateIcons(fresh);
+    await out.mount?.();
     if (silent) window.scrollTo(0, scroll);
   } catch (e) {
     if (id !== state.renderId) return;
@@ -1194,78 +1917,91 @@ async function render({ silent = false } = {}) {
     else toast('No se pudo actualizar: ' + e.message, 'error');
   } finally {
     state.force = false;
-    $('#refresh-btn').classList.remove('animate-spin');
+    $('#refresh-btn svg')?.classList.remove('animate-spin');
   }
 }
 
-// ---------- controles de fecha / en vivo ----------
-function initControls() {
-  const preset = $('#preset');
-  preset.innerHTML = Object.entries(state.boot.presets).map(([k, l]) => `<option value="${k}">${l}</option>`).join('') + '<option value="custom">Personalizado…</option>';
-  preset.value = state.range.preset;
-  const custom = $('#custom-range');
-  const since = $('#since'), until = $('#until');
-  const today = new Date().toISOString().slice(0, 10);
-  since.max = until.max = today;
-  since.value = state.range.since || '';
-  until.value = state.range.until || today;
-  const showCustom = () => { custom.classList.toggle('hidden', preset.value !== 'custom'); custom.classList.toggle('flex', preset.value === 'custom'); };
-  showCustom();
-  preset.addEventListener('change', () => {
-    showCustom();
-    if (preset.value !== 'custom') { state.range = { preset: preset.value }; store.set('range', state.range); render(); }
-  });
-  const applyCustom = () => {
-    if (since.value && until.value && since.value <= until.value) {
-      state.range = { preset: 'custom', since: since.value, until: until.value };
-      store.set('range', state.range);
-      render();
-    }
-  };
-  since.addEventListener('change', applyCustom);
-  until.addEventListener('change', applyCustom);
+// =========================================================================
+// Controles: rango de fechas, en vivo, tema, menú
+// =========================================================================
+const QUICK = [['today', 'Hoy'], ['last_7d', '7 días'], ['last_30d', '30 días'], ['this_month', 'Este mes']];
 
-  $('#refresh-btn').addEventListener('click', () => { state.force = true; $('#refresh-btn').classList.add('animate-spin'); render({ silent: true }); });
+function renderRange() {
+  const r = state.range;
+  const box = $('#range-ctl');
+  box.innerHTML = `
+    <div class="seg hidden lg:inline-flex">${QUICK.map(([k, l]) => `<button data-p="${k}" class="${r.preset === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <select class="select select-sm" id="preset">${Object.entries(state.boot.presets).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}<option value="custom">Personalizado…</option></select>
+    <div id="custom-range" class="${r.preset === 'custom' ? 'flex' : 'hidden'} items-center gap-1">
+      <input type="date" id="since" class="input select-sm w-[136px]" value="${esc(r.since || '')}"><span class="t3">–</span><input type="date" id="until" class="input select-sm w-[136px]" value="${esc(r.until || '')}">
+    </div>`;
+  const preset = $('#preset');
+  preset.value = r.preset;
+  const today = new Date().toISOString().slice(0, 10);
+  $('#since').max = $('#until').max = today;
+  const setPreset = (p) => {
+    if (p === 'custom') { $('#custom-range').classList.replace('hidden', 'flex'); preset.value = 'custom'; return; }
+    state.range = { preset: p }; store.set('range', state.range); renderRange(); render();
+  };
+  $$('[data-p]', box).forEach((b) => b.addEventListener('click', () => setPreset(b.dataset.p)));
+  preset.addEventListener('change', () => setPreset(preset.value));
+  const applyCustom = () => {
+    const s = $('#since').value, u = $('#until').value;
+    if (s && u && s <= u) { state.range = { preset: 'custom', since: s, until: u }; store.set('range', state.range); render(); }
+  };
+  $('#since').addEventListener('change', applyCustom);
+  $('#until').addEventListener('change', applyCustom);
+}
+
+function initControls() {
+  renderRange();
+  hydrateIcons();
+  paintThemeButtons();
+  $$('[data-theme-toggle]').forEach((b) => b.addEventListener('click', () => setTheme(theme() === 'dark' ? 'light' : 'dark')));
+  $('#refresh-btn').addEventListener('click', () => { state.force = true; $('#refresh-btn svg')?.classList.add('animate-spin'); paletteItems = null; render({ silent: true }); });
   const live = $('#live-btn');
   const setLive = (on) => {
     state.live = on; store.set('live', on);
     live.classList.toggle('live-on', on);
     clearInterval(state.timer);
     if (on) {
-      const every = Math.max(60, state.boot.refresh_sec) * 1000;
       state.timer = setInterval(() => {
-        const path = location.hash;
-        if (document.visibilityState === 'visible' && !path.startsWith('#/settings') && $('#modal').classList.contains('hidden')) render({ silent: true });
-      }, every);
+        const busy = !$('#modal').classList.contains('hidden') || !$('#palette').classList.contains('hidden') || document.activeElement?.matches('input,textarea,select');
+        if (document.visibilityState === 'visible' && !busy && !NO_LIVE.test(location.hash)) render({ silent: true });
+      }, Math.max(60, state.boot.refresh_sec) * 1000);
     }
   };
-  live.addEventListener('click', () => { setLive(!state.live); toast(state.live ? 'Actualización automática activada' : 'Actualización automática pausada'); });
+  live.addEventListener('click', () => { setLive(!state.live); toast(state.live ? 'Actualización automática activada' : 'Actualización automática en pausa'); });
   setLive(state.live);
 
-  $('#menu-btn').addEventListener('click', () => { $('#sidebar').classList.remove('-translate-x-full'); $('#backdrop').classList.remove('hidden'); });
-  $('#backdrop').addEventListener('click', closeMenu);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#modal').classList.add('hidden'); });
+  $('#menu-btn')?.addEventListener('click', () => { $('#sidebar').classList.remove('-translate-x-full'); $('#backdrop').classList.remove('hidden'); });
+  $('#backdrop')?.addEventListener('click', closeMenu);
+  $('#palette-btn')?.addEventListener('click', openPalette);
+  $('#account-btn')?.addEventListener('click', accountMenu);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeModal(); $('#palette').classList.add('hidden'); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
+  });
 }
 
 function closeMenu() {
-  if (window.innerWidth < 1024) { $('#sidebar').classList.add('-translate-x-full'); $('#backdrop').classList.add('hidden'); }
-}
-
-function updateCounts() {
-  $$('[data-count]').forEach((el) => { el.textContent = state.boot.counts[el.dataset.count] || ''; });
+  if (window.innerWidth < 1024 && $('#sidebar')) { $('#sidebar').classList.add('-translate-x-full'); $('#backdrop').classList.add('hidden'); }
 }
 
 (async function init() {
+  applyChartTheme();
   try {
     state.boot = await api('bootstrap');
   } catch (e) {
     $('#view').innerHTML = errorBox(e.message);
     return;
   }
-  $('#user-name').textContent = state.boot.user.name;
-  updateCounts();
+  $$('#user-name').forEach((el) => { el.textContent = state.boot.user.name; });
+  if ($('#user-initials')) $('#user-initials').textContent = initials(state.boot.user.name);
+  if (isClient()) setAccent(state.boot.client?.color);
+  renderNav();
   initControls();
-  if (window.FLASH) toast(window.FLASH.text, window.FLASH.type);
+  if (window.FLASH) toast(window.FLASH.text, window.FLASH.type === 'error' ? 'error' : 'info');
   window.addEventListener('hashchange', () => render());
   render();
 })();

@@ -37,8 +37,13 @@ final class Webhooks
         return $n;
     }
 
-    public static function recent(int $limit = 50): array
+    /** $only: IDs de páginas/Instagram permitidos (null = todos). */
+    public static function recent(int $limit = 50, ?array $only = null): array
     {
+        if ($only !== null && !$only) {
+            return [];
+        }
+        $where = $only !== null ? ' WHERE object_id IN (' . implode(',', array_fill(0, count($only), '?')) . ')' : '';
         $names = [];
         foreach (Db::all("SELECT external_id, name FROM assets WHERE type IN ('page','ig_account')") as $a) {
             $names[$a['external_id']] = $a['name'];
@@ -55,6 +60,6 @@ final class Webhooks
                 'item'        => $value['item'] ?? null,
                 'received_at' => $r['received_at'],
             ];
-        }, Db::all('SELECT * FROM webhook_events ORDER BY id DESC LIMIT ' . max(1, min(200, $limit))));
+        }, Db::all('SELECT * FROM webhook_events' . $where . ' ORDER BY id DESC LIMIT ' . max(1, min(200, $limit)), $only ?? []));
     }
 }

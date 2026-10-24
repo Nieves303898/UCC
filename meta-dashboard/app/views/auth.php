@@ -1,44 +1,55 @@
 <?php
 /** @var string $mode install|login */
 /** @var ?string $error */
-$title = $mode === 'install' ? 'Instalación' : 'Ingresar';
+$appName = App\Config::get('app_name', 'Meta Hub');
+$agency = App\Config::get('agency_name', $appName);
 ?><!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><?= e($title) ?> · <?= e(App\Config::get('app_name', 'Meta Hub')) ?></title>
-  <meta name="robots" content="noindex,nofollow">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/tailwind.css?v=1">
-  <style>body{font-family:Inter,system-ui,sans-serif}</style>
+<?php require __DIR__ . '/_head.php'; ?>
+  <title><?= $mode === 'install' ? 'Instalación' : 'Ingresar' ?> · <?= e($appName) ?></title>
 </head>
-<body class="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-  <div class="w-full max-w-md">
-    <div class="flex items-center gap-3 mb-8 justify-center">
-      <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500 to-fuchsia-500 grid place-items-center font-bold">M</div>
-      <span class="text-xl font-semibold"><?= e(App\Config::get('app_name', 'Meta Hub')) ?></span>
-    </div>
-    <form method="post" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
-      <h1 class="text-lg font-semibold"><?= $mode === 'install' ? 'Crear usuario administrador' : 'Ingresá a tu panel' ?></h1>
-      <?php if ($mode === 'install'): ?>
-        <p class="text-sm text-slate-400">Primera ejecución: se crean las tablas en la base de datos y tu usuario.</p>
-      <?php endif; ?>
-      <?php if ($error): ?>
-        <div class="rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm px-3 py-2"><?= e($error) ?></div>
-      <?php endif; ?>
-      <input type="hidden" name="csrf" value="<?= e(App\Auth::csrfToken()) ?>">
-      <?php if ($mode === 'install'): ?>
-        <label class="block"><span class="text-sm text-slate-400">Nombre</span>
-          <input name="name" class="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" required></label>
-      <?php endif; ?>
-      <label class="block"><span class="text-sm text-slate-400">Email</span>
-        <input name="email" type="email" autocomplete="username" class="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" required></label>
-      <label class="block"><span class="text-sm text-slate-400">Contraseña</span>
-        <input name="password" type="password" autocomplete="<?= $mode === 'install' ? 'new-password' : 'current-password' ?>" minlength="8" class="mt-1 w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" required></label>
-      <button class="w-full rounded-lg bg-blue-600 hover:bg-blue-500 font-medium py-2.5 transition"><?= $mode === 'install' ? 'Instalar y entrar' : 'Ingresar' ?></button>
-    </form>
+<body class="min-h-screen">
+  <div class="min-h-screen grid lg:grid-cols-[1fr_520px]">
+    <section class="hidden lg:flex flex-col justify-between p-12 hair-r" style="background:var(--panel)">
+      <div class="flex items-center gap-3">
+        <div class="mono-avatar w-9 h-9" style="background:var(--t1);color:var(--bg)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17V7l7 6 7-6v10"/></svg>
+        </div>
+        <span class="h2"><?= e($appName) ?></span>
+      </div>
+      <div class="max-w-lg">
+        <div class="eyebrow mb-4">Performance · Meta Ads · Facebook · Instagram</div>
+        <h1 class="text-4xl font-semibold tracking-tight t1 leading-tight">Tus resultados, en vivo y en un solo lugar.</h1>
+        <p class="t2 mt-4 text-base leading-relaxed">Inversión, ventas, conversaciones y contenido actualizados en tiempo real, junto con todo lo que estamos trabajando para tu marca.</p>
+        <div class="mt-10 grid grid-cols-3 gap-px rounded-xl overflow-hidden" style="background:var(--line);border:1px solid var(--line)">
+          <?php foreach ([['Actualización', 'cada 2 min'], ['Fuentes', 'Ads · FB · IG'], ['Acceso', 'privado']] as [$k, $v]): ?>
+            <div class="p-4" style="background:var(--bg)"><div class="eyebrow"><?= e($k) ?></div><div class="t1 font-medium mt-1"><?= e($v) ?></div></div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <div class="t3 text-xs"><?= e($agency) ?></div>
+    </section>
+
+    <section class="flex items-center justify-center p-6">
+      <form method="post" class="w-full max-w-sm space-y-5">
+        <div>
+          <h2 class="h1"><?= $mode === 'install' ? 'Crear administrador' : 'Ingresar' ?></h2>
+          <p class="t2 mt-1"><?= $mode === 'install' ? 'Primera ejecución: se crean las tablas y tu usuario.' : 'Usá el usuario y la contraseña que te dio la agencia.' ?></p>
+        </div>
+        <?php if ($error): ?>
+          <div class="pill red plain" style="height:auto;padding:9px 12px;border-radius:10px;white-space:normal"><?= e($error) ?></div>
+        <?php endif; ?>
+        <input type="hidden" name="csrf" value="<?= e(App\Auth::csrfToken()) ?>">
+        <?php if ($mode === 'install'): ?>
+          <label class="field"><span>Tu nombre</span><input class="input" name="name" required></label>
+        <?php endif; ?>
+        <label class="field"><span>Usuario o email</span><input class="input" name="login" autocomplete="username" autocapitalize="none" required autofocus></label>
+        <label class="field"><span>Contraseña</span><input class="input" name="password" type="password" minlength="8" autocomplete="<?= $mode === 'install' ? 'new-password' : 'current-password' ?>" required></label>
+        <button class="btn btn-primary w-full" style="height:40px"><?= $mode === 'install' ? 'Instalar y entrar' : 'Ingresar' ?></button>
+        <p class="t3 text-xs text-center lg:hidden"><?= e($agency) ?></p>
+      </form>
+    </section>
   </div>
 </body>
 </html>

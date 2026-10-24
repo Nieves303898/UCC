@@ -44,15 +44,12 @@ if (!$installed) {
             if (!Auth::checkCsrf($_POST['csrf'] ?? null)) {
                 throw new RuntimeException('Sesión vencida, recargá la página.');
             }
-            if (!filter_var($_POST['email'] ?? '', FILTER_VALIDATE_EMAIL) || strlen($_POST['password'] ?? '') < 8) {
-                throw new RuntimeException('Ingresá un email válido y una contraseña de al menos 8 caracteres.');
-            }
             App\Crypto::encrypt('test'); // valida app_key
             Schema::install();
             if (!Db::one('SELECT id FROM users LIMIT 1')) {
-                Auth::createUser($_POST['email'], $_POST['name'] ?: 'Admin', $_POST['password']);
+                Auth::createUser((string) ($_POST['login'] ?? ''), (string) ($_POST['name'] ?? ''), (string) ($_POST['password'] ?? ''));
             }
-            Auth::attempt($_POST['email'], $_POST['password']);
+            Auth::attempt((string) $_POST['login'], (string) $_POST['password']);
             redirect('index.php#/settings');
         } catch (Throwable $ex) {
             $error = $ex->getMessage();
@@ -65,10 +62,10 @@ switch ($route) {
     case 'login':
         $error = null;
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            if (Auth::checkCsrf($_POST['csrf'] ?? null) && Auth::attempt((string) ($_POST['email'] ?? ''), (string) ($_POST['password'] ?? ''))) {
+            if (Auth::checkCsrf($_POST['csrf'] ?? null) && Auth::attempt((string) ($_POST['login'] ?? ''), (string) ($_POST['password'] ?? ''))) {
                 redirect('index.php');
             }
-            $error = 'Email o contraseña incorrectos.';
+            $error = 'Usuario o contraseña incorrectos.';
         }
         view('auth', ['mode' => 'login', 'error' => $error]);
 

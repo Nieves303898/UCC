@@ -6,9 +6,11 @@ namespace App;
 /** Login de usuarios del panel + protección CSRF. */
 final class Auth
 {
-    public static function attempt(string $email, string $password): bool
+    /** $login puede ser el usuario o el email. */
+    public static function attempt(string $login, string $password): bool
     {
-        $user = Db::one('SELECT * FROM users WHERE email = ?', [mb_strtolower(trim($email))]);
+        $login = mb_strtolower(trim($login));
+        $user = Db::one('SELECT * FROM users WHERE username = ? OR email = ?', [$login, $login]);
         if (!$user || !password_verify($password, $user['password_hash'])) {
             usleep(400000); // freno básico a fuerza bruta
             return false;
@@ -25,7 +27,7 @@ final class Auth
         if ($user === false) {
             $user = empty($_SESSION['user_id'])
                 ? null
-                : Db::one('SELECT id, email, name, role FROM users WHERE id = ?', [$_SESSION['user_id']]);
+                : Db::one('SELECT id, username, email, name, role, client_id FROM users WHERE id = ?', [$_SESSION['user_id']]);
         }
         return $user;
     }
@@ -36,13 +38,30 @@ final class Auth
         session_destroy();
     }
 
-    public static function createUser(string $email, string $name, string $password, string $role = 'admin'): int
+    public static function isAdmin(): bool
     {
+        return (self::user()['role'] ?? '') === 'admin';
+    }
+
+    public static function createUser(string $username, string $name, string $password, string $role = 'admin', ?int $clientId = null, ?string $email = null): int
+    {
+        $username = mb_strtolower(trim($username));
+        if (!preg_match('/^[a-z0-9._@+-]{3,190}$/', $username)) {
+            throw new \InvalidArgumentException('El usuario sólo puede tener letras, números y . _ - @ (mínimo 3).');
+        }
+        if (strlen($password) < 8) {
+            throw new \InvalidArgumentException('La contraseña debe tener al menos 8 caracteres.');
+        }
+        if (Db::one('SELECT id FROM users WHERE username = ? OR email = ?', [$username, $username])) {
+            throw new \InvalidArgumentException('Ese usuario ya existe.');
+        }
         return Db::insert('users', [
-            'email'         => mb_strtolower(trim($email)),
-            'name'          => trim($name),
+            'username'      => $username,
+            'email'         => $email ? mb_strtolower(trim($email)) : (filter_var($username, FILTER_VALIDATE_EMAIL) ? $username : null),
+            'name'          => trim($name) ?: $username,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'role'          => $role,
+            'role'          => $role === 'client' ? 'client' : 'admin',
+            'client_id'     => $role === 'client' ? $clientId : null,
             'created_at'    => Db::now(),
         ]);
     }

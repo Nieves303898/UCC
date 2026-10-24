@@ -4,7 +4,9 @@
  * config.php NUNCA debe quedar dentro de la carpeta pública.
  */
 return [
-    'app_name' => 'Meta Hub',
+    'app_name'    => 'Meta Hub',
+    // Se muestra en el portal de clientes y en los reportes.
+    'agency_name' => 'Tres Dos Agency',
     // URL pública donde vive /public (sin barra final). Ej: https://metricas.tudominio.com
     'app_url'  => 'https://metricas.tudominio.com',
     // Clave para cifrar tokens. Generala con:  php -r "echo base64_encode(random_bytes(32));"

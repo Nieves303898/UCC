@@ -14,14 +14,48 @@ final class Schema
         $suffix = $mysql ? ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci' : '';
 
         $tables = [
+            // role: admin (agencia, ve todo) | client (sólo ve lo asignado a su client_id)
             "CREATE TABLE IF NOT EXISTS users (
                 id $id,
-                email VARCHAR(190) NOT NULL UNIQUE,
+                username VARCHAR(190) NOT NULL UNIQUE,
+                email VARCHAR(190) NULL,
                 name VARCHAR(190) NOT NULL,
                 password_hash VARCHAR(255) NOT NULL,
                 role VARCHAR(20) NOT NULL DEFAULT 'admin',
+                client_id INT NULL,
                 created_at DATETIME NOT NULL,
                 last_login_at DATETIME NULL
+            )$suffix",
+
+            "CREATE TABLE IF NOT EXISTS clients (
+                id $id,
+                name VARCHAR(190) NOT NULL,
+                color VARCHAR(20) NOT NULL DEFAULT '#0e7c66',
+                logo_url VARCHAR(500) NULL,
+                notes TEXT NULL,
+                created_at DATETIME NOT NULL
+            )$suffix",
+
+            "CREATE TABLE IF NOT EXISTS client_assets (
+                client_id INT NOT NULL,
+                asset_type VARCHAR(20) NOT NULL,
+                external_id VARCHAR(64) NOT NULL,
+                UNIQUE (client_id, asset_type, external_id)
+            )$suffix",
+
+            // Lo que la agencia está haciendo para el cliente (lo ve en su portal).
+            "CREATE TABLE IF NOT EXISTS client_updates (
+                id $id,
+                client_id INT NOT NULL,
+                kind VARCHAR(30) NOT NULL DEFAULT 'otro',
+                status VARCHAR(20) NOT NULL DEFAULT 'en_curso',
+                title VARCHAR(255) NOT NULL,
+                body TEXT NULL,
+                link VARCHAR(500) NULL,
+                due_date DATE NULL,
+                created_by INT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
             )$suffix",
 
             "CREATE TABLE IF NOT EXISTS meta_connections (
