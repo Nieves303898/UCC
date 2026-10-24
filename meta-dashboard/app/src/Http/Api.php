@@ -38,12 +38,18 @@ final class Api
     /** Usuarios internos de solo lectura (ej. gerencia): todo lo del cliente + vistas de agencia. */
     private const VIEWER_ACTIONS = ['clients', 'client_brand', 'budgets'];
 
+    /** Equipo: además edita lo operativo (presupuestos, objetivos, ventas, trabajo) de lo que tiene asignado. */
+    private const MEMBER_ACTIONS = [
+        'client', 'campaign_names', 'budget_save', 'campaign_target_save', 'update_save', 'update_delete',
+        'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
+    ];
+
     private const POST_ACTIONS = [
         'sync', 'connection_add_token', 'connection_delete', 'asset_toggle', 'cache_flush',
         'user_add', 'user_delete', 'user_reset_password', 'password_change',
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
-        'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add',
+        'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
     ];
 
     public static function handle(): void
@@ -62,7 +68,8 @@ final class Api
         $role = Auth::user()['role'] ?? '';
         $permitted = $role === 'admin'
             || in_array($action, self::CLIENT_ACTIONS, true)
-            || ($role === 'viewer' && in_array($action, self::VIEWER_ACTIONS, true));
+            || (in_array($role, ['viewer', 'member'], true) && in_array($action, self::VIEWER_ACTIONS, true))
+            || ($role === 'member' && in_array($action, self::MEMBER_ACTIONS, true));
         if (!$permitted) {
             self::json(['ok' => false, 'error' => 'No tenés permiso para esta acción.'], 403);
         }
@@ -106,13 +113,21 @@ final class Api
         $force = !empty($q['refresh']);
         $range = fn () => DateRange::fromRequest($q);
         $id = fn (string $k = 'id') => self::id($q[$k] ?? '');
-        $client = Scope::clientId($q);
-        $allowed = Scope::allowed($client);
+        [$client, $allowed, $internal] = Scope::resolve($q);
+        // Para acciones de equipo sobre un cliente / cuenta en particular.
+        $ownClient = function (int $cid) use ($internal) {
+            Scope::assertClient($cid, $internal);
+            return $cid;
+        };
+        $ownAccount = function (string $acc) use ($internal) {
+            Scope::assertAsset('ad_account', $acc, $internal);
+            return $acc;
+        };
 
-        // Activos del cliente: valida antes de llamar a Meta.
-        $adAccount = function (string $k = 'account') use ($id, $client) {
+        // Activos permitidos: valida antes de llamar a Meta.
+        $adAccount = function (string $k = 'account') use ($id, $allowed) {
             $acc = $id($k);
-            Scope::assertAsset('ad_account', $acc, $client);
+            Scope::assertAsset('ad_account', $acc, $allowed);
             return $acc;
         };
         $inAccount = function () use ($id, $adAccount, $client) {
@@ -120,9 +135,9 @@ final class Api
             Scope::assertInAccount($id(), $acc, $client);
             return [$id(), $acc, Scope::campaignFilter($client, $acc)];
         };
-        $asset = function (string $type) use ($id, $client) {
+        $asset = function (string $type) use ($id, $allowed) {
             $v = $id();
-            Scope::assertAsset($type, $v, $client);
+            Scope::assertAsset($type, $v, $allowed);
             return $v;
         };
 
@@ -216,13 +231,15 @@ final class Api
             case 'sales_preview':
                 return Sales::preview($_FILES['file'] ?? null, isset($body['url']) && $body['url'] !== '' ? (string) $body['url'] : null);
             case 'sales_import':
-                return Sales::import((int) ($body['client_id'] ?? 0), $body);
+                return Sales::import($ownClient((int) ($body['client_id'] ?? 0)), $body);
             case 'sales_sync':
+                $ownClient(Sales::sourceClient((int) ($body['id'] ?? 0)));
                 return Sales::sync((int) ($body['id'] ?? 0));
             case 'sales_entry':
-                Sales::entry((int) ($body['client_id'] ?? 0), $body);
+                Sales::entry($ownClient((int) ($body['client_id'] ?? 0)), $body);
                 return null;
             case 'sales_source_delete':
+                $ownClient(Sales::sourceClient((int) ($body['id'] ?? 0)));
                 Sales::deleteSource((int) ($body['id'] ?? 0));
                 return null;
 
@@ -230,7 +247,10 @@ final class Api
             case 'settings':
                 return [
                     'connections'   => Connections::all(),
-                    'users'         => Db::all("SELECT id, username, email, name, role, last_login_at FROM users WHERE role IN ('admin', 'viewer') ORDER BY id"),
+                    'users'         => array_map(fn ($u) => $u + ['scope' => Db::all('SELECT kind, ref FROM user_scopes WHERE user_id = ?', [$u['id']])],
+                        Db::all("SELECT id, username, email, name, role, last_login_at FROM users WHERE role IN ('admin', 'viewer', 'member') ORDER BY id")),
+                    'businesses'    => Assets::list('business', true),
+                    'clients'       => Db::all('SELECT id, name, color FROM clients ORDER BY name'),
                     'tax_rate'      => \App\Settings::taxRate() * 100,
                     'oauth_ready'   => Config::get('meta.app_id') && Config::get('meta.app_secret'),
                     'redirect_uri'  => OAuth::redirectUri(),
@@ -239,9 +259,9 @@ final class Api
                     'log'           => Db::all('SELECT job, status, message, created_at FROM sync_log ORDER BY id DESC LIMIT 15'),
                 ];
             case 'budgets':
-                return Budgets::overview(null, $force);
+                return Budgets::overview($internal['ad_account'] ?? null, $force, $internal['clients'] ?? null);
             case 'budget_save':
-                $key = !empty($body['client_id']) ? 'client:' . (int) $body['client_id'] : self::id((string) ($body['account'] ?? ''));
+                $key = !empty($body['client_id']) ? 'client:' . $ownClient((int) $body['client_id']) : $ownAccount(self::id((string) ($body['account'] ?? '')));
                 Budgets::save($key, $body['month'] ?? null, $body['amount'] ?? null, $body['note'] ?? null);
                 return null;
             case 'settings_save':
@@ -253,6 +273,10 @@ final class Api
                 Cache::flush(); // las métricas guardadas en caché llevan el impuesto anterior
                 return null;
             case 'campaign_target_save':
+                if ($internal !== null) {
+                    $acc = $ownAccount(self::id((string) ($body['account'] ?? '')));
+                    Scope::assertInAccount(self::id((string) ($body['campaign_id'] ?? '')), $acc);
+                }
                 Sales::saveCampaignTarget(self::id((string) ($body['campaign_id'] ?? '')), $body['month'] ?? null, $body['target_orders'] ?? '', $body['target_revenue'] ?? '');
                 return null;
             case 'campaign_groups':
@@ -261,13 +285,14 @@ final class Api
                 Clients::addRule((int) ($body['client_id'] ?? 0), self::id((string) ($body['account'] ?? '')), (string) ($body['pattern'] ?? ''));
                 return null;
             case 'client_brand':
-                return Clients::brand((int) ($q['id'] ?? 0));
+                return Clients::brand($ownClient((int) ($q['id'] ?? 0)));
             case 'campaign_names':
-                return Sales::campaignNames((int) ($q['id'] ?? 0));
+                return Sales::campaignNames($ownClient((int) ($q['id'] ?? 0)));
             case 'clients':
-                return Clients::all();
+                $list = Clients::all();
+                return $internal === null ? $list : array_values(array_filter($list, fn ($c) => in_array($c['id'], $internal['clients'], true)));
             case 'client':
-                return Clients::detail((int) ($q['id'] ?? 0));
+                return Clients::detail($ownClient((int) ($q['id'] ?? 0)));
             case 'client_save':
                 return ['id' => Clients::save($body)];
             case 'client_delete':
@@ -277,10 +302,15 @@ final class Api
                 Clients::setAssets((int) ($body['id'] ?? 0), (array) ($body['assets'] ?? []), isset($body['rules']) ? (array) $body['rules'] : null);
                 return null;
             case 'update_save':
+                $ownClient((int) ($body['client_id'] ?? 0));
                 return ['id' => Clients::saveUpdate($body)];
             case 'update_delete':
+                $u = Db::one('SELECT client_id FROM client_updates WHERE id = ?', [(int) ($body['id'] ?? 0)]);
+                $ownClient((int) ($u['client_id'] ?? 0));
                 Clients::deleteUpdate((int) ($body['id'] ?? 0));
                 return null;
+            case 'user_scope_save':
+                return self::saveUserScope($body);
             case 'sync':
                 return isset($body['connection_id']) ? AssetSync::sync((int) $body['connection_id']) : AssetSync::syncAll();
             case 'connection_add_token':
@@ -295,7 +325,7 @@ final class Api
                 Cache::flush();
                 return null;
             case 'user_add':
-                $role = in_array($body['role'] ?? '', ['client', 'viewer'], true) ? $body['role'] : 'admin';
+                $role = in_array($body['role'] ?? '', ['client', 'viewer', 'member'], true) ? $body['role'] : 'admin';
                 $clientId = $role === 'client' ? Clients::find((int) ($body['client_id'] ?? 0))['id'] : null;
                 return ['id' => Auth::createUser((string) ($body['username'] ?? ''), (string) ($body['name'] ?? ''), (string) ($body['password'] ?? ''), $role, $clientId)];
             case 'user_delete':
@@ -303,6 +333,7 @@ final class Api
                     throw new InvalidArgumentException('No podés borrar tu propio usuario.');
                 }
                 Db::exec('DELETE FROM users WHERE id = ?', [(int) ($body['id'] ?? 0)]);
+                Db::exec('DELETE FROM user_scopes WHERE user_id = ?', [(int) ($body['id'] ?? 0)]);
                 return null;
             case 'user_reset_password':
                 if (strlen((string) ($body['password'] ?? '')) < 8) {
@@ -312,6 +343,33 @@ final class Api
                 return null;
         }
         throw new InvalidArgumentException('Acción desconocida');
+    }
+
+    /** Asigna a un usuario interno qué portfolios, cuentas, páginas, Instagram y clientes ve. */
+    private static function saveUserScope(array $body): void
+    {
+        $userId = (int) ($body['user_id'] ?? 0);
+        $user = Db::one('SELECT role FROM users WHERE id = ?', [$userId]);
+        if (!$user || !in_array($user['role'], ['viewer', 'member'], true)) {
+            throw new InvalidArgumentException('Sólo se asignan accesos a usuarios de equipo o solo lectura.');
+        }
+        $role = in_array($body['role'] ?? '', ['viewer', 'member'], true) ? $body['role'] : $user['role'];
+        Db::exec('UPDATE users SET role = ? WHERE id = ?', [$role, $userId]);
+        Db::exec('DELETE FROM user_scopes WHERE user_id = ?', [$userId]);
+        $types = ['business' => 'business', 'ad_account' => 'ad_account', 'page' => 'page', 'ig_account' => 'ig_account'];
+        foreach ((array) ($body['scope'] ?? []) as $item) {
+            $kind = (string) ($item['kind'] ?? '');
+            $ref = (string) ($item['ref'] ?? '');
+            if ($kind === 'client') {
+                if (!Db::one('SELECT id FROM clients WHERE id = ?', [(int) $ref])) {
+                    continue;
+                }
+                $ref = (string) (int) $ref;
+            } elseif (!isset($types[$kind]) || !Db::one('SELECT id FROM assets WHERE type = ? AND external_id = ?', [$types[$kind], $ref])) {
+                continue;
+            }
+            Db::insert('user_scopes', ['user_id' => $userId, 'kind' => $kind, 'ref' => $ref]);
+        }
     }
 
     /** Quita del listado datos que el cliente no necesita. */

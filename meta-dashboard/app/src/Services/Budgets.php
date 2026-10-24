@@ -19,7 +19,8 @@ final class Budgets
 {
     private const STATUSES = ['ACTIVE', 'PAUSED', 'IN_PROCESS', 'WITH_ISSUES', 'PENDING_REVIEW', 'PENDING_BILLING_INFO', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED'];
 
-    public static function overview(?array $only = null, bool $force = false): array
+    /** $only: cuentas visibles (null = todas). $clientIds: marcas visibles (null = todas). */
+    public static function overview(?array $only = null, bool $force = false, ?array $clientIds = null): array
     {
         $tax = Settings::taxRate();
         $month = date('Y-m');
@@ -38,6 +39,9 @@ final class Budgets
         $brands = [];
         foreach (Db::all('SELECT id, name, color, currency FROM clients ORDER BY name') as $c) {
             $cid = (int) $c['id'];
+            if ($clientIds !== null && !in_array($cid, $clientIds, true)) {
+                continue;
+            }
             $brands[$cid] = $c + [
                 'full'  => array_column(Db::all("SELECT external_id FROM client_assets WHERE client_id = ? AND asset_type = 'ad_account'", [$cid]), 'external_id'),
                 'rules' => Clients::rules($cid),

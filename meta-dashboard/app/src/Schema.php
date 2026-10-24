@@ -140,6 +140,15 @@ final class Schema
                 UNIQUE (account_id, month)
             )$suffix",
 
+            // Qué ve cada usuario interno (equipo / gerencia). Sin filas = ve todo.
+            // kind: business | ad_account | page | ig_account | client
+            "CREATE TABLE IF NOT EXISTS user_scopes (
+                user_id INT NOT NULL,
+                kind VARCHAR(20) NOT NULL,
+                ref VARCHAR(64) NOT NULL,
+                UNIQUE (user_id, kind, ref)
+            )$suffix",
+
             // Marcas que comparten una cuenta publicitaria: el cliente ve sólo
             // las campañas cuyo nombre contiene alguna palabra clave (o un ID exacto).
             "CREATE TABLE IF NOT EXISTS client_campaign_rules (

@@ -27,6 +27,9 @@ const state = {
 const isClient = () => state.boot?.user.role === 'client';
 const isAdmin = () => state.boot?.user.role === 'admin';
 const isViewer = () => state.boot?.user.role === 'viewer';
+const isMember = () => state.boot?.user.role === 'member';
+/** Puede editar lo operativo (presupuestos, objetivos, ventas, trabajo). */
+const canEdit = () => isAdmin() || isMember();
 /** ID del cliente cuyo portal se está mostrando (propio o vista previa). */
 const portalClient = () => (isClient() ? state.boot.client?.id : state.preview);
 
@@ -1528,7 +1531,10 @@ async function viewClient(id, tab = 'assets') {
   crumbs([{ label: 'Clientes', href: '#/clients' }, { label: c.name }]);
   const assigned = new Set(c.assets.map((a) => `${a.asset_type}:${a.external_id}`));
   const portalUrl = location.origin + location.pathname.replace(/index\.php$/, '');
+  const tabs = [['assets', 'Activos asignados'], ['sales', esc(c.sales_label) + ' / conversiones'], ['users', 'Accesos'], ['work', 'Trabajo en curso']]
+    .filter(([k]) => isAdmin() || ['sales', 'work'].includes(k));
   tab = store.get('clientTab', tab);
+  if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
 
   // Cuentas publicitarias: completa o sólo campañas por palabra clave (cuentas compartidas entre marcas).
   const accMode = (id) => (assigned.has(`ad_account:${id}`) ? 'full' : c.rules?.[id] ? 'rules' : 'none');
@@ -1597,18 +1603,18 @@ async function viewClient(id, tab = 'assets') {
       <div class="min-w-0"><h1 class="h1">${esc(c.name)}</h1><div class="t2 mt-0.5">${c.assets.length + Object.keys(c.rules || {}).length} activos · ${c.users.length} accesos · portal en <span class="mono text-xs">${esc(portalUrl)}</span></div></div>
       <div class="flex-1"></div>
       <a class="btn btn-accent" href="#/preview/${c.id}" style="--accent:${esc(c.color)}">${icon('eye', 15)}Ver como cliente</a>
-      <button class="btn" id="edit-client">Editar</button>
-      <button class="btn btn-ghost btn-danger" id="del-client">Eliminar</button>
+      ${isAdmin() ? `<button class="btn" id="edit-client">Editar</button>
+      <button class="btn btn-ghost btn-danger" id="del-client">Eliminar</button>` : ''}
     </div>
-    <div class="utabs mb-6" id="ctabs">${[['assets', 'Activos asignados'], ['sales', esc(c.sales_label) + ' / conversiones'], ['users', 'Accesos'], ['work', 'Trabajo en curso']].map(([k, l]) => `<button data-ct="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div>
-    <div data-pane="assets" class="${tab === 'assets' ? '' : 'hidden'}">
+    <div class="utabs mb-6" id="ctabs">${tabs.map(([k, l]) => `<button data-ct="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div>
+    ${isAdmin() ? `<div data-pane="assets" class="${tab === 'assets' ? '' : 'hidden'}">
       <div class="flex flex-wrap items-center gap-3 mb-4"><div class="t2 flex-1">Elegí qué puede ver este cliente. Todo lo que no esté marcado queda oculto para él.</div>
         <input class="input w-64" placeholder="Filtrar" id="asset-filter"><button class="btn btn-primary" id="save-assets">Guardar asignación</button></div>
       ${adAccountList(assets.ad_accounts)}
       <div class="grid lg:grid-cols-2 gap-4">${assetList('page', assets.pages, 'Páginas de Facebook')}${assetList('ig_account', assets.ig_accounts, 'Instagram')}</div>
-    </div>
+    </div>` : ''}
     <div data-pane="sales" class="${tab === 'sales' ? '' : 'hidden'}">${salesPane(c)}</div>
-    <div data-pane="users" class="${tab === 'users' ? '' : 'hidden'}">${users}</div>
+    ${isAdmin() ? `<div data-pane="users" class="${tab === 'users' ? '' : 'hidden'}">${users}</div>` : ''}
     <div data-pane="work" class="${tab === 'work' ? '' : 'hidden'}">${work}</div>`;
 
   return {
@@ -1658,7 +1664,7 @@ async function viewClient(id, tab = 'assets') {
         $$('#ctabs [data-ct]').forEach((x) => x.classList.toggle('active', x === b));
         $$('[data-pane]').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== b.dataset.ct));
       });
-      $('#asset-filter').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('[data-pane=assets] [data-name]').forEach((el) => { el.style.display = el.dataset.name.includes(q) ? '' : 'none'; }); });
+      $('#asset-filter')?.addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('[data-pane=assets] [data-name]').forEach((el) => { el.style.display = el.dataset.name.includes(q) ? '' : 'none'; }); });
       view.addEventListener('change', async (e) => {
         if (e.target.dataset.asset) counts();
         if (e.target.dataset.status) {
@@ -1667,7 +1673,7 @@ async function viewClient(id, tab = 'assets') {
           render({ silent: true });
         }
       });
-      $('#save-assets').addEventListener('click', async () => {
+      $('#save-assets')?.addEventListener('click', async () => {
         const list = $$('[data-asset]:checked').map((x) => ({ type: x.dataset.asset, id: x.value }));
         const rules = [];
         $$('[data-acc-mode]').forEach((x) => {
@@ -1679,16 +1685,16 @@ async function viewClient(id, tab = 'assets') {
         await post('client_assets', { id: c.id, assets: list, rules }, 'Asignación guardada');
         state.boot = await api('bootstrap'); renderNav();
       });
-      $('#edit-client').addEventListener('click', () => clientForm(c));
-      $('#del-client').addEventListener('click', async () => {
+      $('#edit-client')?.addEventListener('click', () => clientForm(c));
+      $('#del-client')?.addEventListener('click', async () => {
         if (!confirm(`¿Eliminar a ${c.name}? Se borran sus accesos y novedades (no afecta nada en Meta).`)) return;
         await post('client_delete', { id: c.id }, 'Cliente eliminado');
         location.hash = '#/clients';
       });
       const pass = $('#cuser-form [name=password]');
-      pass.value = genPassword();
-      $('#gen-pass').addEventListener('click', () => { pass.value = genPassword(); });
-      $('#cuser-form').addEventListener('submit', async (e) => {
+      if (pass) pass.value = genPassword();
+      $('#gen-pass')?.addEventListener('click', () => { pass.value = genPassword(); });
+      $('#cuser-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(e.target));
         try {
@@ -1779,6 +1785,68 @@ async function viewActivity() {
 }
 
 // =========================================================================
+// Accesos de usuarios internos (equipo / solo lectura)
+// =========================================================================
+const SCOPE_LABELS = { business: 'portfolio', ad_account: 'cuenta', page: 'página', ig_account: 'Instagram', client: 'cliente' };
+function scopeSummary(scope) {
+  if (!scope || !scope.length) return '<span class="t-warn">ve todo (sin asignar)</span>';
+  const n = {};
+  scope.forEach((x) => { n[x.kind] = (n[x.kind] || 0) + 1; });
+  return Object.entries(n).map(([k, v]) => `${v} ${SCOPE_LABELS[k]}${v > 1 ? (k === 'ig_account' ? '' : k === 'business' ? 's' : k === 'client' ? 's' : 's') : ''}`).join(' · ');
+}
+
+function scopeModal(user, s, assets) {
+  const has = new Set((user.scope || []).map((x) => `${x.kind}:${x.ref}`));
+  const accByBiz = {};
+  assets.ad_accounts.forEach((a) => { const b = a.business_id || a.data.business?.id; if (b) accByBiz[b] = (accByBiz[b] || 0) + 1; });
+  const section = (kind, title, items, sub) => `
+    <div class="card overflow-hidden flex flex-col">
+      <div class="card-h" style="min-height:46px"><div class="h2 text-[14px]">${title}</div><span class="t3 text-xs" data-scount="${kind}"></span><div class="flex-1"></div>
+        <button type="button" class="link text-xs" data-sall="${kind}">Todos</button><button type="button" class="link text-xs ml-2" data-snone="${kind}">Ninguno</button></div>
+      <div class="max-h-[230px] overflow-y-auto divide">${items.map((it) => `
+        <label class="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-[var(--hover)]" data-sname="${esc((it.name || '').toLowerCase())}">
+          <input type="checkbox" class="check" data-skind="${kind}" value="${esc(it.id)}" ${has.has(`${kind}:${it.id}`) ? 'checked' : ''}>
+          <div class="min-w-0 flex-1"><div class="t1 truncate text-[13px]">${esc(it.name)}</div>${sub ? `<div class="t3 text-[11px] truncate">${sub(it)}</div>` : ''}</div>
+        </label>`).join('') || '<div class="p-4 t3 text-[13px]">Nada para asignar.</div>'}</div>
+    </div>`;
+  const el = modal(`${modalHead(`Accesos de ${user.name}`, 'Elegí qué ve. Si no marcás nada, ve todo.')}
+    <div class="p-5 space-y-4">
+      <div class="flex flex-wrap gap-3 items-center">
+        <div class="seg" id="scope-role"><button type="button" data-r="member" class="${user.role === 'member' ? 'on' : ''}">Equipo (puede editar)</button><button type="button" data-r="viewer" class="${user.role === 'viewer' ? 'on' : ''}">Solo lectura</button></div>
+        <div class="flex-1"></div><input class="input select-sm w-56" placeholder="Filtrar" id="scope-filter">
+      </div>
+      <p class="t3 text-xs">Un <b>portfolio comercial</b> incluye todas sus cuentas publicitarias. Un <b>cliente</b> incluye sus cuentas, páginas e Instagram. Una <b>página</b> incluye su Instagram vinculado.</p>
+      <div class="grid md:grid-cols-2 gap-4">
+        ${section('business', 'Portfolios comerciales', s.businesses.map((b) => ({ id: b.external_id, name: b.name })), (it) => `${accByBiz[it.id] || 0} cuentas publicitarias`)}
+        ${section('client', 'Clientes / marcas', s.clients.map((c) => ({ id: String(c.id), name: c.name })))}
+        ${section('ad_account', 'Cuentas publicitarias', assets.ad_accounts.map((a) => ({ id: a.external_id, name: a.name, biz: a.data.business?.name })), (it) => esc(it.biz || 'Sin portfolio'))}
+        ${section('page', 'Páginas de Facebook', assets.pages.map((p) => ({ id: p.external_id, name: p.name })))}
+        ${section('ig_account', 'Instagram', assets.ig_accounts.map((p) => ({ id: p.external_id, name: p.name })))}
+      </div>
+      <div class="flex gap-2 pt-1"><button class="btn btn-primary" id="scope-save">Guardar accesos</button><button class="btn btn-ghost" data-close>Cancelar</button></div>
+    </div>`);
+  const counts = () => Object.keys(SCOPE_LABELS).forEach((k) => { const c = $(`[data-scount="${k}"]`, el); if (c) c.textContent = `${$$(`[data-skind="${k}"]:checked`, el).length} marcados`; });
+  counts();
+  el.addEventListener('change', counts);
+  el.addEventListener('click', (e) => {
+    const r = e.target.closest('[data-r]');
+    if (r) $$('#scope-role [data-r]', el).forEach((x) => x.classList.toggle('on', x === r));
+    const all = e.target.closest('[data-sall]'), none = e.target.closest('[data-snone]');
+    if (all || none) {
+      const k = (all || none).dataset.sall || (all || none).dataset.snone;
+      $$(`[data-skind="${k}"]`, el).forEach((x) => { if (x.closest('label').style.display !== 'none') x.checked = !!all; });
+      counts();
+    }
+  });
+  $('#scope-filter', el).addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('[data-sname]', el).forEach((x) => { x.style.display = x.dataset.sname.includes(q) ? '' : 'none'; }); });
+  $('#scope-save', el).addEventListener('click', async () => {
+    const scope = $$('[data-skind]:checked', el).map((x) => ({ kind: x.dataset.skind, ref: x.value }));
+    const role = $('#scope-role .on', el)?.dataset.r || user.role;
+    try { await post('user_scope_save', { user_id: user.id, role, scope }, `Accesos guardados (${scope.length})`); closeModal(); render({ silent: true }); } catch { /* toast */ }
+  });
+}
+
+// =========================================================================
 // Admin · Configuración
 // =========================================================================
 async function viewSettings() {
@@ -1844,11 +1912,15 @@ async function viewSettings() {
         </section>
         <section class="card">
           <div class="card-h"><div class="h2">Equipo y gerencia</div></div>
-          <div class="divide">${s.users.map((u) => `<div class="px-5 py-3 flex items-center gap-3"><div class="mono-avatar w-8 h-8 text-xs" style="background:var(--sunk);color:var(--t2)">${esc(initials(u.name))}</div><div class="flex-1 min-w-0"><div class="t1 truncate">${esc(u.name)} ${u.role === 'viewer' ? '<span class="pill blue plain">Solo lectura</span>' : ''}</div><div class="t3 text-xs mono truncate">${esc(u.username)}</div></div>${u.id !== state.boot.user.id ? `<button class="btn btn-sm btn-ghost btn-danger" data-del-user="${u.id}">${icon('x', 14)}</button>` : '<span class="pill plain">Vos</span>'}</div>`).join('')}</div>
+          <div class="divide">${s.users.map((u) => `<div class="px-5 py-3 flex items-center gap-3"><div class="mono-avatar w-8 h-8 text-xs" style="background:var(--sunk);color:var(--t2)">${esc(initials(u.name))}</div>
+            <div class="flex-1 min-w-0"><div class="t1 truncate">${esc(u.name)} ${{ viewer: '<span class="pill blue plain">Solo lectura</span>', member: '<span class="pill accent plain">Equipo</span>' }[u.role] || ''}</div>
+              <div class="t3 text-xs truncate"><span class="mono">${esc(u.username)}</span>${u.role !== 'admin' ? ` · ${scopeSummary(u.scope)}` : ''}</div></div>
+            ${u.role !== 'admin' ? `<button class="btn btn-sm" data-scope-user="${u.id}">${icon('key', 13)}Accesos</button>` : ''}
+            ${u.id !== state.boot.user.id ? `<button class="btn btn-sm btn-ghost btn-danger" data-del-user="${u.id}">${icon('x', 14)}</button>` : '<span class="pill plain">Vos</span>'}</div>`).join('')}</div>
           <form class="p-5 space-y-2 hair-t" id="admin-form">
             <input class="input" name="name" placeholder="Nombre" required><input class="input mono" name="username" placeholder="Usuario o email" autocapitalize="none" required>
             <input class="input" name="password" type="password" minlength="8" placeholder="Contraseña (mín. 8)" required>
-            <select class="select" name="role"><option value="viewer">Solo lectura (jefes / gerencia): ve todo, no edita</option><option value="admin">Administrador: ve y edita todo</option></select>
+            <select class="select" name="role"><option value="member">Equipo: ve lo que le asignes y carga presupuestos, objetivos y ventas</option><option value="viewer">Solo lectura (jefes / gerencia): no edita</option><option value="admin">Administrador: ve y edita todo</option></select>
             <button class="btn w-full">Agregar usuario</button>
             <p class="t3 text-xs">Para clientes usá la sección Clientes.</p>
           </form>
@@ -1880,6 +1952,8 @@ async function viewSettings() {
           if (confirm('¿Quitar esta conexión? Se borran sus activos del panel (no afecta nada en Meta).')) { await post('connection_delete', { id: +t.dataset.delConn }, 'Conexión eliminada'); await reload(); }
         } else if (t.dataset.delUser) {
           if (confirm('¿Eliminar este usuario?')) { await post('user_delete', { id: +t.dataset.delUser }, 'Usuario eliminado'); render(); }
+        } else if (t.dataset.scopeUser) {
+          scopeModal(s.users.find((u) => u.id === +t.dataset.scopeUser), s, assets);
         } else if (t.dataset.copy) {
           copyText(t.dataset.copy);
         } else if (t.id === 'flush') {
@@ -2134,7 +2208,7 @@ function salesPane(c) {
       </div>
       <div class="xl:col-span-2 space-y-6">
         <div class="card" id="camp-names-card"><div class="card-h"><div class="h2">Nombres exactos de campañas</div><span class="t3 text-xs">para la columna “Campaña”</span></div>
-          <div class="p-4 t3 text-[13px]" data-names>${c.assets.some((a) => a.asset_type === 'ad_account') ? 'Cargando…' : 'Este cliente no tiene cuentas publicitarias asignadas.'}</div></div>
+          <div class="p-4 t3 text-[13px]" data-names>${(c.assets.some((a) => a.asset_type === 'ad_account') || Object.keys(c.rules || {}).length > 0) ? 'Cargando…' : 'Este cliente no tiene cuentas publicitarias asignadas.'}</div></div>
         <form class="card p-5 space-y-3" id="sales-entry">
           <div class="h2">Cargar un día a mano</div>
           <div class="grid grid-cols-2 gap-3">
@@ -2160,7 +2234,7 @@ function salesPane(c) {
 function mountSalesPane(c) {
   const wiz = $('#sales-wizard');
   if (!wiz) return;
-  if (c.assets.some((a) => a.asset_type === 'ad_account')) {
+  if ((c.assets.some((a) => a.asset_type === 'ad_account') || Object.keys(c.rules || {}).length > 0)) {
     api('campaign_names', { id: c.id }).then((names) => {
       const box = $('#camp-names-card [data-names]');
       if (!box) return;
@@ -2254,7 +2328,7 @@ function budgetBar(spent, planned, projected) {
 function budgetGoalCell(c, a) {
   const g = c.goal;
   const parts = g ? [g.target_orders ? `${fmt.int(g.target_orders)} ventas` : '', g.target_revenue ? fmt.moneyShort(g.target_revenue, a.currency) : ''].filter(Boolean) : [];
-  const edit = isAdmin() ? `<button class="btn btn-sm ${parts.length ? 'btn-ghost' : ''} !h-7" data-bgoal="${esc(a.id)}|${esc(c.id)}">${icon(parts.length ? 'sliders' : 'plus', 13)}${parts.length ? '' : 'Objetivo'}</button>` : '';
+  const edit = canEdit() ? `<button class="btn btn-sm ${parts.length ? 'btn-ghost' : ''} !h-7" data-bgoal="${esc(a.id)}|${esc(c.id)}">${icon(parts.length ? 'sliders' : 'plus', 13)}${parts.length ? '' : 'Objetivo'}</button>` : '';
   return `<div class="flex items-center justify-end gap-1.5">${parts.length ? `<span class="num font-medium">${parts.join(' · ')}</span>` : (edit ? '' : '<span class="t3">—</span>')}${edit}</div>`;
 }
 
@@ -2290,7 +2364,7 @@ async function viewBudgets() {
         </div>
         <div class="grid grid-cols-2 gap-x-4 gap-y-3 mt-4">
           <div><div class="t3 text-xs">Presupuesto del mes</div>
-            ${isAdmin() ? `<div class="flex gap-1.5 mt-1"><input class="input select-sm num !w-full" data-bplan="${b.client_id}" value="${b.planned ?? ''}" placeholder="Cargar" inputmode="decimal"><button class="btn btn-sm" data-bplan-save="${b.client_id}">${icon('check', 14)}</button></div>`
+            ${canEdit() ? `<div class="flex gap-1.5 mt-1"><input class="input select-sm num !w-full" data-bplan="${b.client_id}" value="${b.planned ?? ''}" placeholder="Cargar" inputmode="decimal"><button class="btn btn-sm" data-bplan-save="${b.client_id}">${icon('check', 14)}</button></div>`
               : `<div class="num text-lg font-semibold t1 mt-0.5">${b.planned ? m(b.planned) : '—'}</div>`}</div>
           <div><div class="t3 text-xs">Gastado (+${tax})</div><div class="num text-lg font-semibold t1 mt-0.5">${m(b.spent_mtd_tax)}</div></div>
           <div><div class="t3 text-xs">Hoy (+${tax})</div><div class="num font-semibold t1">${m(b.spent_today_tax)}</div><div class="t3 text-[11px]">${m(b.active_daily_tax)}/día activo</div></div>
@@ -2324,7 +2398,7 @@ async function viewBudgets() {
           ${a.error ? `<div class="t-warn text-xs mt-2">${esc(a.error)}</div>` : ''}
           <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mt-5">
             <div><div class="t3 text-xs">Presupuesto del mes</div>
-              ${isAdmin() ? `<div class="flex gap-1.5 mt-1"><input class="input select-sm num !w-full" data-plan="${esc(a.id)}" value="${a.planned ?? ''}" placeholder="Cargar" inputmode="decimal"><button class="btn btn-sm" data-plan-save="${esc(a.id)}">${icon('check', 14)}</button></div>`
+              ${canEdit() ? `<div class="flex gap-1.5 mt-1"><input class="input select-sm num !w-full" data-plan="${esc(a.id)}" value="${a.planned ?? ''}" placeholder="Cargar" inputmode="decimal"><button class="btn btn-sm" data-plan-save="${esc(a.id)}">${icon('check', 14)}</button></div>`
                 : `<div class="num text-lg font-semibold t1 mt-0.5">${a.planned ? m(a.planned) : '—'}</div>`}
               <div class="t3 text-[11px] mt-1">con impuestos</div></div>
             <div><div class="t3 text-xs">Gastado (+${tax})</div><div class="num text-lg font-semibold t1 mt-0.5">${m(a.spent_mtd_tax)}</div><div class="t3 text-[11px]">${m(a.spent_mtd)} en Meta</div></div>
@@ -2354,7 +2428,7 @@ async function viewBudgets() {
         if (g) {
           const [accId, campId] = g.dataset.bgoal.split('|');
           const acc = d.accounts.find((x) => x.id === accId);
-          return goalModal(acc.campaigns.find((x) => x.id === campId), acc.currency, () => render({ silent: true }));
+          return goalModal({ ...acc.campaigns.find((x) => x.id === campId), account: acc.id }, acc.currency, () => render({ silent: true }));
         }
         const bp = e.target.closest('[data-bplan-save]');
         if (bp) {
@@ -2393,7 +2467,7 @@ function goalBar(gi) {
 
 function goalCell(r, L, money) {
   const gi = goalInfo(r.goal);
-  const edit = isAdmin() ? `<button class="btn btn-sm btn-ghost !h-6 !px-1.5" data-goal="${esc(r.id)}" title="Editar objetivo">${icon(gi ? 'sliders' : 'plus', 13)}${gi ? '' : 'Objetivo'}</button>` : '';
+  const edit = canEdit() ? `<button class="btn btn-sm btn-ghost !h-6 !px-1.5" data-goal="${esc(r.id)}" title="Editar objetivo">${icon(gi ? 'sliders' : 'plus', 13)}${gi ? '' : 'Objetivo'}</button>` : '';
   if (!gi) return `<div class="flex justify-end">${edit || '<span class="t3">—</span>'}</div>`;
   const f = gi.byOrders ? fmt.int : money;
   return `<div class="min-w-[170px]"><div class="flex items-center justify-end gap-1.5"><span class="num font-medium">${f(gi.done)} / ${f(gi.target)}</span><span class="pill ${gi.cls} plain">${gi.label}</span>${edit}</div>
@@ -2427,7 +2501,7 @@ function goalModal(r, cur, after) {
       <div class="flex gap-2 pt-1"><button class="btn btn-primary">Guardar</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button><div class="flex-1"></div>
         ${r.goal?.target_orders || r.goal?.target_revenue ? '<button type="button" class="btn btn-ghost btn-danger" id="goal-clear">Quitar objetivo</button>' : ''}</div>
     </form>`, 'sm');
-  const save = async (data) => { await post('campaign_target_save', { campaign_id: r.id, ...data }, 'Objetivo guardado'); closeModal(); after(); };
+  const save = async (data) => { await post('campaign_target_save', { campaign_id: r.id, account: r.account, ...data }, 'Objetivo guardado'); closeModal(); after(); };
   $('#goal-form', el).addEventListener('submit', (e) => { e.preventDefault(); save(Object.fromEntries(new FormData(e.target))).catch(() => {}); });
   $('#goal-clear', el)?.addEventListener('click', () => save({ target_orders: '', target_revenue: '' }).catch(() => {}));
 }
@@ -2496,7 +2570,7 @@ function renderNav() {
     return;
   }
   const counts = state.boot.counts;
-  const nav = ADMIN_NAV.map(([sec, items]) => [sec, isViewer() ? items.filter(([k]) => k !== 'settings') : items]);
+  const nav = ADMIN_NAV.map(([sec, items]) => [sec, !isAdmin() ? items.filter(([k]) => k !== 'settings') : items]);
   $('#nav').innerHTML = nav.map(([sec, items]) => `<div class="nav-sec">${sec}</div>${items.map(([k, href, ic, l, cnt]) => `
     <a href="${href}" data-nav="${k}" class="nav-link">${icon(ic)}${l}${cnt && counts[cnt] ? `<span class="nav-count">${counts[cnt]}</span>` : ''}</a>`).join('')}`).join('');
 }
@@ -2592,7 +2666,7 @@ const NO_LIVE = /^#\/(settings|clients)/;
 async function render({ silent = false } = {}) {
   const path = location.hash.replace(/^#/, '') || '/';
   const id = ++state.renderId;
-  if (isViewer() && /^\/(settings|clients\/\d+)/.test(path)) {
+  if ((isViewer() && /^\/(settings|clients\/\d+)/.test(path)) || (isMember() && /^\/settings/.test(path))) {
     const m2 = path.match(/^\/clients\/(\d+)/);
     location.replace(m2 ? `#/preview/${m2[1]}` : '#/');
     return;

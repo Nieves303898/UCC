@@ -152,6 +152,11 @@ final class Sales
         self::touch($sourceId);
     }
 
+    public static function sourceClient(int $sourceId): int
+    {
+        return (int) (Db::one('SELECT client_id FROM sales_sources WHERE id = ?', [$sourceId])['client_id'] ?? 0);
+    }
+
     public static function deleteSource(int $id): void
     {
         Db::exec('DELETE FROM sales_daily WHERE source_id = ?', [$id]);

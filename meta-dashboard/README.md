@@ -65,6 +65,18 @@ Si una cuenta tiene campañas de distintas marcas (ej. PayLab Gestión con campa
 - El portal, las métricas, la serie diaria, las ventas por campaña, el ROAS real y los objetivos del cliente usan sólo sus campañas. El acceso se valida en el servidor (también para conjuntos y anuncios), y el cliente ve el nombre de su marca en lugar del de la cuenta compartida.
 - *Presupuestos → Por marca / cliente*: presupuesto mensual propio de cada marca, gasto +35%, gasto de hoy, cierre estimado y diario sugerido; cada campaña muestra la etiqueta de su marca.
 
+### Equipo de la agencia: cada persona ve sólo lo suyo
+
+*Configuración → Equipo y gerencia*: al crear un usuario elegís el rol y después, con **Accesos**, qué ve:
+
+| Rol | Ve | Puede editar |
+|---|---|---|
+| Administrador | Todo | Todo |
+| Equipo | Sólo lo asignado | Presupuestos, objetivos, carga de ventas y trabajo en curso de lo asignado |
+| Solo lectura | Lo asignado (o todo si no tiene asignaciones) | Nada |
+
+Se puede asignar por **portfolio comercial** (incluye todas sus cuentas publicitarias), **cliente/marca** (sus cuentas, páginas e Instagram), **cuenta publicitaria**, **página** (incluye su Instagram) o **Instagram**. Todo se valida en el servidor.
+
 ## 1. Requisitos
 
 - PHP 8.1 o superior con extensiones `curl`, `openssl`, `pdo_mysql` (vienen en cPanel).

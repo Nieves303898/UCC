@@ -22,7 +22,7 @@ $isClient = $user['role'] === 'client';
     <nav id="nav" class="flex-1 overflow-y-auto px-3 pb-3 text-[13.5px]"></nav>
     <div class="p-3 hair-t flex items-center gap-2">
       <div class="mono-avatar w-8 h-8 text-xs" style="background:var(--sunk);color:var(--t2)" id="user-initials"></div>
-      <div class="min-w-0 flex-1 leading-tight"><div class="t1 text-[13px] font-medium truncate" id="user-name"></div><div class="t3 text-xs"><?= $user['role'] === 'viewer' ? 'Solo lectura' : 'Administrador' ?></div></div>
+      <div class="min-w-0 flex-1 leading-tight"><div class="t1 text-[13px] font-medium truncate" id="user-name"></div><div class="t3 text-xs"><?= ['viewer' => 'Solo lectura', 'member' => 'Equipo'][$user['role']] ?? 'Administrador' ?></div></div>
       <button class="btn btn-ghost btn-icon" data-theme-toggle title="Cambiar tema"></button>
       <a class="btn btn-ghost btn-icon" href="index.php?r=logout" title="Salir" data-icon="logout"></a>
     </div>

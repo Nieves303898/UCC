@@ -5,6 +5,7 @@ namespace App\Services;
 
 use App\Auth;
 use App\Cache;
+use App\Db;
 use App\Meta\GraphException;
 use RuntimeException;
 
@@ -33,12 +34,89 @@ final class Scope
         return $clientId === null ? null : Clients::allowed($clientId);
     }
 
-    public static function assertAsset(string $type, string $id, ?int $clientId): void
+    /**
+     * Resuelve qué puede ver quien hace la request.
+     * @return array{0: ?int, 1: ?array, 2: ?array} [cliente activo, activos permitidos, alcance interno]
+     */
+    public static function resolve(array $q): array
     {
-        if ($clientId === null) {
+        $u = Auth::user();
+        if (($u['role'] ?? '') === 'client') {
+            $cid = self::clientId($q);
+            return [$cid, Clients::allowed($cid), null];
+        }
+        $internal = self::internal();
+        $cid = !empty($q['client']) ? (int) $q['client'] : null;
+        if ($cid !== null) {
+            self::assertClient($cid, $internal);
+            return [$cid, Clients::allowed($cid), $internal];
+        }
+        return [null, $internal ? ['ad_account' => $internal['ad_account'], 'page' => $internal['page'], 'ig_account' => $internal['ig_account']] : null, $internal];
+    }
+
+    /**
+     * Alcance de un usuario interno (equipo / solo lectura) según lo que le asignó el admin.
+     * null = sin restricciones (admin, o usuario sin asignaciones).
+     */
+    public static function internal(?int $userId = null): ?array
+    {
+        static $cache = [];
+        $u = Auth::user();
+        $userId ??= (int) ($u['id'] ?? 0);
+        if ($userId === (int) ($u['id'] ?? 0) && ($u['role'] ?? '') === 'admin') {
+            return null;
+        }
+        if (array_key_exists($userId, $cache)) {
+            return $cache[$userId];
+        }
+        $rows = Db::all('SELECT kind, ref FROM user_scopes WHERE user_id = ?', [$userId]);
+        if (!$rows) {
+            return $cache[$userId] = null;
+        }
+        $set = ['business' => [], 'ad_account' => [], 'page' => [], 'ig_account' => [], 'clients' => []];
+        foreach ($rows as $r) {
+            $r['kind'] === 'client' ? $set['clients'][] = (int) $r['ref'] : $set[$r['kind']][] = $r['ref'];
+        }
+        // Un portfolio comercial incluye todas sus cuentas publicitarias.
+        if ($set['business']) {
+            $ph = implode(',', array_fill(0, count($set['business']), '?'));
+            foreach (Db::all("SELECT external_id FROM assets WHERE type = 'ad_account' AND business_id IN ($ph)", $set['business']) as $a) {
+                $set['ad_account'][] = $a['external_id'];
+            }
+        }
+        // Un cliente incluye sus activos.
+        foreach ($set['clients'] as $cid) {
+            foreach (Clients::allowed($cid) as $type => $ids) {
+                $set[$type] = array_merge($set[$type], $ids);
+            }
+        }
+        // Una página incluye su Instagram vinculado.
+        if ($set['page']) {
+            $ph = implode(',', array_fill(0, count($set['page']), '?'));
+            foreach (Db::all("SELECT external_id FROM assets WHERE type = 'ig_account' AND parent_id IN ($ph)", $set['page']) as $a) {
+                $set['ig_account'][] = $a['external_id'];
+            }
+        }
+        foreach (['ad_account', 'page', 'ig_account', 'clients'] as $k) {
+            $set[$k] = array_values(array_unique($set[$k]));
+        }
+        return $cache[$userId] = $set;
+    }
+
+    public static function assertClient(int $clientId, ?array $internal): void
+    {
+        if ($internal !== null && !in_array($clientId, $internal['clients'], true)) {
+            throw new AccessDenied('No tenés asignado este cliente.');
+        }
+    }
+
+    /** $allowed = activos permitidos (null = todos). */
+    public static function assertAsset(string $type, string $id, ?array $allowed): void
+    {
+        if ($allowed === null) {
             return;
         }
-        if (!in_array($id, Clients::allowed($clientId)[$type] ?? [], true)) {
+        if (!in_array($id, $allowed[$type] ?? [], true)) {
             throw new AccessDenied('No tenés acceso a este recurso.');
         }
     }
