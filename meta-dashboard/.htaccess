@@ -1,0 +1,9 @@
+# Si subiste toda la carpeta dentro de public_html, esto bloquea config.php y
+# redirige al panel. Lo ideal es apuntar el (sub)dominio directo a /public.
+<FilesMatch "^(config\.php|config\.sample\.php|README\.md)$">
+  Require all denied
+</FilesMatch>
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^$ public/ [L,R=302]
+</IfModule>
