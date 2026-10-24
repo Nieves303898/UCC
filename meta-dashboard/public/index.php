@@ -14,6 +14,7 @@ use App\Services\Connections;
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Cache-Control: no-store, no-cache, must-revalidate');
 
 function view(string $name, array $vars = []): never
 {

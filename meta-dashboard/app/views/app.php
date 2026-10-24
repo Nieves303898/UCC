@@ -64,6 +64,6 @@ $isClient = $user['role'] === 'client';
 <div id="palette" class="overlay hidden"></div>
 
 <script>window.FLASH = <?= json_encode($flash, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) ?>;</script>
-<script src="assets/app.js?v=2"></script>
+<script src="assets/app.js?v=<?= @filemtime(APP_ROOT . '/public/assets/app.js') ?>"></script>
 </body>
 </html>
