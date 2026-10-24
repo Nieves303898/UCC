@@ -33,7 +33,7 @@ $isClient = $user['role'] === 'client';
   <header class="topbar sticky top-0 z-20">
     <div class="<?= $isClient ? 'max-w-[1320px] mx-auto' : '' ?> px-4 lg:px-8 h-16 flex items-center gap-3">
       <?php if ($isClient): ?>
-        <div id="client-brand" class="flex items-center gap-3 min-w-0"></div>
+        <div id="client-brand" class="flex items-center gap-3 shrink-0"></div>
         <nav id="nav" class="topnav hidden md:flex items-center gap-1 ml-4 text-[13.5px]"></nav>
       <?php else: ?>
         <button id="menu-btn" class="lg:hidden btn btn-ghost btn-icon -ml-2" aria-label="Menú" data-icon="menu"></button>

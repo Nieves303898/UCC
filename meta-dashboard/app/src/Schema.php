@@ -33,6 +33,12 @@ final class Schema
                 color VARCHAR(20) NOT NULL DEFAULT '#0e7c66',
                 logo_url VARCHAR(500) NULL,
                 notes TEXT NULL,
+                currency VARCHAR(3) NOT NULL DEFAULT 'ARS',
+                sales_label VARCHAR(60) NOT NULL DEFAULT 'Ventas',
+                leads_label VARCHAR(60) NOT NULL DEFAULT 'Consultas',
+                dim_label VARCHAR(60) NOT NULL DEFAULT 'Sucursal',
+                target_orders DECIMAL(14,2) NULL,
+                target_revenue DECIMAL(16,2) NULL,
                 created_at DATETIME NOT NULL
             )$suffix",
 
@@ -97,6 +103,32 @@ final class Schema
             )$suffix",
 
             // Fotos diarias (seguidores, etc.) que Meta no guarda como historial.
+            // Ventas propias del cliente (Excel, Google Sheets o carga manual).
+            "CREATE TABLE IF NOT EXISTS sales_sources (
+                id $id,
+                client_id INT NOT NULL,
+                name VARCHAR(190) NOT NULL,
+                kind VARCHAR(20) NOT NULL,
+                url TEXT NULL,
+                mapping_json TEXT NULL,
+                rows_count INT NOT NULL DEFAULT 0,
+                last_sync_at DATETIME NULL,
+                last_error TEXT NULL,
+                created_at DATETIME NOT NULL
+            )$suffix",
+
+            "CREATE TABLE IF NOT EXISTS sales_daily (
+                id $id,
+                client_id INT NOT NULL,
+                source_id INT NOT NULL,
+                day DATE NOT NULL,
+                dim VARCHAR(120) NOT NULL DEFAULT '',
+                orders DECIMAL(14,2) NOT NULL DEFAULT 0,
+                revenue DECIMAL(16,2) NOT NULL DEFAULT 0,
+                leads DECIMAL(14,2) NULL,
+                UNIQUE (source_id, day, dim)
+            )$suffix",
+
             "CREATE TABLE IF NOT EXISTS daily_snapshots (
                 id $id,
                 asset_type VARCHAR(20) NOT NULL,

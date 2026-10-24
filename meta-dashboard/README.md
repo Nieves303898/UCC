@@ -32,6 +32,22 @@ El aislamiento se valida en el servidor: un cliente sólo puede consultar los ac
 
 ---
 
+### Ventas y conversiones propias (con o sin campañas)
+
+Para clientes que **no tienen campañas** (ej. VTV) o para cruzar la publicidad con las ventas reales. Se carga por cliente en *Clientes → {cliente} → Ventas / conversiones*:
+
+| Fuente | Cómo funciona |
+|---|---|
+| **Google Sheets** (recomendado) | Pegás el link de la planilla compartida como "cualquier persona con el enlace puede ver". Se vuelve a leer sola cada 20 min al abrir el tablero y en cada cron. Ideal si el equipo ya carga las ventas del día ahí. |
+| **Excel / CSV** | Subís el `.xlsx` o `.csv`. Al volver a subirlo se reemplazan sólo las fechas que trae (sirve para cargar el día o la semana). |
+| **Carga manual** | Un formulario para cargar el total de un día. |
+
+- Acepta **una fila por día** (totales) o **una fila por venta/turno** (se cuentan las filas). Fechas `dd/mm/aaaa` o fecha de Excel; números `1.234,56` o `1,234.56`.
+- Al importar, el sistema **detecta las columnas** (fecha, cantidad, monto, consultas, sucursal/planta) y te deja corregirlas. Hay una plantilla en `public/assets/plantilla-ventas.csv`.
+- Cada cliente tiene su vocabulario (ej. *Verificaciones*, *Consultas*, *Planta*), moneda y **objetivo mensual**.
+
+El tablero muestra: total, facturación, ticket promedio, promedio diario, consultas y tasa de conversión (vs. la misma cantidad de días anteriores); **proyección de cierre del mes** con avance contra el objetivo y ritmo diario necesario; último día cargado y mejor día; serie diaria; **días de la semana que más rinden**; desglose por sucursal/planta; detalle diario exportable a CSV. Si el cliente además tiene campañas asignadas, suma **costo por venta real**, **ROAS real** y cuántas ventas atribuye Meta sobre el total. Todo aparece también en el inicio del portal y en el reporte PDF.
+
 ## 1. Requisitos
 
 - PHP 8.1 o superior con extensiones `curl`, `openssl`, `pdo_mysql` (vienen en cPanel).
@@ -75,13 +91,13 @@ Con *Conectar con Facebook* el token dura 60 días; el panel avisa 10 días ante
 
 ## 4. Cron (seguidores históricos y mantenimiento)
 
-cPanel → *Cron Jobs* → una vez por día:
+cPanel → *Cron Jobs* → cada hora (así las planillas de Google Sheets quedan al día aunque nadie abra el panel):
 
 ```
-15 3 * * * /usr/local/bin/php /home/USUARIO/meta-dashboard/cron/sync.php > /dev/null 2>&1
+7 * * * * /usr/local/bin/php /home/USUARIO/meta-dashboard/cron/sync.php > /dev/null 2>&1
 ```
 
-Sincroniza cuentas, páginas e Instagram nuevos, guarda la foto diaria de seguidores (Meta no da historial largo), avisa tokens por vencer y limpia la caché.
+Sincroniza cuentas, páginas e Instagram nuevos, relee las planillas de ventas de Google Sheets, guarda la foto diaria de seguidores (Meta no da historial largo), avisa tokens por vencer y limpia la caché.
 Si tu hosting no permite cron por CLI, definí `cron_key` en `config.php` y llamá a `https://TU-URL/cron.php?key=TU_CLAVE` desde un servicio externo (por ejemplo cron-job.org).
 
 ## 5. Webhook (opcional, actividad en vivo)

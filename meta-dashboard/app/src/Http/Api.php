@@ -19,6 +19,7 @@ use App\Services\Clients;
 use App\Services\Connections;
 use App\Services\Instagram;
 use App\Services\Pages;
+use App\Services\Sales;
 use App\Services\Scope;
 use App\Services\Webhooks;
 use InvalidArgumentException;
@@ -29,13 +30,14 @@ final class Api
     /** Lo único que puede pedir un usuario cliente. Todo lo demás es sólo para admins. */
     private const CLIENT_ACTIONS = [
         'bootstrap', 'assets', 'overview', 'account', 'adsets', 'ads', 'timeseries', 'breakdown',
-        'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change',
+        'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales',
     ];
 
     private const POST_ACTIONS = [
         'sync', 'connection_add_token', 'connection_delete', 'asset_toggle', 'cache_flush',
         'user_add', 'user_delete', 'user_reset_password', 'password_change',
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
+        'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
     ];
 
     public static function handle(): void
@@ -186,6 +188,26 @@ final class Api
 
             case 'password_change':
                 return self::changePassword($body);
+
+            case 'sales':
+                if ($client === null) {
+                    throw new InvalidArgumentException('Indicá el cliente.');
+                }
+                return Sales::summary($client, $range());
+
+            // ---------- ventas (admin) ----------
+            case 'sales_preview':
+                return Sales::preview($_FILES['file'] ?? null, isset($body['url']) && $body['url'] !== '' ? (string) $body['url'] : null);
+            case 'sales_import':
+                return Sales::import((int) ($body['client_id'] ?? 0), $body);
+            case 'sales_sync':
+                return Sales::sync((int) ($body['id'] ?? 0));
+            case 'sales_entry':
+                Sales::entry((int) ($body['client_id'] ?? 0), $body);
+                return null;
+            case 'sales_source_delete':
+                Sales::deleteSource((int) ($body['id'] ?? 0));
+                return null;
 
             // ---------- sólo admin ----------
             case 'settings':

@@ -15,6 +15,7 @@ final class Jobs
         $out = [];
         $out['assets'] = self::step('sync_assets', fn () => AssetSync::syncAll());
         $out['snapshots'] = self::step('snapshots', fn () => self::snapshots());
+        $out['sales'] = self::step('sales_sync', fn () => Sales::syncAll());
         $out['tokens'] = self::step('token_check', fn () => self::tokenCheck());
         $out['cleanup'] = self::step('cleanup', function () {
             $n = Cache::purgeExpired();

@@ -159,7 +159,8 @@ async function api(action, params = {}, body = null) {
   const q = new URLSearchParams({ action });
   Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v); });
   if (state.force && !body) q.set('refresh', '1');
-  const opts = body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }, body: JSON.stringify(body) } : {};
+  const isForm = body instanceof FormData;
+  const opts = body ? { method: 'POST', headers: isForm ? { 'X-CSRF-Token': CSRF } : { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }, body: isForm ? body : JSON.stringify(body) } : {};
   const res = await fetch('api.php?' + q.toString(), opts);
   const json = await res.json().catch(() => ({ ok: false, error: `Respuesta inválida del servidor (HTTP ${res.status})` }));
   if (json.auth === false) { location.href = 'index.php?r=login'; throw new Error('Sesión vencida'); }
@@ -398,7 +399,7 @@ function chart(canvas, labels, datasets, { fmtY, fmtY1, stacked = false, horizon
         const isBar = d.type === 'bar';
         return {
           type: d.type || 'line', label: d.label, data: d.data, yAxisID: horizontal ? undefined : (d.axis || 'y'),
-          borderColor: color, backgroundColor: isBar ? color + (datasets.length > 1 ? '55' : 'cc') : color + '14',
+          borderColor: color, backgroundColor: isBar ? color + (d.alpha || (datasets.length > 1 ? '55' : 'cc')) : color + '14',
           hoverBackgroundColor: color, fill: !isBar && datasets.filter((x) => x.type !== 'bar').length === 1,
           tension: 0.35, pointRadius: 0, pointHoverRadius: 4, pointBackgroundColor: color,
           borderWidth: isBar ? 0 : 2, borderRadius: 5, maxBarThickness: 34, order: isBar ? 2 : 1, _fmt: d.fmt,
@@ -1209,7 +1210,7 @@ function todayLabel() {
 const previewBanner = (cid, name) => (state.preview ? `
   <div class="card mb-5 px-4 py-3 flex flex-wrap items-center gap-3 no-print" style="border-color:var(--accent-line);background:var(--accent-soft)">
     <span class="t-accent">${icon('eye', 16)}</span><div class="flex-1 t1 text-[13px]">Vista previa del portal de <b>${esc(name)}</b>: así lo ve el cliente.</div>
-    <a class="btn btn-sm" href="#/preview/${cid}">Inicio</a><a class="btn btn-sm" href="#/preview/${cid}/work">Trabajo</a><a class="btn btn-sm" href="#/preview/${cid}/report">Reporte</a>
+    <a class="btn btn-sm" href="#/preview/${cid}">Inicio</a><a class="btn btn-sm" href="#/preview/${cid}/sales">Ventas</a><a class="btn btn-sm" href="#/preview/${cid}/work">Trabajo</a><a class="btn btn-sm" href="#/preview/${cid}/report">Reporte</a>
     <a class="btn btn-sm btn-primary" href="#/clients/${cid}">Salir de la vista previa</a>
   </div>` : '');
 
@@ -1262,7 +1263,9 @@ async function viewClientHome(cid) {
     </div>
 
     ${ov.accounts.length ? liveTodayBlock('live-today') : ''}
-    ${t ? adsKpis(t.metrics, t.previous, cur, daily, { client: true }) : ''}
+    ${!ov.accounts.length ? '<div id="home-sales"><div class="sk h-64 mb-6"></div></div>' : ''}
+    ${t ? `<div class="h2 mb-3">Publicidad en Meta</div>${adsKpis(t.metrics, t.previous, cur, daily, { client: true })}` : ''}
+    ${ov.accounts.length ? '<div id="home-sales"></div>' : ''}
 
     <div class="grid xl:grid-cols-3 gap-6 mb-6">
       ${t ? `<div class="card xl:col-span-2"><div class="card-h"><div class="h2">Rendimiento diario</div><span class="t3 text-xs">${esc(cur)}</span></div><div class="p-4 h-[300px]"><canvas id="home-chart"></canvas></div></div>` : ''}
@@ -1289,6 +1292,7 @@ async function viewClientHome(cid) {
     html,
     async mount() {
       mountLiveToday('live-today', cid);
+      mountSalesHome('home-sales', cid);
       if (t) {
         chart($('#home-chart'), daily.map((x) => fmt.date(x.date)), [
           { label: 'Inversión', data: daily.map((x) => x.spend), type: 'bar', fmt: (v) => fmt.money(v, cur), color: cssVar('--t3') },
@@ -1359,6 +1363,7 @@ async function viewReport(cid) {
   const camps = accs.filter(Boolean).flatMap((acc) => acc.campaigns.map((c) => ({ ...c, currency: acc.account.currency }))).filter((c) => c.metrics.spend > 0).sort((a, b) => b.metrics.spend - a.metrics.spend).slice(0, 10);
   const igs = await Promise.all(assets.ig_accounts.map((x) => api('ig', rp({ id: x.external_id })).catch(() => null)));
   const media = assets.ig_accounts[0] ? await api('ig_media', rp({ id: assets.ig_accounts[0].external_id })).catch(() => []) : [];
+  const sales = await api('sales', rp({ client: cid })).catch(() => null);
   const inRange = (u) => u.updated_at.slice(0, 10) >= ov.range.since;
   const doneWork = updates.filter((u) => u.status === 'hecho' && inRange(u));
   const openWork = updates.filter((u) => u.status !== 'hecho');
@@ -1374,6 +1379,8 @@ async function viewReport(cid) {
           <div class="t2 mt-0.5">${fmt.dateLong(ov.range.since)} – ${fmt.dateLong(ov.range.until)} · comparado con los ${ov.range.days} días anteriores</div></div>
         <div class="text-right t3 text-xs">Preparado por<div class="t1 font-medium text-[13px]">${esc(state.boot.agency_name)}</div>${fmt.dateLong(new Date().toISOString().slice(0, 10))}</div>
       </header>
+      ${sales?.has_data ? `<section><div class="flex items-center gap-2 mb-3"><div class="h2">${esc(sales.labels.sales)}</div>${freshness(sales)}</div>${salesKpis(sales)}
+        <div class="grid md:grid-cols-2 gap-6">${projectionCard(sales.month, sales.labels, sales.currency)}${sales.ads ? crossoverCard(sales.ads, sales.labels, sales.totals) : `<div class="card"><div class="card-h"><div class="h2">${esc(sales.labels.sales)} por día</div></div><div class="p-4 h-[200px]"><canvas id="rep-sales"></canvas></div></div>`}</div></section>` : ''}
       ${t ? `<section><div class="h2 mb-3">Publicidad en Meta</div>${adsKpis(t.metrics, t.previous, cur, daily, { client: true })}
         <div class="card"><div class="card-h"><div class="h2">Inversión y resultados por día</div></div><div class="p-4 h-[260px]"><canvas id="rep-chart"></canvas></div></div></section>` : ''}
       ${camps.length ? `<section class="card overflow-hidden"><div class="card-h"><div class="h2">Campañas</div></div><div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Campaña</th><th>Inversión</th><th>Resultados</th><th>Costo/resultado</th><th>Alcance</th><th>CTR</th><th>ROAS</th></tr></thead><tbody>
@@ -1390,6 +1397,7 @@ async function viewReport(cid) {
   return {
     html,
     mount() {
+      if (sales?.has_data && $('#rep-sales')) chart($('#rep-sales'), sales.daily.map((x) => fmt.date(x.date)), [{ label: sales.labels.sales, data: sales.daily.map((x) => x.orders), type: 'bar', color: cssVar('--accent') }]);
       if (t) chart($('#rep-chart'), daily.map((x) => fmt.date(x.date)), [
         { label: 'Inversión', data: daily.map((x) => x.spend), type: 'bar', fmt: (v) => fmt.money(v, cur), color: cssVar('--t3') },
         { label: 'Resultados', data: daily.map((x) => x.results), axis: 'y1', color: cssVar('--accent') },
@@ -1448,6 +1456,15 @@ function clientForm(c = null) {
         <label class="field flex-1"><span>Logo (URL https, opcional)</span><input class="input" name="logo_url" value="${esc(c?.logo_url || '')}" placeholder="https://…/logo.png"></label>
       </div>
       <p class="t3 text-xs">El color se usa como acento en el portal y en los reportes del cliente.</p>
+      <div class="hair-t pt-4"><div class="h2">Ventas / conversiones</div><p class="t3 text-xs mt-0.5">Cómo se llaman en este negocio (ej. VTV: “Verificaciones”, “Turnos”, “Planta”).</p></div>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="field"><span>Nombre de la conversión</span><input class="input" name="sales_label" value="${esc(c?.sales_label || 'Ventas')}"></label>
+        <label class="field"><span>Nombre de los contactos</span><input class="input" name="leads_label" value="${esc(c?.leads_label || 'Consultas')}"></label>
+        <label class="field"><span>Nombre del desglose</span><input class="input" name="dim_label" value="${esc(c?.dim_label || 'Sucursal')}"></label>
+        <label class="field"><span>Moneda</span><input class="input" name="currency" maxlength="3" value="${esc(c?.currency || 'ARS')}"></label>
+        <label class="field"><span>Objetivo mensual (cantidad)</span><input class="input num" name="target_orders" inputmode="decimal" value="${esc(c?.target_orders ?? '')}" placeholder="opcional"></label>
+        <label class="field"><span>Objetivo mensual (facturación)</span><input class="input num" name="target_revenue" inputmode="decimal" value="${esc(c?.target_revenue ?? '')}" placeholder="opcional"></label>
+      </div>
       <div class="flex gap-2 pt-1"><button class="btn btn-primary">${c ? 'Guardar' : 'Crear cliente'}</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button></div>
     </form>`, 'sm');
   $('#client-form', el).addEventListener('submit', async (e) => {
@@ -1518,12 +1535,13 @@ async function viewClient(id, tab = 'assets') {
       <button class="btn" id="edit-client">Editar</button>
       <button class="btn btn-ghost btn-danger" id="del-client">Eliminar</button>
     </div>
-    <div class="utabs mb-6" id="ctabs">${[['assets', 'Activos asignados'], ['users', 'Accesos'], ['work', 'Trabajo en curso']].map(([k, l]) => `<button data-ct="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div>
+    <div class="utabs mb-6" id="ctabs">${[['assets', 'Activos asignados'], ['sales', esc(c.sales_label) + ' / conversiones'], ['users', 'Accesos'], ['work', 'Trabajo en curso']].map(([k, l]) => `<button data-ct="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</div>
     <div data-pane="assets" class="${tab === 'assets' ? '' : 'hidden'}">
       <div class="flex flex-wrap items-center gap-3 mb-4"><div class="t2 flex-1">Elegí qué puede ver este cliente. Todo lo que no esté marcado queda oculto para él.</div>
         <input class="input w-64" placeholder="Filtrar" id="asset-filter"><button class="btn btn-primary" id="save-assets">Guardar asignación</button></div>
       <div class="grid lg:grid-cols-3 gap-4">${assetList('ad_account', assets.ad_accounts, 'Cuentas publicitarias')}${assetList('page', assets.pages, 'Páginas de Facebook')}${assetList('ig_account', assets.ig_accounts, 'Instagram')}</div>
     </div>
+    <div data-pane="sales" class="${tab === 'sales' ? '' : 'hidden'}">${salesPane(c)}</div>
     <div data-pane="users" class="${tab === 'users' ? '' : 'hidden'}">${users}</div>
     <div data-pane="work" class="${tab === 'work' ? '' : 'hidden'}">${work}</div>`;
 
@@ -1589,6 +1607,7 @@ async function viewClient(id, tab = 'assets') {
         }
       });
       bindUpdateForm($('#update-form'), c.id);
+      mountSalesPane(c);
     },
   };
 }
@@ -1776,6 +1795,300 @@ async function viewSettings() {
 }
 
 // =========================================================================
+// Ventas propias (Excel / Google Sheets / carga manual)
+// =========================================================================
+const salesFmt = (cur) => ({ money: (v) => fmt.moneyShort(v, cur), moneyFull: (v) => fmt.money(v, cur) });
+const lower = (s) => String(s || '').toLowerCase();
+
+/** Tarjeta de proyección del mes. */
+function projectionCard(mo, L, cur) {
+  if (!mo) return '';
+  const { money } = salesFmt(cur);
+  const monthName = new Date(mo.month + '-15').toLocaleDateString(LOCALE, { month: 'long' });
+  const target = mo.target_orders;
+  const pct = target ? Math.min(100, (mo.orders / target) * 100) : (mo.projected_orders ? (mo.orders / mo.projected_orders) * 100 : 0);
+  const projPct = target ? Math.min(100, (mo.projected_orders / target) * 100) : 100;
+  const vsPrev = mo.prev_month_orders ? ((mo.projected_orders - mo.prev_month_orders) / mo.prev_month_orders) * 100 : null;
+  return `
+    <div class="card p-5 flex flex-col">
+      <div class="flex items-center gap-2"><div class="h2">Proyección de ${esc(monthName)}</div><span class="t3 text-xs">día ${mo.elapsed} de ${mo.days_in_month}</span></div>
+      <div class="flex items-end gap-6 mt-4 flex-wrap">
+        <div><div class="t2 text-[12.5px]">Acumulado</div><div class="hero-num t1 mt-1" style="font-size:32px">${fmt.int(mo.orders)}</div><div class="t3 text-xs mt-1">${esc(lower(L.sales))}${mo.revenue ? ' · ' + money(mo.revenue) : ''}</div></div>
+        <div><div class="t2 text-[12.5px]">Cierre estimado</div><div class="hero-num t-accent mt-1" style="font-size:32px">≈ ${fmt.int(mo.projected_orders)}</div><div class="t3 text-xs mt-1">${mo.projected_revenue ? money(mo.projected_revenue) + ' · ' : ''}${vsPrev !== null ? `${vsPrev >= 0 ? '+' : ''}${fmt.dec(vsPrev, 1)}% vs. mes anterior` : 'al ritmo actual'}</div></div>
+        ${target ? `<div><div class="t2 text-[12.5px]">Objetivo</div><div class="hero-num t1 mt-1" style="font-size:32px">${fmt.int(target)}</div><div class="t3 text-xs mt-1">${mo.needed_per_day !== null ? `Hacen falta ${fmt.dec(mo.needed_per_day, 1)} por día` : ''}</div></div>` : ''}
+      </div>
+      <div class="mt-5">
+        <div class="relative h-2.5 rounded-full sunk overflow-hidden">
+          <div class="absolute inset-y-0 left-0 rounded-full" style="width:${projPct}%;background:var(--accent-soft)"></div>
+          <div class="absolute inset-y-0 left-0 rounded-full" style="width:${pct}%;background:var(--accent)"></div>
+        </div>
+        <div class="flex text-[11.5px] t3 mt-1.5"><span>${target ? `${fmt.dec((mo.orders / target) * 100, 0)}% del objetivo` : 'Acumulado vs. estimado'}</span><span class="flex-1"></span><span>Mismo día del mes anterior: ${fmt.int(mo.prev_same_orders)}</span></div>
+      </div>
+    </div>`;
+}
+
+/** Cruce con Meta Ads: costo por venta y ROAS reales. */
+function crossoverCard(ads, L, tot) {
+  if (!ads) return '';
+  const money = (v) => fmt.money(v, ads.currency);
+  return `
+    <div class="card p-5">
+      <div class="flex items-center gap-2"><div class="h2">Publicidad vs. ${esc(lower(L.sales))} reales</div><span class="pill accent plain">Meta Ads</span></div>
+      <div class="grid grid-cols-2 gap-4 mt-4">
+        <div><div class="t2 text-[12.5px]">Inversión</div><div class="num text-xl font-semibold t1 mt-1">${money(ads.spend)}</div></div>
+        <div><div class="t2 text-[12.5px]">Costo por ${esc(lower(L.sales).replace(/s$/, ''))}</div><div class="num text-xl font-semibold t1 mt-1">${money(ads.cost_per_order)}</div></div>
+        <div><div class="t2 text-[12.5px]">ROAS real</div><div class="num text-xl font-semibold t1 mt-1">${fmt.x(ads.roas_real)}</div></div>
+        <div><div class="t2 text-[12.5px]">Atribuidas por Meta</div><div class="num text-xl font-semibold t1 mt-1">${fmt.int(ads.meta_results)} <span class="t3 text-sm font-normal">de ${fmt.int(tot.orders)}</span></div></div>
+      </div>
+      ${ads.meta_share !== null ? `<div class="bar mt-4"><i style="width:${ads.meta_share}%"></i></div><div class="t3 text-xs mt-1.5">Meta registra el ${fmt.dec(ads.meta_share, 0)}% de las ${esc(lower(L.sales))}. El resto llega por otros canales o sin atribución.</div>` : ''}
+    </div>`;
+}
+
+function salesKpis(d) {
+  const L = d.labels, t = d.totals, p = d.previous, cur = d.currency;
+  const { money } = salesFmt(cur);
+  const s = (k) => sparkline(d.daily.map((x) => x[k]));
+  const vs = `vs. ${d.compared_days} días anteriores`;
+  const items = [
+    [L.sales, fmt.int(t.orders), delta(t.orders, p.orders), s('orders')],
+    t.revenue > 0 && ['Facturación', money(t.revenue), delta(t.revenue, p.revenue), s('revenue')],
+    t.avg_ticket && ['Ticket promedio', money(t.avg_ticket), delta(t.avg_ticket, p.avg_ticket), ''],
+    [`Promedio diario`, fmt.dec(t.per_day, 1), delta(t.per_day, p.per_day), ''],
+    d.has_leads && [L.leads, fmt.int(t.leads), delta(t.leads, p.leads), s('leads')],
+    d.has_leads && ['Tasa de conversión', fmt.pct(t.conv_rate), delta(t.conv_rate, p.conv_rate), ''],
+  ].filter(Boolean);
+  const cols = items.length >= 6 ? 'lg:grid-cols-6' : items.length === 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-4';
+  return `<div class="kpi-row grid-cols-2 sm:grid-cols-3 ${cols} mb-6" style="display:grid">${items.map(([l, v, dl, sp]) => kpi(l, v, { d: dl, spark: sp, vs })).join('')}</div>`;
+}
+
+const freshness = (d) => {
+  if (!d.last_day) return '';
+  const days = Math.round((Date.now() - new Date(d.last_day + 'T12:00:00').getTime()) / 86400000);
+  const cls = days <= 1 ? 'green' : days <= 3 ? 'amber' : 'red';
+  return `<span class="pill ${cls}">Datos hasta el ${fmt.date(d.last_day)}${days > 1 ? ` · hace ${days} días` : ''}</span>`;
+};
+
+async function viewSales(cid) {
+  cid = +cid || portalClient();
+  const brand = await clientBrand(cid);
+  setAccent(brand.color);
+  const d = await api('sales', rp({ client: cid }));
+  const L = d.labels, cur = d.currency;
+  const { money, moneyFull } = salesFmt(cur);
+  if (!d.has_data) {
+    return { html: previewBanner(cid, brand.name) + empty(`Todavía no hay ${lower(L.sales)} cargadas`, isClient() ? 'La agencia va a conectar la planilla de ventas y la vas a ver acá día a día.' : 'Cargalas desde Clientes → Ventas: subí el Excel, conectá un Google Sheets o cargá el día a mano.', isClient() ? '' : `<a class="btn btn-primary" href="#/clients/${cid}">Ir a cargar ventas</a>`, 'report') };
+  }
+  const daily = d.daily;
+  const cols = [
+    { key: 'date', label: 'Día', left: true, value: (r) => r.date, html: (r) => `${new Date(r.date + 'T12:00:00').toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' })}` },
+    { key: 'orders', label: L.sales, value: (r) => r.orders, total: (rows) => fmt.int(rows.reduce((x, r) => x + (r.orders || 0), 0)) },
+    ...(d.totals.revenue > 0 ? [{ key: 'revenue', label: 'Facturación', value: (r) => r.revenue, html: (r) => moneyFull(r.revenue), total: (rows) => moneyFull(rows.reduce((x, r) => x + (r.revenue || 0), 0)) },
+      { key: 'ticket', label: 'Ticket prom.', value: (r) => (r.orders ? r.revenue / r.orders : null), html: (r) => moneyFull(r.orders ? r.revenue / r.orders : null) }] : []),
+    ...(d.has_leads ? [{ key: 'leads', label: L.leads, value: (r) => r.leads, total: (rows) => fmt.int(rows.reduce((x, r) => x + (r.leads || 0), 0)) },
+      { key: 'conv', label: 'Conversión', value: (r) => (r.leads ? (r.orders / r.leads) * 100 : null), html: (r) => fmt.pct(r.leads ? (r.orders / r.leads) * 100 : null) }] : []),
+    ...(d.ads ? [{ key: 'spend', label: 'Inversión Meta', value: (r) => d.ads.spend_daily[r.date] ?? null, html: (r) => fmt.money(d.ads.spend_daily[r.date], d.ads.currency) },
+      { key: 'cpo', label: 'Costo/venta', value: (r) => (r.orders && d.ads.spend_daily[r.date] ? d.ads.spend_daily[r.date] / r.orders : null), html: (r) => fmt.money(r.orders && d.ads.spend_daily[r.date] ? d.ads.spend_daily[r.date] / r.orders : null, d.ads.currency) }] : []),
+  ];
+  const last = d.last;
+  const best = [...daily].filter((x) => x.orders != null).sort((a, b) => b.orders - a.orders)[0];
+
+  const html = `
+    ${previewBanner(cid, brand.name)}
+    ${isClient() ? backLink('#/', 'Inicio') : ''}
+    ${pageHead(esc(L.sales), `${esc(brand.name)} · ${fmt.dateLong(d.range.since)} – ${fmt.dateLong(d.range.until)}`, `<div class="flex items-center gap-2">${freshness(d)}<a class="btn" href="${state.preview ? `#/preview/${cid}/report` : '#/report'}">${icon('report', 15)}Reporte</a></div>`)}
+    ${salesKpis(d)}
+    <div class="grid xl:grid-cols-3 gap-6 mb-6">
+      ${projectionCard(d.month, L, cur).replace('class="card p-5 flex flex-col"', 'class="card p-5 flex flex-col xl:col-span-2"')}
+      <div class="card p-5">
+        <div class="h2">Último día cargado</div>
+        <div class="t3 text-xs mt-0.5">${last ? new Date(last.day + 'T12:00:00').toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' }) : ''}</div>
+        <div class="hero-num t1 mt-4">${fmt.int(last?.orders)}</div><div class="t2 mt-1">${esc(lower(L.sales))}${last?.revenue ? ' · ' + money(last.revenue) : ''}</div>
+        ${best ? `<div class="hair-t mt-5 pt-4 t2 text-[13px]">Mejor día del período: <b class="t1">${fmt.date(best.date)}</b> con ${fmt.int(best.orders)}</div>` : ''}
+      </div>
+    </div>
+    ${d.ads ? `<div class="mb-6">${crossoverCard(d.ads, L, d.totals)}</div>` : ''}
+    <div class="card mb-6"><div class="card-h"><div class="h2">${esc(L.sales)} por día</div><div class="flex-1"></div>
+      ${d.totals.revenue > 0 || d.ads ? `<span class="t3 text-xs">vs.</span><select class="select select-sm" id="sales-line">${d.totals.revenue > 0 ? '<option value="revenue">Facturación</option>' : ''}${d.has_leads ? `<option value="leads">${esc(L.leads)}</option>` : ''}${d.ads ? '<option value="spend">Inversión Meta</option>' : ''}<option value="">—</option></select>` : ''}</div>
+      <div class="p-4 h-[300px]"><canvas id="sales-chart"></canvas></div></div>
+    <div class="grid xl:grid-cols-2 gap-6 mb-6">
+      <div class="card"><div class="card-h"><div class="h2">¿Qué días rinden más?</div><span class="t3 text-xs">promedio, últimos 90 días</span></div><div class="p-4 h-[260px]"><canvas id="wd-chart"></canvas></div></div>
+      ${d.dims.length ? `<div class="card overflow-hidden"><div class="card-h"><div class="h2">Por ${esc(lower(L.dim))}</div></div>
+        <div class="scroll-x max-h-[300px]"><table class="tbl"><thead><tr><th style="text-align:left">${esc(L.dim)}</th><th>${esc(L.sales)}</th><th>Participación</th>${d.totals.revenue > 0 ? '<th>Facturación</th>' : ''}${d.has_leads ? '<th>Conversión</th>' : ''}</tr></thead><tbody>
+        ${d.dims.map((x) => `<tr><td style="text-align:left">${esc(x.label)}</td><td>${fmt.int(x.orders)}</td><td style="min-width:120px"><div class="flex items-center gap-2"><div class="bar flex-1"><i style="width:${(x.orders / d.totals.orders) * 100}%"></i></div><span class="t3 text-xs num w-10">${fmt.dec((x.orders / d.totals.orders) * 100, 0)}%</span></div></td>${d.totals.revenue > 0 ? `<td>${money(x.revenue)}</td>` : ''}${d.has_leads ? `<td>${fmt.pct(x.leads ? (x.orders / x.leads) * 100 : null)}</td>` : ''}</tr>`).join('')}
+        </tbody></table></div></div>` : `<div class="card p-5 t3 text-[13px] flex items-center">Si la planilla tiene una columna de ${esc(lower(L.dim))}, canal o producto, acá vas a ver el desglose.</div>`}
+    </div>
+    ${tableHtml('sales-days', cols, [...daily].reverse().filter((x) => x.orders !== null), { title: 'Detalle diario', csvName: 'ventas-' + brand.name, search: false })}
+    ${!isClient() && d.sources.some((x) => x.last_error) ? `<div class="t-warn text-xs mt-3">Una fuente tuvo un error al sincronizar: ${esc(d.sources.find((x) => x.last_error).last_error)}</div>` : ''}`;
+
+  return {
+    html,
+    mount() {
+      mountTable('sales-days');
+      const sel = $('#sales-line');
+      let c;
+      const draw = () => {
+        dropChart(c);
+        const ds = [{ label: L.sales, data: daily.map((x) => x.orders), type: 'bar', color: cssVar('--accent'), alpha: 'bb' }];
+        const k = sel?.value;
+        if (k === 'revenue') ds.push({ label: 'Facturación', data: daily.map((x) => x.revenue), axis: 'y1', fmt: (v) => fmt.money(v, cur), color: cssVar('--c2') });
+        if (k === 'leads') ds.push({ label: L.leads, data: daily.map((x) => x.leads), axis: 'y1', color: cssVar('--c3') });
+        if (k === 'spend') ds.push({ label: 'Inversión Meta', data: daily.map((x) => d.ads.spend_daily[x.date] ?? null), axis: 'y1', fmt: (v) => fmt.money(v, d.ads.currency), color: cssVar('--c2') });
+        c = chart($('#sales-chart'), daily.map((x) => fmt.date(x.date)), ds);
+      };
+      sel?.addEventListener('change', draw);
+      draw();
+      chart($('#wd-chart'), d.weekday.map((w) => w.label), [{ label: `${L.sales} promedio`, data: d.weekday.map((w) => w.orders), type: 'bar', fmt: (v) => fmt.dec(v, 1), color: cssVar('--accent') }]);
+    },
+  };
+}
+
+/** Bloque compacto de ventas para el inicio del cliente. */
+async function mountSalesHome(boxId, cid) {
+  const box = $('#' + boxId);
+  if (!box) return;
+  try {
+    const d = await api('sales', rp({ client: cid }));
+    if (!d.has_data) { box.remove(); return; }
+    const L = d.labels;
+    box.innerHTML = `
+      <div class="flex items-center mb-3 gap-2"><div class="h2">${esc(L.sales)}</div>${freshness(d)}<div class="flex-1"></div><a class="link text-[13px]" href="${state.preview ? `#/preview/${cid}/sales` : '#/sales'}">Ver tablero completo</a></div>
+      ${salesKpis(d)}
+      <div class="grid xl:grid-cols-3 gap-6 mb-6">
+        <div class="card xl:col-span-2"><div class="card-h"><div class="h2">${esc(L.sales)} por día</div></div><div class="p-4 h-[260px]"><canvas id="home-sales-chart"></canvas></div></div>
+        ${projectionCard(d.month, L, d.currency)}
+      </div>
+      ${d.ads ? `<div class="mb-6">${crossoverCard(d.ads, L, d.totals)}</div>` : ''}`;
+    chart($('#home-sales-chart'), d.daily.map((x) => fmt.date(x.date)), [{ label: L.sales, data: d.daily.map((x) => x.orders), type: 'bar', color: cssVar('--accent') }]);
+  } catch (e) {
+    box.innerHTML = errorBox(e.message, false);
+  }
+}
+
+// ---------- Admin: carga de ventas de un cliente ----------
+function salesPane(c) {
+  const kinds = { upload: 'Archivo', gsheet: 'Google Sheets', manual: 'Carga manual' };
+  return `
+    <div class="grid xl:grid-cols-5 gap-6">
+      <div class="xl:col-span-3 space-y-6">
+        <div class="card">
+          <div class="card-h"><div class="h2">Fuentes de ${esc(lower(c.sales_label))}</div><div class="flex-1"></div><a class="btn btn-sm" href="#/preview/${c.id}/sales">${icon('eye', 14)}Ver tablero</a></div>
+          <div class="divide">${c.sales_sources.map((s) => `
+            <div class="px-5 py-3.5 flex flex-wrap items-center gap-3">
+              <span class="w-8 h-8 rounded-lg sunk grid place-items-center t2">${icon(s.kind === 'gsheet' ? 'link' : s.kind === 'manual' ? 'calendar' : 'report', 15)}</span>
+              <div class="min-w-0 flex-1"><div class="t1 font-medium">${esc(s.name)} <span class="pill plain">${kinds[s.kind] || s.kind}</span></div>
+                <div class="t3 text-xs mt-0.5">${fmt.int(s.rows_count)} filas · ${s.min_day ? `${fmt.date(s.min_day)} → ${fmt.date(s.max_day)}` : 'sin datos'} · actualizado ${s.last_sync_at ? fmt.ago(s.last_sync_at) : 'nunca'}</div>
+                ${s.last_error ? `<div class="t-bad text-xs mt-1">${esc(s.last_error)}</div>` : ''}</div>
+              ${s.kind === 'gsheet' ? `<button class="btn btn-sm" data-sales-sync="${s.id}">${icon('refresh', 14)}Sincronizar</button>` : ''}
+              ${s.kind === 'upload' ? `<button class="btn btn-sm" data-sales-reupload="${s.id}" data-name="${esc(s.name)}">${icon('download', 14)}Subir actualización</button>` : ''}
+              <button class="btn btn-sm btn-ghost btn-danger" data-sales-del="${s.id}">${icon('x', 14)}</button>
+            </div>`).join('') || `<div class="p-5 t2">Sin fuentes. Conectá un Google Sheets (se actualiza solo), subí el Excel o cargá los días a mano.</div>`}</div>
+          ${c.sales_sources.length > 1 ? '<div class="px-5 py-3 hair-t t3 text-xs">Las fuentes se suman entre sí: no cargues el mismo período en dos fuentes distintas.</div>' : ''}
+        </div>
+        <div class="card" id="sales-wizard">
+          <div class="card-h"><div class="h2">Importar planilla</div><div class="flex-1"></div><a class="link text-[13px]" href="assets/plantilla-ventas.csv" download>Descargar plantilla</a></div>
+          <div class="p-5 space-y-4" data-step="1">
+            <div class="seg" id="imp-kind"><button class="on" data-k="gsheet">Google Sheets (automático)</button><button data-k="upload">Excel / CSV</button></div>
+            <div data-k-pane="gsheet" class="space-y-2">
+              <input class="input" id="imp-url" placeholder="https://docs.google.com/spreadsheets/d/…">
+              <p class="t3 text-xs">Compartí la planilla como <b>“Cualquier persona con el enlace puede ver”</b>. Se vuelve a leer sola cada 20 minutos cuando alguien abre el tablero, y en cada cron.</p>
+            </div>
+            <div data-k-pane="upload" class="hidden space-y-2">
+              <input type="file" class="input !h-auto py-2" id="imp-file" accept=".xlsx,.csv,.txt">
+              <p class="t3 text-xs">.xlsx o .csv. Si volvés a subir el archivo, se reemplazan sólo las fechas que trae (ideal para cargar el día).</p>
+            </div>
+            <input type="hidden" id="imp-source">
+            <button class="btn btn-primary" id="imp-preview">Leer columnas</button>
+          </div>
+          <div class="p-5 space-y-4 hidden" data-step="2"></div>
+        </div>
+      </div>
+      <div class="xl:col-span-2 space-y-6">
+        <form class="card p-5 space-y-3" id="sales-entry">
+          <div class="h2">Cargar un día a mano</div>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="field"><span>Fecha</span><input class="input" type="date" name="day" value="${new Date(Date.now() - 864e5).toISOString().slice(0, 10)}" max="${new Date().toISOString().slice(0, 10)}" required></label>
+            <label class="field"><span>${esc(c.sales_label)}</span><input class="input num" name="orders" inputmode="decimal" required></label>
+            <label class="field"><span>Facturación (${esc(c.currency)})</span><input class="input num" name="revenue" inputmode="decimal" placeholder="opcional"></label>
+            <label class="field"><span>${esc(c.leads_label)}</span><input class="input num" name="leads" inputmode="decimal" placeholder="opcional"></label>
+          </div>
+          <label class="field"><span>${esc(c.dim_label)} (opcional)</span><input class="input" name="dim"></label>
+          <button class="btn btn-accent w-full">Guardar día</button>
+          <p class="t3 text-xs">Si el día ya existe en la carga manual, se reemplaza.</p>
+        </form>
+        <div class="card overflow-hidden"><div class="card-h"><div class="h2">Últimos días</div></div>
+          <div class="max-h-[420px] overflow-y-auto"><table class="tbl"><thead><tr><th style="text-align:left">Día</th><th>${esc(c.sales_label)}</th><th>Facturación</th><th style="text-align:left">${esc(c.dim_label)}</th></tr></thead><tbody>
+            ${c.sales_recent.map((r) => `<tr><td style="text-align:left">${fmt.date(r.day)}</td><td>${fmt.int(+r.orders)}</td><td>${fmt.money(+r.revenue, c.currency)}</td><td style="text-align:left" class="t3">${esc(r.dim || '—')}</td></tr>`).join('') || '<tr><td colspan="4" class="t3 !py-6" style="text-align:center">Sin datos</td></tr>'}
+          </tbody></table></div></div>
+      </div>
+    </div>`;
+}
+
+function mountSalesPane(c) {
+  const wiz = $('#sales-wizard');
+  if (!wiz) return;
+  let kind = 'gsheet';
+  $('#imp-kind').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-k]');
+    if (!b) return;
+    kind = b.dataset.k;
+    $$('#imp-kind [data-k]').forEach((x) => x.classList.toggle('on', x === b));
+    $$('[data-k-pane]', wiz).forEach((p) => p.classList.toggle('hidden', p.dataset.kPane !== kind));
+  });
+  const step2 = $('[data-step="2"]', wiz);
+  $('#imp-preview').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    let p;
+    btn.disabled = true; btn.textContent = 'Leyendo…';
+    try {
+      if (kind === 'gsheet') {
+        p = await api('sales_preview', {}, { url: $('#imp-url').value.trim() });
+      } else {
+        const f = $('#imp-file').files[0];
+        if (!f) throw new Error('Elegí un archivo.');
+        const fd = new FormData(); fd.append('file', f);
+        p = await api('sales_preview', {}, fd);
+      }
+    } catch (err) { toast(err.message, 'error'); return; } finally { btn.disabled = false; btn.textContent = 'Leer columnas'; }
+    const opt = (field) => `<option value="">— ninguna —</option>${p.headers.map((h, i) => `<option value="${i}" ${p.suggest[field] === i ? 'selected' : ''}>${esc(h)}</option>`).join('')}`;
+    const fields = [['date', 'Fecha', true], ['orders', `${c.sales_label} (cantidad)`], ['revenue', 'Facturación / monto'], ['leads', `${c.leads_label}`], ['dim', `${c.dim_label} / canal`]];
+    step2.innerHTML = `
+      <div class="flex items-center gap-2"><div class="h2">Revisá las columnas</div><span class="t3 text-xs">${fmt.int(p.total)} filas leídas${p.detected ? ` · ${p.detected.days} días (${fmt.date(p.detected.min)} → ${fmt.date(p.detected.max)})` : ''}</span></div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${fields.map(([f, l, req]) => `<label class="field"><span>${esc(l)}${req ? ' *' : ''}</span><select class="select" data-map="${f}">${opt(f)}</select></label>`).join('')}</div>
+      <p class="t3 text-xs">Si no elegís la columna de cantidad, <b>cada fila cuenta como 1</b> (sirve si la planilla tiene una fila por venta o por turno).</p>
+      <div class="scroll-x rounded-xl" style="border:1px solid var(--line)"><table class="tbl"><thead><tr>${p.headers.map((h) => `<th style="text-align:left">${esc(h)}</th>`).join('')}</tr></thead><tbody>${p.sample.map((r) => `<tr>${p.headers.map((_, i) => `<td style="text-align:left">${esc(r[i] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <div class="flex flex-wrap gap-3 items-end"><label class="field flex-1 min-w-[200px]"><span>Nombre de la fuente</span><input class="input" id="imp-name" value="${esc($('#imp-source').dataset.name || (kind === 'gsheet' ? 'Planilla de ventas (Sheets)' : 'Planilla de ventas'))}"></label>
+        <button class="btn btn-accent" id="imp-go">Importar</button><button class="btn btn-ghost" id="imp-cancel">Cancelar</button></div>`;
+    $('[data-step="1"]', wiz).classList.add('hidden');
+    step2.classList.remove('hidden');
+    $('#imp-cancel').onclick = () => render({ silent: true });
+    $('#imp-go').onclick = async () => {
+      const mapping = Object.fromEntries($$('[data-map]', step2).map((s) => [s.dataset.map, s.value === '' ? null : +s.value]));
+      try {
+        const r = await post('sales_import', { client_id: c.id, token: p.token, mapping, kind, url: $('#imp-url').value.trim(), name: $('#imp-name').value, source_id: $('#imp-source').value || null });
+        toast(`Importado: ${r.days} días (${fmt.date(r.min)} → ${fmt.date(r.max)})${r.skipped ? ` · ${r.skipped} filas sin fecha válida` : ''}`);
+        render({ silent: true });
+      } catch { /* toast */ }
+    };
+  });
+  $('#sales-entry').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await post('sales_entry', { ...Object.fromEntries(new FormData(e.target)), client_id: c.id }, 'Día guardado'); render({ silent: true }); } catch { /* toast */ }
+  });
+  $('#view').addEventListener('click', async (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.salesSync) { b.disabled = true; try { await post('sales_sync', { id: +b.dataset.salesSync }, 'Planilla sincronizada'); render({ silent: true }); } catch { b.disabled = false; } }
+    if (b.dataset.salesDel && confirm('¿Eliminar esta fuente y todos sus datos?')) { await post('sales_source_delete', { id: +b.dataset.salesDel }, 'Fuente eliminada'); render({ silent: true }); }
+    if (b.dataset.salesReupload) {
+      $('#imp-source').value = b.dataset.salesReupload; $('#imp-source').dataset.name = b.dataset.name;
+      $('#imp-kind [data-k=upload]').click();
+      wiz.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      toast('Elegí el archivo actualizado y leé las columnas');
+    }
+  });
+}
+
+// =========================================================================
 // Navegación
 // =========================================================================
 const ADMIN_NAV = [
@@ -1786,13 +2099,17 @@ const CLIENT_NAV = [['home', '#/', 'home', 'Inicio'], ['ads', '#/ads', 'target',
 
 function renderNav() {
   if (isClient()) {
-    const html = CLIENT_NAV.map(([k, href, ic, l]) => `<a href="${href}" data-nav="${k}">${icon(ic)}${l}</a>`).join('');
+    const c0 = state.boot.client || {};
+    const cn = state.boot.counts || {};
+    const items = CLIENT_NAV.filter(([k]) => (k !== 'ads' || c0.has_ads) && (k !== 'social' || cn.page || cn.ig_account));
+    if (c0.has_sales) items.splice(1, 0, ['sales', '#/sales', 'layers', c0.sales_label || 'Ventas']);
+    const html = items.map(([k, href, ic, l]) => `<a href="${href}" data-nav="${k}">${icon(ic)}${esc(l)}</a>`).join('');
     $('#nav').innerHTML = html;
     $('#nav-mobile').innerHTML = html;
     const c = state.boot.client;
     $('#client-brand').innerHTML = `
       <div class="mono-avatar w-8 h-8 text-xs" style="background:var(--accent);color:var(--on-accent)">${c?.logo_url ? `<img src="${esc(c.logo_url)}" class="w-full h-full object-cover rounded-[10px]" alt="">` : esc(initials(c?.name))}</div>
-      <div class="leading-tight min-w-0 hidden sm:block"><div class="font-semibold t1 truncate">${esc(c?.name || '')}</div><div class="t3 text-[11px] truncate">por ${esc(state.boot.agency_name)}</div></div>`;
+      <div class="leading-tight min-w-[90px] max-w-[220px] hidden sm:block"><div class="font-semibold t1 truncate">${esc(c?.name || '')}</div><div class="t3 text-[11px] truncate">por ${esc(state.boot.agency_name)}</div></div>`;
     return;
   }
   const counts = state.boot.counts;
@@ -1867,6 +2184,7 @@ const ADMIN_ROUTES = [
   [/^\/clients\/(\d+)$/, viewClient, 'clients'],
   [/^\/preview\/(\d+)$/, viewClientHome, 'clients', true],
   [/^\/preview\/(\d+)\/work$/, viewWork, 'clients', true],
+  [/^\/preview\/(\d+)\/sales$/, viewSales, 'clients', true],
   [/^\/preview\/(\d+)\/report$/, viewReport, 'clients', true],
   [/^\/activity$/, viewActivity, 'activity'],
   [/^\/settings$/, viewSettings, 'settings'],
@@ -1881,6 +2199,7 @@ const CLIENT_ROUTES = [
   [/^\/pages\/(\d+)$/, viewPage, 'social'],
   [/^\/ig\/(\d+)$/, viewIg, 'social'],
   [/^\/work$/, () => viewWork(), 'work'],
+  [/^\/sales$/, () => viewSales(), 'sales'],
   [/^\/report$/, () => viewReport(), 'report'],
 ];
 const NO_LIVE = /^#\/(settings|clients)/;
@@ -1930,7 +2249,7 @@ function renderRange() {
   const r = state.range;
   const box = $('#range-ctl');
   box.innerHTML = `
-    <div class="seg hidden lg:inline-flex">${QUICK.map(([k, l]) => `<button data-p="${k}" class="${r.preset === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="seg hidden ${isClient() ? '2xl' : 'xl'}:inline-flex">${QUICK.map(([k, l]) => `<button data-p="${k}" class="${r.preset === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <select class="select select-sm" id="preset">${Object.entries(state.boot.presets).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}<option value="custom">Personalizado…</option></select>
     <div id="custom-range" class="${r.preset === 'custom' ? 'flex' : 'hidden'} items-center gap-1">
       <input type="date" id="since" class="input select-sm w-[136px]" value="${esc(r.since || '')}"><span class="t3">–</span><input type="date" id="until" class="input select-sm w-[136px]" value="${esc(r.until || '')}">

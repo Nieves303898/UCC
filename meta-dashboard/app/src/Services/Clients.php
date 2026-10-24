@@ -44,6 +44,8 @@ final class Clients
             'assets'  => Db::all('SELECT asset_type, external_id FROM client_assets WHERE client_id = ?', [$id]),
             'users'   => Db::all('SELECT id, username, name, last_login_at, created_at FROM users WHERE client_id = ? ORDER BY id', [$id]),
             'updates' => self::updates($id),
+            'sales_sources' => Sales::sources($id),
+            'sales_recent'  => Sales::recent($id),
         ];
     }
 
@@ -51,7 +53,10 @@ final class Clients
     public static function brand(int $id): array
     {
         $c = self::find($id);
-        return ['id' => $c['id'], 'name' => $c['name'], 'color' => $c['color'], 'logo_url' => $c['logo_url']];
+        return [
+            'id' => $c['id'], 'name' => $c['name'], 'color' => $c['color'], 'logo_url' => $c['logo_url'], 'sales_label' => $c['sales_label'],
+            'has_sales' => Sales::hasData($c['id']), 'has_ads' => (bool) Clients::allowed($c['id'])['ad_account'],
+        ];
     }
 
     public static function save(array $data): int
@@ -62,10 +67,18 @@ final class Clients
         }
         $color = preg_match('/^#[0-9a-fA-F]{6}$/', (string) ($data['color'] ?? '')) ? $data['color'] : '#0e7c66';
         $logo = filter_var($data['logo_url'] ?? '', FILTER_VALIDATE_URL) && str_starts_with((string) $data['logo_url'], 'https://') ? $data['logo_url'] : null;
-        $row = ['name' => mb_substr($name, 0, 190), 'color' => $color, 'logo_url' => $logo, 'notes' => $data['notes'] ?? null];
+        $label = fn ($k, $def) => mb_substr(trim((string) ($data[$k] ?? '')), 0, 60) ?: $def;
+        $num = fn ($k) => trim((string) ($data[$k] ?? '')) === '' ? null : SalesImport::parseNumber($data[$k]);
+        $row = [
+            'name' => mb_substr($name, 0, 190), 'color' => $color, 'logo_url' => $logo, 'notes' => $data['notes'] ?? null,
+            'currency' => preg_match('/^[A-Z]{3}$/', strtoupper((string) ($data['currency'] ?? ''))) ? strtoupper($data['currency']) : 'ARS',
+            'sales_label' => $label('sales_label', 'Ventas'), 'leads_label' => $label('leads_label', 'Consultas'), 'dim_label' => $label('dim_label', 'Sucursal'),
+            'target_orders' => $num('target_orders'), 'target_revenue' => $num('target_revenue'),
+        ];
         if (!empty($data['id'])) {
             self::find((int) $data['id']);
-            Db::exec('UPDATE clients SET name = ?, color = ?, logo_url = ?, notes = ? WHERE id = ?', [...array_values($row), (int) $data['id']]);
+            $sets = implode(',', array_map(fn ($c) => "$c = ?", array_keys($row)));
+            Db::exec("UPDATE clients SET $sets WHERE id = ?", [...array_values($row), (int) $data['id']]);
             return (int) $data['id'];
         }
         return Db::insert('clients', $row + ['created_at' => Db::now()]);
@@ -75,6 +88,8 @@ final class Clients
     {
         Db::exec('DELETE FROM client_assets WHERE client_id = ?', [$id]);
         Db::exec('DELETE FROM client_updates WHERE client_id = ?', [$id]);
+        Db::exec('DELETE FROM sales_daily WHERE client_id = ?', [$id]);
+        Db::exec('DELETE FROM sales_sources WHERE client_id = ?', [$id]);
         Db::exec('DELETE FROM users WHERE client_id = ?', [$id]);
         Db::exec('DELETE FROM clients WHERE id = ?', [$id]);
     }
