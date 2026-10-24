@@ -34,6 +34,25 @@ final class Budgets
                 'target_revenue' => $g['target_revenue'] !== null ? (float) $g['target_revenue'] : null,
             ];
         }
+        // Marcas (clientes) y qué campañas les corresponden en cada cuenta.
+        $brands = [];
+        foreach (Db::all('SELECT id, name, color, currency FROM clients ORDER BY name') as $c) {
+            $cid = (int) $c['id'];
+            $brands[$cid] = $c + [
+                'full'  => array_column(Db::all("SELECT external_id FROM client_assets WHERE client_id = ? AND asset_type = 'ad_account'", [$cid]), 'external_id'),
+                'rules' => Clients::rules($cid),
+            ];
+        }
+        $brandsOf = function (string $accountId, string $campaignId, string $name) use ($brands): array {
+            $out = [];
+            foreach ($brands as $cid => $b) {
+                if (in_array($accountId, $b['full'], true) || (isset($b['rules'][$accountId]) && Clients::matches($b['rules'][$accountId], $campaignId, $name))) {
+                    $out[] = $cid;
+                }
+            }
+            return $out;
+        };
+
         $planned = [];
         foreach (Db::all('SELECT account_id, amount, note FROM ad_budgets WHERE month = ?', [$month]) as $r) {
             $planned[$r['account_id']] = ['amount' => (float) $r['amount'], 'note' => $r['note']];
@@ -105,6 +124,8 @@ final class Budgets
                         'today_pct' => $daily ? min(999, $spentToday / $daily * 100) : null,
                         'spent_mtd' => $spentMtd, 'spent_mtd_tax' => $spentMtd * (1 + $tax),
                         'goal' => $goals[$c['id']] ?? null,
+                        'brands' => $brandsOf($id, $c['id'], $c['name']),
+                        'active' => $active,
                     ];
                 }
                 // Campañas que gastaron este mes pero ya no están activas ni pausadas (archivadas, etc.).
@@ -112,7 +133,8 @@ final class Budgets
                     if (!isset($seen[$cid]) && $spent > 0) {
                         $camps[] = ['id' => $cid, 'name' => $mtdNames[$cid], 'effective_status' => 'ARCHIVED', 'objective' => null, 'budget_type' => null,
                             'daily' => null, 'daily_tax' => null, 'lifetime' => null, 'remaining' => null, 'stop_time' => null,
-                            'spent_today' => 0, 'spent_today_tax' => 0, 'today_pct' => null, 'spent_mtd' => $spent, 'spent_mtd_tax' => $spent * (1 + $tax), 'goal' => $goals[$cid] ?? null];
+                            'spent_today' => 0, 'spent_today_tax' => 0, 'today_pct' => null, 'spent_mtd' => $spent, 'spent_mtd_tax' => $spent * (1 + $tax), 'goal' => $goals[$cid] ?? null,
+                            'brands' => $brandsOf($id, (string) $cid, (string) $mtdNames[$cid]), 'active' => false];
                     }
                 }
                 usort($camps, fn ($x, $y) => $y['spent_mtd'] <=> $x['spent_mtd']);
@@ -143,6 +165,44 @@ final class Budgets
         }
         usort($out, fn ($x, $y) => $y['spent_mtd'] <=> $x['spent_mtd']);
 
+        // Resumen por marca: suma de sus campañas en todas las cuentas.
+        $byBrand = [];
+        foreach ($out as $a) {
+            foreach ($a['campaigns'] as $c) {
+                foreach ($c['brands'] as $cid) {
+                    $b = &$byBrand[$cid];
+                    $b ??= ['client_id' => $cid, 'name' => $brands[$cid]['name'], 'color' => $brands[$cid]['color'], 'currency' => $a['currency'],
+                        'campaigns' => 0, 'active' => 0, 'spent_mtd' => 0.0, 'spent_mtd_tax' => 0.0, 'spent_today_tax' => 0.0, 'active_daily_tax' => 0.0, 'projected' => 0.0, 'accounts' => []];
+                    $b['campaigns']++;
+                    $b['spent_mtd'] += $c['spent_mtd'];
+                    $b['spent_mtd_tax'] += $c['spent_mtd_tax'];
+                    $b['spent_today_tax'] += $c['spent_today_tax'];
+                    $b['projected'] += $c['spent_mtd_tax'];
+                    if ($c['active'] && $c['daily']) {
+                        $b['active']++;
+                        $b['active_daily_tax'] += $c['daily_tax'];
+                        $b['projected'] += max(0, $c['daily'] - $c['spent_today']) * (1 + $tax) + $c['daily_tax'] * max(0, $daysLeft - 1);
+                    }
+                    if (!in_array($a['name'], $b['accounts'], true)) {
+                        $b['accounts'][] = $a['name'];
+                    }
+                    unset($b);
+                }
+            }
+        }
+        foreach ($byBrand as $cid => &$b) {
+            $plan = $planned['client:' . $cid]['amount'] ?? null;
+            $b['planned'] = $plan;
+            $b['remaining'] = $plan !== null ? $plan - $b['spent_mtd_tax'] : null;
+            $b['pct'] = $plan ? $b['spent_mtd_tax'] / $plan * 100 : null;
+            $b['suggested_daily'] = $plan !== null && $daysLeft > 0 ? max(0, ($plan - $b['spent_mtd_tax']) / $daysLeft / (1 + $tax)) : null;
+            $b['status'] = self::status($plan, $b['projected']);
+        }
+        unset($b);
+        $byBrand = array_values($byBrand);
+        usort($byBrand, fn ($x, $y) => $y['spent_mtd'] <=> $x['spent_mtd']);
+        $brandNames = array_map(fn ($b) => ['name' => $b['name'], 'color' => $b['color']], $brands);
+
         $totals = [];
         foreach ($out as $a) {
             $t = &$totals[$a['currency']];
@@ -162,12 +222,18 @@ final class Budgets
         return [
             'month' => $month, 'days_in_month' => $daysInMonth, 'day' => (int) date('j'), 'days_left' => $daysLeft,
             'tax_rate' => $tax, 'accounts' => $out, 'totals' => $totals,
+            'brands' => $byBrand, 'brand_names' => $brandNames,
         ];
     }
 
+    /** $accountId: 'act_…' para una cuenta o 'client:ID' para una marca. */
     public static function save(string $accountId, ?string $month, mixed $amount, ?string $note = null): void
     {
-        Assets::find('ad_account', $accountId);
+        if (str_starts_with($accountId, 'client:')) {
+            Clients::find((int) substr($accountId, 7));
+        } else {
+            Assets::find('ad_account', $accountId);
+        }
         $month = $month && preg_match('/^\d{4}-\d{2}$/', $month) ? $month : date('Y-m');
         $value = SalesImport::parseNumber($amount);
         if ($value === null || $value <= 0) {

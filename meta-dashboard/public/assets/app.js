@@ -764,8 +764,8 @@ async function viewAccount(accountId) {
     ${isClient() ? '' : alertsBlock(d.alerts)}
     ${tableHtml('camps', cols, d.campaigns, { title: `Campañas <span class="t3 font-normal">${d.campaigns.length}</span>`, sort: 'spend', csvName: 'campanas', filters: liveFilters,
       onClick: (r) => (location.hash = `#/ads/${accountId}/c/${r.id}`) })}
-    <div class="mt-6">${breakdownBlock('acc-bd')}</div>`;
-  return { html, mount() { mountTable('camps'); mountAdsChart('acc-chart', d.daily, cur); mountBreakdown('acc-bd', accountId, accountId, cur); } };
+    ${d.sliced ? '' : `<div class="mt-6">${breakdownBlock('acc-bd')}</div>`}`;
+  return { html, mount() { mountTable('camps'); mountAdsChart('acc-chart', d.daily, cur); if (!d.sliced) mountBreakdown('acc-bd', accountId, accountId, cur); } };
 }
 
 function entityHeader(e, cur, sub) {
@@ -1430,7 +1430,7 @@ async function viewClients() {
   crumbs([{ label: 'Clientes' }]);
   const list = await api('clients');
   const html = `
-    ${pageHead('Clientes', isViewer() ? 'Abrí el portal de cada cliente para ver sus métricas, ventas, trabajo y reporte.' : 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', isAdmin() ? `<button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button>` : '')}
+    ${pageHead('Clientes', isViewer() ? 'Abrí el portal de cada cliente para ver sus métricas, ventas, trabajo y reporte.' : 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', isAdmin() ? `<div class="flex gap-2"><button class="btn" id="detect-brands">${icon('search', 15)}Detectar marcas en campañas</button><button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button></div>` : '')}
     ${list.length ? `<div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${list.map((c) => `
       <a href="#/${isViewer() ? 'preview' : 'clients'}/${c.id}" class="card card-link p-5 block">
         <div class="flex items-center gap-3">
@@ -1446,8 +1446,51 @@ async function viewClients() {
       : empty('Todavía no creaste clientes', 'Creá un cliente, asignale sus cuentas publicitarias, páginas e Instagram y generale un usuario para que vea su portal en tiempo real.', `<button class="btn btn-primary" id="new-client-2">${icon('plus', 15)}Crear el primero</button>`, 'users')}`;
   return {
     html,
-    mount() { ['#new-client', '#new-client-2'].forEach((s) => $(s)?.addEventListener('click', () => clientForm())); },
+    mount() {
+      ['#new-client', '#new-client-2'].forEach((s) => $(s)?.addEventListener('click', () => clientForm()));
+      $('#detect-brands')?.addEventListener('click', () => detectBrands(list));
+    },
   };
+}
+
+/** Propone marcas a partir de los nombres de campaña y las asigna con un clic. */
+async function detectBrands(clients) {
+  const el = modal(`${modalHead('Marcas detectadas en tus campañas', 'Agrupado por el nombre (lo que va antes de “ - ” o “ | ”). Campañas activas o con gasto en los últimos 90 días.')}<div class="p-5" id="dg"><div class="sk h-48"></div></div>`);
+  let data;
+  try { data = await api('campaign_groups'); } catch (e) { $('#dg', el).innerHTML = errorBox(e.message, false); return; }
+  const opts = `<option value="">Asignar a…</option>${clients.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}<option value="new">+ Crear cliente nuevo</option>`;
+  $('#dg', el).innerHTML = data.length ? data.map((acc) => `
+    <div class="mb-6"><div class="eyebrow mb-2">${esc(acc.name)} · ${esc(acc.account)}</div>
+      <div class="card divide">${acc.groups.map((g, i) => `
+        <div class="px-4 py-3 flex flex-wrap items-center gap-3" data-g="${esc(acc.account)}|${i}">
+          <div class="min-w-0 flex-1"><div class="t1 font-medium">${esc(g.label)} <span class="t3 font-normal text-xs">· ${g.campaigns.length} campaña${g.campaigns.length > 1 ? 's' : ''} · ${fmt.moneyShort(g.spend, acc.currency)}</span></div>
+            <div class="t3 text-xs truncate mt-0.5" title="${esc(g.campaigns.join('\n'))}">${esc(g.campaigns.slice(0, 3).join(' · '))}${g.campaigns.length > 3 ? ' …' : ''}</div>
+            ${g.assigned_to.length ? `<div class="mt-1 flex gap-1 flex-wrap">${g.assigned_to.map((n) => `<span class="pill green plain">${esc(n)}</span>`).join('')}</div>` : ''}</div>
+          <input class="input select-sm w-40" value="${esc(g.pattern)}" data-pattern title="Palabra clave que se va a usar">
+          <select class="select select-sm w-48" data-target>${opts}</select>
+          <button class="btn btn-sm btn-primary" data-assign>Asignar</button>
+        </div>`).join('')}</div></div>`).join('') : empty('No encontramos campañas', 'Sincronizá Meta o revisá que haya campañas activas.');
+  $('#dg', el).addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-assign]');
+    if (!b) return;
+    const row = b.closest('[data-g]');
+    const [account, idx] = row.dataset.g.split('|');
+    const pattern = $('[data-pattern]', row).value.trim();
+    let target = $('[data-target]', row).value;
+    if (!target || !pattern) { toast('Elegí el cliente y la palabra clave.', 'error'); return; }
+    b.disabled = true;
+    try {
+      if (target === 'new') {
+        const g = data.find((x) => x.account === account).groups[+idx];
+        target = (await post('client_save', { name: g.label })).id;
+        clients.push({ id: target, name: g.label });
+      }
+      await post('client_rule_add', { client_id: +target, account, pattern }, 'Campañas asignadas');
+      b.textContent = 'Listo';
+      row.style.opacity = '.55';
+    } catch { b.disabled = false; }
+  });
+  el.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) render({ silent: true }); });
 }
 
 function clientForm(c = null) {
@@ -1486,6 +1529,25 @@ async function viewClient(id, tab = 'assets') {
   const assigned = new Set(c.assets.map((a) => `${a.asset_type}:${a.external_id}`));
   const portalUrl = location.origin + location.pathname.replace(/index\.php$/, '');
   tab = store.get('clientTab', tab);
+
+  // Cuentas publicitarias: completa o sólo campañas por palabra clave (cuentas compartidas entre marcas).
+  const accMode = (id) => (assigned.has(`ad_account:${id}`) ? 'full' : c.rules?.[id] ? 'rules' : 'none');
+  const adAccountList = (list) => `
+    <div class="card overflow-hidden mb-4">
+      <div class="card-h"><div class="h2">Cuentas publicitarias</div><span class="t3 text-xs" data-count="ad_account"></span><div class="flex-1"></div>
+        <span class="t3 text-xs">¿Una cuenta con varias marcas? Elegí “Solo algunas campañas” y escribí cómo se llaman.</span></div>
+      <div class="divide max-h-[560px] overflow-y-auto">${list.map((a) => { const mode = accMode(a.external_id); return `
+        <div class="px-4 py-3" data-name="${esc(a.name.toLowerCase())} ${esc(a.external_id)}">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="min-w-0 flex-1"><div class="t1 truncate">${esc(a.name)}</div><div class="t3 text-xs truncate">${esc((a.data.business?.name || 'Sin portfolio') + ' · ' + (a.data.currency || '') + ' · ' + a.external_id)}</div></div>
+            <div class="seg" data-acc-mode="${esc(a.external_id)}">${[['none', 'No'], ['full', 'Toda la cuenta'], ['rules', 'Solo algunas campañas']].map(([m, l]) => `<button type="button" data-m="${m}" class="${mode === m ? 'on' : ''}">${l}</button>`).join('')}</div>
+          </div>
+          <div class="mt-3 ${mode === 'rules' ? '' : 'hidden'}" data-rules-box="${esc(a.external_id)}">
+            <input class="input" data-rules="${esc(a.external_id)}" value="${esc((c.rules?.[a.external_id] || []).join(', '))}" placeholder="Palabras clave separadas por coma. Ej: go celular, gocel">
+            <div class="t3 text-xs mt-1.5" data-rules-preview="${esc(a.external_id)}"></div>
+          </div>
+        </div>`; }).join('') || '<div class="p-4 t3">No hay cuentas sincronizadas.</div>'}</div>
+    </div>`;
 
   const assetList = (type, list, label) => `
     <div class="card overflow-hidden flex flex-col">
@@ -1532,7 +1594,7 @@ async function viewClient(id, tab = 'assets') {
   const html = `
     <div class="flex flex-wrap items-center gap-4 mb-6">
       <div class="mono-avatar w-12 h-12 text-base" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
-      <div class="min-w-0"><h1 class="h1">${esc(c.name)}</h1><div class="t2 mt-0.5">${c.assets.length} activos · ${c.users.length} accesos · portal en <span class="mono text-xs">${esc(portalUrl)}</span></div></div>
+      <div class="min-w-0"><h1 class="h1">${esc(c.name)}</h1><div class="t2 mt-0.5">${c.assets.length + Object.keys(c.rules || {}).length} activos · ${c.users.length} accesos · portal en <span class="mono text-xs">${esc(portalUrl)}</span></div></div>
       <div class="flex-1"></div>
       <a class="btn btn-accent" href="#/preview/${c.id}" style="--accent:${esc(c.color)}">${icon('eye', 15)}Ver como cliente</a>
       <button class="btn" id="edit-client">Editar</button>
@@ -1542,7 +1604,8 @@ async function viewClient(id, tab = 'assets') {
     <div data-pane="assets" class="${tab === 'assets' ? '' : 'hidden'}">
       <div class="flex flex-wrap items-center gap-3 mb-4"><div class="t2 flex-1">Elegí qué puede ver este cliente. Todo lo que no esté marcado queda oculto para él.</div>
         <input class="input w-64" placeholder="Filtrar" id="asset-filter"><button class="btn btn-primary" id="save-assets">Guardar asignación</button></div>
-      <div class="grid lg:grid-cols-3 gap-4">${assetList('ad_account', assets.ad_accounts, 'Cuentas publicitarias')}${assetList('page', assets.pages, 'Páginas de Facebook')}${assetList('ig_account', assets.ig_accounts, 'Instagram')}</div>
+      ${adAccountList(assets.ad_accounts)}
+      <div class="grid lg:grid-cols-2 gap-4">${assetList('page', assets.pages, 'Páginas de Facebook')}${assetList('ig_account', assets.ig_accounts, 'Instagram')}</div>
     </div>
     <div data-pane="sales" class="${tab === 'sales' ? '' : 'hidden'}">${salesPane(c)}</div>
     <div data-pane="users" class="${tab === 'users' ? '' : 'hidden'}">${users}</div>
@@ -1552,8 +1615,42 @@ async function viewClient(id, tab = 'assets') {
     html,
     mount() {
       const view = $('#view');
-      const counts = () => ['ad_account', 'page', 'ig_account'].forEach((t) => { const el = $(`[data-count="${t}"]`); if (el) el.textContent = `${$$(`[data-asset="${t}"]:checked`).length} asignados`; });
+      const modeOf = (id) => $(`[data-acc-mode="${id}"] .on`)?.dataset.m || 'none';
+      const counts = () => {
+        ['page', 'ig_account'].forEach((t) => { const el = $(`[data-count="${t}"]`); if (el) el.textContent = `${$$(`[data-asset="${t}"]:checked`).length} asignados`; });
+        const accs = $$('[data-acc-mode]').map((x) => modeOf(x.dataset.accMode));
+        const el = $('[data-count="ad_account"]');
+        if (el) el.textContent = `${accs.filter((m) => m === 'full').length} completas · ${accs.filter((m) => m === 'rules').length} compartidas`;
+      };
       counts();
+      // Vista previa de qué campañas toma cada palabra clave.
+      const campCache = {};
+      const preview = async (accId) => {
+        const box = $(`[data-rules-preview="${accId}"]`);
+        const patterns = $(`[data-rules="${accId}"]`).value.split(',').map((x) => x.trim()).filter(Boolean);
+        if (!patterns.length) { box.textContent = 'Escribí al menos una palabra clave.'; return; }
+        box.textContent = 'Buscando campañas…';
+        try {
+          campCache[accId] ??= (await api('account', { id: accId, preset: 'last_90d' })).campaigns;
+          const hit = campCache[accId].filter((x) => campaignMatches(patterns, x.id, x.name));
+          box.innerHTML = hit.length
+            ? `<span class="t-pos">Toma ${hit.length} campaña${hit.length > 1 ? 's' : ''}:</span> ${hit.slice(0, 6).map((x) => esc(x.name)).join(' · ')}${hit.length > 6 ? ' …' : ''}`
+            : '<span class="t-warn">Ninguna campaña coincide (últimos 90 días). Revisá cómo se llaman.</span>';
+        } catch (err) { box.textContent = err.message; }
+      };
+      let tmr;
+      view.addEventListener('input', (e) => { if (e.target.dataset.rules) { clearTimeout(tmr); tmr = setTimeout(() => preview(e.target.dataset.rules), 400); } });
+      $$('[data-rules-box]:not(.hidden)').forEach((b) => preview(b.dataset.rulesBox));
+      view.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-acc-mode] [data-m]');
+        if (!b) return;
+        const seg = b.parentElement;
+        $$('[data-m]', seg).forEach((x) => x.classList.toggle('on', x === b));
+        const box = $(`[data-rules-box="${seg.dataset.accMode}"]`);
+        box.classList.toggle('hidden', b.dataset.m !== 'rules');
+        if (b.dataset.m === 'rules') { $('input', box).focus(); preview(seg.dataset.accMode); }
+        counts();
+      });
       $('#ctabs').addEventListener('click', (e) => {
         const b = e.target.closest('[data-ct]');
         if (!b) return;
@@ -1572,7 +1669,15 @@ async function viewClient(id, tab = 'assets') {
       });
       $('#save-assets').addEventListener('click', async () => {
         const list = $$('[data-asset]:checked').map((x) => ({ type: x.dataset.asset, id: x.value }));
-        await post('client_assets', { id: c.id, assets: list }, `Asignación guardada (${list.length} activos)`);
+        const rules = [];
+        $$('[data-acc-mode]').forEach((x) => {
+          const id = x.dataset.accMode, m = modeOf(id);
+          if (m === 'full') list.push({ type: 'ad_account', id });
+          if (m === 'rules') rules.push({ account: id, patterns: $(`[data-rules="${id}"]`).value.split(',').map((p) => p.trim()).filter(Boolean) });
+        });
+        if (rules.some((r) => !r.patterns.length)) { toast('Completá las palabras clave de las cuentas compartidas.', 'error'); return; }
+        await post('client_assets', { id: c.id, assets: list, rules }, 'Asignación guardada');
+        state.boot = await api('bootstrap'); renderNav();
       });
       $('#edit-client').addEventListener('click', () => clientForm(c));
       $('#del-client').addEventListener('click', async () => {
@@ -1809,6 +1914,12 @@ async function viewSettings() {
 // =========================================================================
 const salesFmt = (cur) => ({ money: (v) => fmt.moneyShort(v, cur), moneyFull: (v) => fmt.money(v, cur) });
 const lower = (s) => String(s || '').toLowerCase();
+/** Misma normalización que el servidor para cruzar nombres de campañas. */
+const normName = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s\-_|·]+/g, ' ').trim();
+function campaignMatches(patterns, id, name) {
+  const n = normName(name), compact = n.replace(/ /g, '');
+  return patterns.some((p) => (/^\d+$/.test(p) ? p === id : (normName(p) && (n.includes(normName(p)) || compact.includes(normName(p).replace(/ /g, ''))))));
+}
 
 /** Tarjeta de proyección del mes. */
 function projectionCard(mo, L, cur) {
@@ -2147,6 +2258,8 @@ function budgetGoalCell(c, a) {
   return `<div class="flex items-center justify-end gap-1.5">${parts.length ? `<span class="num font-medium">${parts.join(' · ')}</span>` : (edit ? '' : '<span class="t3">—</span>')}${edit}</div>`;
 }
 
+const brandPill = (b) => (b ? `<span class="pill plain" style="background:color-mix(in srgb, ${esc(b.color)} 14%, transparent);color:${esc(b.color)}">${esc(b.name)}</span>` : '');
+
 async function viewBudgets() {
   crumbs([{ label: 'Presupuestos' }]);
   const d = await api('budgets');
@@ -2165,12 +2278,34 @@ async function viewBudgets() {
     </div>`;
   }).join('');
 
+  const brandCard = (b) => {
+    const m = (v) => fmt.money(v, b.currency);
+    const [stLabel, stCls] = BUDGET_STATUS[b.status] || BUDGET_STATUS.sin_plan;
+    return `
+      <div class="card p-5" data-acc="${esc(b.name)}">
+        <div class="flex items-start gap-3">
+          <div class="mono-avatar w-9 h-9 text-xs" style="background:${esc(b.color)};color:#fff">${esc(initials(b.name))}</div>
+          <div class="min-w-0 flex-1"><a class="h2 hover:underline" href="#/preview/${b.client_id}">${esc(b.name)}</a><div class="t3 text-xs mt-0.5 truncate">${b.active} activas de ${b.campaigns} · ${esc(b.accounts.join(', '))}</div></div>
+          <span class="pill ${stCls}">${stLabel}</span>
+        </div>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-3 mt-4">
+          <div><div class="t3 text-xs">Presupuesto del mes</div>
+            ${isAdmin() ? `<div class="flex gap-1.5 mt-1"><input class="input select-sm num !w-full" data-bplan="${b.client_id}" value="${b.planned ?? ''}" placeholder="Cargar" inputmode="decimal"><button class="btn btn-sm" data-bplan-save="${b.client_id}">${icon('check', 14)}</button></div>`
+              : `<div class="num text-lg font-semibold t1 mt-0.5">${b.planned ? m(b.planned) : '—'}</div>`}</div>
+          <div><div class="t3 text-xs">Gastado (+${tax})</div><div class="num text-lg font-semibold t1 mt-0.5">${m(b.spent_mtd_tax)}</div></div>
+          <div><div class="t3 text-xs">Hoy (+${tax})</div><div class="num font-semibold t1">${m(b.spent_today_tax)}</div><div class="t3 text-[11px]">${m(b.active_daily_tax)}/día activo</div></div>
+          <div><div class="t3 text-xs">Cierre estimado</div><div class="num font-semibold t1">${m(b.projected)}</div>${b.suggested_daily !== null ? `<div class="t-accent text-[11px]">Sugerido en Meta: ${m(b.suggested_daily)}/día</div>` : ''}</div>
+        </div>
+        ${budgetBar(b.spent_mtd_tax, b.planned, b.projected)}
+      </div>`;
+  };
+
   const accountCard = (a) => {
     const m = (v) => fmt.money(v, a.currency);
     const [stLabel, stCls] = BUDGET_STATUS[a.status] || BUDGET_STATUS.sin_plan;
     const rows = a.campaigns.map((c) => `
       <tr>
-        <td style="text-align:left"><div class="font-medium max-w-[340px] truncate" title="${esc(c.name)}">${esc(c.name)}</div><div class="mt-1 flex gap-2 items-center">${statusPill(c.effective_status)}<span class="sub">${esc(c.budget_type || '')}</span></div></td>
+        <td style="text-align:left"><div class="font-medium max-w-[340px] truncate" title="${esc(c.name)}">${esc(c.name)}</div><div class="mt-1 flex gap-2 items-center flex-wrap">${statusPill(c.effective_status)}${(c.brands || []).map((id) => brandPill(d.brand_names[id])).join('')}<span class="sub">${esc(c.budget_type || '')}</span></div></td>
         <td>${c.daily !== null ? m(c.daily) : (c.lifetime ? `${m(c.lifetime)} <span class="sub">total</span>` : '—')}</td>
         <td class="font-medium">${c.daily_tax !== null ? m(c.daily_tax) : '—'}</td>
         <td>${m(c.spent_today_tax)}${c.today_pct !== null ? `<div class="bar mt-1.5 w-20 ml-auto"><i style="width:${Math.min(100, c.today_pct)}%"></i></div>` : ''}</td>
@@ -2208,6 +2343,8 @@ async function viewBudgets() {
   return {
     html: `${pageHead(`Presupuestos · ${esc(monthName)}`, `Día ${d.day} de ${d.days_in_month} · todos los montos “+${tax}” incluyen impuestos sobre el gasto en Meta`, isAdmin() ? `<a class="btn" href="#/settings">${icon('sliders', 14)}Impuestos: ${tax}</a>` : `<span class="pill plain">Impuestos ${tax}</span>`)}
       ${totals}
+      ${d.brands.length ? `<div class="flex items-center gap-2 mb-3"><div class="h2">Por marca / cliente</div><span class="t3 text-xs">suma sus campañas aunque compartan cuenta publicitaria</span></div>
+        <div class="grid md:grid-cols-2 2xl:grid-cols-3 gap-4 mb-8" id="brand-list">${d.brands.map(brandCard).join('')}</div>` : ''}
       <div class="flex items-center gap-3 mb-3"><div class="h2">Por cuenta publicitaria</div><div class="flex-1"></div><input class="input select-sm w-56" placeholder="Buscar cuenta" id="bud-search"></div>
       <div id="bud-list">${d.accounts.map(accountCard).join('')}</div>`,
     mount() {
@@ -2218,6 +2355,12 @@ async function viewBudgets() {
           const [accId, campId] = g.dataset.bgoal.split('|');
           const acc = d.accounts.find((x) => x.id === accId);
           return goalModal(acc.campaigns.find((x) => x.id === campId), acc.currency, () => render({ silent: true }));
+        }
+        const bp = e.target.closest('[data-bplan-save]');
+        if (bp) {
+          const cid = bp.dataset.bplanSave;
+          await post('budget_save', { client_id: +cid, amount: $(`[data-bplan="${cid}"]`).value }, 'Presupuesto de la marca guardado');
+          return render({ silent: true });
         }
         const b = e.target.closest('[data-plan-save]');
         if (!b) return;

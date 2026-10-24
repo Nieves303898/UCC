@@ -140,6 +140,16 @@ final class Schema
                 UNIQUE (account_id, month)
             )$suffix",
 
+            // Marcas que comparten una cuenta publicitaria: el cliente ve sólo
+            // las campañas cuyo nombre contiene alguna palabra clave (o un ID exacto).
+            "CREATE TABLE IF NOT EXISTS client_campaign_rules (
+                id $id,
+                client_id INT NOT NULL,
+                account_id VARCHAR(64) NOT NULL,
+                pattern VARCHAR(190) NOT NULL,
+                created_at DATETIME NOT NULL
+            )$suffix",
+
             // Objetivo mensual de ventas por campaña de Meta.
             "CREATE TABLE IF NOT EXISTS campaign_targets (
                 campaign_id VARCHAR(64) NOT NULL,

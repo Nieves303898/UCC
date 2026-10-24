@@ -43,7 +43,7 @@ final class Api
         'user_add', 'user_delete', 'user_reset_password', 'password_change',
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
-        'budget_save', 'settings_save', 'campaign_target_save',
+        'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add',
     ];
 
     public static function handle(): void
@@ -115,10 +115,10 @@ final class Api
             Scope::assertAsset('ad_account', $acc, $client);
             return $acc;
         };
-        $inAccount = function () use ($id, $adAccount) {
+        $inAccount = function () use ($id, $adAccount, $client) {
             $acc = $adAccount();
-            Scope::assertInAccount($id(), $acc);
-            return [$id(), $acc];
+            Scope::assertInAccount($id(), $acc, $client);
+            return [$id(), $acc, Scope::campaignFilter($client, $acc)];
         };
         $asset = function (string $type) use ($id, $client) {
             $v = $id();
@@ -153,12 +153,18 @@ final class Api
                 ];
 
             case 'overview':
-                return Ads::overview($range(), $force, $allowed['ad_account'] ?? null) + ['range' => $range()->toArray()];
+                return Ads::overview($range(), $force, $allowed['ad_account'] ?? null, $client) + ['range' => $range()->toArray()];
 
             case 'account':
-                $data = Ads::account($adAccount('id'), $range(), $force) + ['range' => $range()->toArray()];
+                $acc = $adAccount('id');
+                $data = Ads::account($acc, $range(), $force, Scope::campaignFilter($client, $acc)) + ['range' => $range()->toArray()];
                 if (!Auth::isAdmin()) {
                     unset($data['account']['payment'], $data['account']['balance']);
+                }
+                // Cuenta compartida: el cliente ve su marca, no la cuenta de la otra empresa.
+                if ($data['sliced'] && $client !== null && Auth::user()['role'] === 'client') {
+                    $data['account']['name'] = Clients::find($client)['name'];
+                    unset($data['account']['business'], $data['account']['spend_cap'], $data['account']['amount_spent']);
                 }
                 return $data;
 
@@ -169,11 +175,11 @@ final class Api
                 [$obj, $acc] = $inAccount();
                 return Ads::ads($obj, $acc, $range(), $force);
             case 'timeseries':
-                [$obj, $acc] = $inAccount();
-                return Ads::timeseries($obj, $acc, $range(), $q['objective'] ?? null, $force);
+                [$obj, $acc, $filter] = $inAccount();
+                return Ads::timeseries($obj, $acc, $range(), $q['objective'] ?? null, $force, $filter);
             case 'breakdown':
-                [$obj, $acc] = $inAccount();
-                return Ads::breakdown($obj, $acc, (string) ($q['type'] ?? 'age_gender'), $range(), $q['objective'] ?? null, $force);
+                [$obj, $acc, $filter] = $inAccount();
+                return Ads::breakdown($obj, $acc, (string) ($q['type'] ?? 'age_gender'), $range(), $q['objective'] ?? null, $force, $filter);
 
             case 'page':
                 return Pages::summary($asset('page'), $range(), $force) + ['range' => $range()->toArray()];
@@ -235,7 +241,8 @@ final class Api
             case 'budgets':
                 return Budgets::overview(null, $force);
             case 'budget_save':
-                Budgets::save(self::id((string) ($body['account'] ?? '')), $body['month'] ?? null, $body['amount'] ?? null, $body['note'] ?? null);
+                $key = !empty($body['client_id']) ? 'client:' . (int) $body['client_id'] : self::id((string) ($body['account'] ?? ''));
+                Budgets::save($key, $body['month'] ?? null, $body['amount'] ?? null, $body['note'] ?? null);
                 return null;
             case 'settings_save':
                 $rate = SalesImport::parseNumber($body['tax_rate'] ?? null);
@@ -247,6 +254,11 @@ final class Api
                 return null;
             case 'campaign_target_save':
                 Sales::saveCampaignTarget(self::id((string) ($body['campaign_id'] ?? '')), $body['month'] ?? null, $body['target_orders'] ?? '', $body['target_revenue'] ?? '');
+                return null;
+            case 'campaign_groups':
+                return Clients::detectGroups();
+            case 'client_rule_add':
+                Clients::addRule((int) ($body['client_id'] ?? 0), self::id((string) ($body['account'] ?? '')), (string) ($body['pattern'] ?? ''));
                 return null;
             case 'client_brand':
                 return Clients::brand((int) ($q['id'] ?? 0));
@@ -262,7 +274,7 @@ final class Api
                 Clients::delete((int) ($body['id'] ?? 0));
                 return null;
             case 'client_assets':
-                Clients::setAssets((int) ($body['id'] ?? 0), (array) ($body['assets'] ?? []));
+                Clients::setAssets((int) ($body['id'] ?? 0), (array) ($body['assets'] ?? []), isset($body['rules']) ? (array) $body['rules'] : null);
                 return null;
             case 'update_save':
                 return ['id' => Clients::saveUpdate($body)];

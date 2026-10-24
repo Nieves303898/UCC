@@ -35,7 +35,7 @@ final class Ads
     ];
 
     /** Resumen de TODAS las cuentas visibles: KPIs, variación, serie diaria y alertas. */
-    public static function overview(DateRange $range, bool $force = false, ?array $only = null): array
+    public static function overview(DateRange $range, bool $force = false, ?array $only = null, ?int $clientId = null): array
     {
         $accounts = Assets::list('ad_account', false, $only);
         $prev = $range->previous();
@@ -73,9 +73,22 @@ final class Ads
                 $metrics = AdsInsights::normalize($cur['data'][0] ?? []);
                 $previous = AdsInsights::normalize(($results["$id|prev"]['data'] ?? [])[0] ?? []);
                 $currency = $a['data']['currency'] ?? 'USD';
-                foreach ($results["$id|daily"]['data'] ?? [] as $d) {
-                    $n = AdsInsights::normalize($d);
-                    $day = $d['date_start'];
+                $activeCount = (int) ($results["$id|active"]['summary']['total_count'] ?? 0);
+                $dailyRows = array_map(fn ($d) => ['date' => $d['date_start']] + AdsInsights::normalize($d), $results["$id|daily"]['data'] ?? []);
+                // Cuenta compartida entre marcas: sólo las campañas del cliente.
+                if ($filter = Scope::campaignFilter($clientId, $id)) {
+                    try {
+                        $mine = self::campaigns($id, $range, $force, $filter);
+                        $metrics = self::sliceTotals($mine);
+                        $previous = self::sliceTotals(self::campaigns($id, $prev, $force, $filter));
+                        $activeCount = count(array_filter($mine, fn ($c) => $c['effective_status'] === 'ACTIVE'));
+                        $dailyRows = self::sliceDaily($id, $range, $filter, $force);
+                    } catch (GraphException $e) {
+                        [$metrics, $previous, $dailyRows, $error] = [AdsInsights::empty(), AdsInsights::empty(), [], $e->getMessage()];
+                    }
+                }
+                foreach ($dailyRows as $n) {
+                    $day = $n['date'];
                     $daily[$currency][$day] ??= ['spend' => 0, 'results' => 0, 'purchase_value' => 0, 'link_clicks' => 0, 'impressions' => 0];
                     foreach (['spend', 'results', 'purchase_value', 'link_clicks', 'impressions'] as $f) {
                         $daily[$currency][$day][$f] += $n[$f];
@@ -83,12 +96,12 @@ final class Ads
                 }
                 $rows[] = [
                     'id'               => $id,
-                    'name'             => $a['name'],
+                    'name'             => $filter && $clientId !== null && (\App\Auth::user()['role'] ?? '') === 'client' ? Clients::find($clientId)['name'] : $a['name'],
                     'currency'         => $currency,
                     'business'         => $a['data']['business']['name'] ?? null,
                     'status'           => (int) ($a['data']['account_status'] ?? 1),
                     'status_label'     => self::ACCOUNT_STATUS[(int) ($a['data']['account_status'] ?? 1)] ?? 'Desconocido',
-                    'active_campaigns' => (int) ($results["$id|active"]['summary']['total_count'] ?? 0),
+                    'active_campaigns' => $activeCount,
                     'metrics'          => $metrics,
                     'previous'         => $previous,
                     'error'            => $error,
@@ -122,7 +135,7 @@ final class Ads
     }
 
     /** Detalle de una cuenta: KPIs, serie diaria y campañas. */
-    public static function account(string $accountId, DateRange $range, bool $force = false): array
+    public static function account(string $accountId, DateRange $range, bool $force = false, ?\Closure $filter = null): array
     {
         $asset = Assets::hydrate(Assets::find('ad_account', $accountId));
         $client = Assets::client('ad_account', $accountId);
@@ -146,10 +159,17 @@ final class Ads
             return $res;
         }, $force);
 
-        $campaigns = self::campaigns($accountId, $range, $force);
+        $campaigns = self::campaigns($accountId, $range, $force, $filter);
         $daily = [];
         foreach ($data['daily']['data'] ?? [] as $d) {
             $daily[] = ['date' => $d['date_start']] + AdsInsights::normalize($d);
+        }
+        $metrics = array_merge(AdsInsights::normalize(($data['cur']['data'] ?? [])[0] ?? []), self::resultTotals($campaigns));
+        $previous = AdsInsights::normalize(($data['prev']['data'] ?? [])[0] ?? []);
+        if ($filter) {
+            $metrics = self::sliceTotals($campaigns);
+            $previous = self::sliceTotals(self::campaigns($accountId, $prev, $force, $filter));
+            $daily = self::sliceDaily($accountId, $range, $filter, $force);
         }
 
         $info = $data['info'] ?: $asset['data'];
@@ -168,15 +188,16 @@ final class Ads
                 'payment'      => $info['funding_source_details']['display_string'] ?? null,
             ],
             // Sumamos las campañas para que "resultados" respete el objetivo de cada una.
-            'metrics'   => array_merge(AdsInsights::normalize(($data['cur']['data'] ?? [])[0] ?? []), self::resultTotals($campaigns)),
-            'previous'  => AdsInsights::normalize(($data['prev']['data'] ?? [])[0] ?? []),
+            'metrics'   => $metrics,
+            'previous'  => $previous,
             'daily'     => $daily,
+            'sliced'    => $filter !== null,
             'campaigns' => $campaigns,
             'alerts'    => self::campaignAlerts($campaigns),
         ];
     }
 
-    public static function campaigns(string $accountId, DateRange $range, bool $force = false): array
+    public static function campaigns(string $accountId, DateRange $range, bool $force = false, ?\Closure $filter = null): array
     {
         $client = Assets::client('ad_account', $accountId);
         $fields = 'id,name,status,effective_status,objective,buying_type,bid_strategy,daily_budget,lifetime_budget,budget_remaining,'
@@ -187,7 +208,42 @@ final class Ads
             'limit' => 100,
         ], 1000), $force);
 
+        if ($filter) {
+            $rows = array_values(array_filter($rows, fn ($c) => $filter(['id' => $c['id'], 'name' => $c['name'] ?? ''])));
+        }
         return array_map(fn ($c) => self::entity($c, $c['objective'] ?? null), $rows);
+    }
+
+    /** Totales de un grupo de campañas (marca dentro de una cuenta compartida). */
+    public static function sliceTotals(array $campaigns): array
+    {
+        $t = AdsInsights::sum(array_map(fn ($c) => $c['metrics'], $campaigns));
+        return $t + ['result_label' => 'Resultados', 'result_key' => 'results', 'frequency' => $t['frequency'] ?? 0];
+    }
+
+    /** Serie diaria sumando sólo las campañas que pasan el filtro. */
+    public static function sliceDaily(string $accountId, DateRange $range, \Closure $filter, bool $force = false): array
+    {
+        $client = Assets::client('ad_account', $accountId);
+        $rows = Cache::remember("cdaily:$accountId:" . $range->key(), $range->ttl(), fn () => $client->paginate("$accountId/insights", [
+            'level' => 'campaign',
+            'fields' => 'campaign_id,campaign_name,objective,' . AdsInsights::FIELDS,
+            'time_range' => $range->timeRange(),
+            'time_increment' => 1,
+        ], 10000), $force);
+        $byDay = [];
+        foreach ($rows as $r) {
+            if ($filter(['id' => $r['campaign_id'] ?? '', 'name' => $r['campaign_name'] ?? ''])) {
+                $byDay[$r['date_start']][] = AdsInsights::normalize($r, $r['objective'] ?? null);
+            }
+        }
+        ksort($byDay);
+        $out = [];
+        for ($d = $range->since; $d <= $range->until; $d = $d->modify('+1 day')) {
+            $k = $d->format('Y-m-d');
+            $out[] = ['date' => $k] + (isset($byDay[$k]) ? AdsInsights::sum($byDay[$k]) : AdsInsights::empty());
+        }
+        return $out;
     }
 
     public static function adsets(string $campaignId, string $accountId, DateRange $range, bool $force = false): array
@@ -242,8 +298,11 @@ final class Ads
     }
 
     /** Serie diaria de cualquier objeto (cuenta, campaña, conjunto o anuncio). */
-    public static function timeseries(string $objectId, string $accountId, DateRange $range, ?string $objective, bool $force = false): array
+    public static function timeseries(string $objectId, string $accountId, DateRange $range, ?string $objective, bool $force = false, ?\Closure $filter = null): array
     {
+        if ($filter && $objectId === $accountId) {
+            return self::sliceDaily($accountId, $range, $filter, $force);
+        }
         $client = Assets::client('ad_account', $accountId);
         $rows = Cache::remember("ts:$objectId:" . $range->key(), $range->ttl(), fn () => $client->paginate("$objectId/insights", [
             'fields' => AdsInsights::FIELDS,
@@ -254,8 +313,11 @@ final class Ads
     }
 
     /** Desglose por edad, género, ubicación, plataforma, región, dispositivo u hora. */
-    public static function breakdown(string $objectId, string $accountId, string $type, DateRange $range, ?string $objective, bool $force = false): array
+    public static function breakdown(string $objectId, string $accountId, string $type, DateRange $range, ?string $objective, bool $force = false, ?\Closure $filter = null): array
     {
+        if ($filter && $objectId === $accountId) {
+            throw new InvalidArgumentException('En cuentas compartidas el desglose se ve dentro de cada campaña.');
+        }
         if (!isset(self::BREAKDOWNS[$type])) {
             throw new InvalidArgumentException('Desglose no soportado');
         }

@@ -185,7 +185,7 @@ final class Sales
         $range = DateRange::fromRequest(['preset' => 'last_90d']);
         foreach (Clients::allowed($clientId)['ad_account'] as $acc) {
             try {
-                foreach (Ads::campaigns($acc, $range) as $c) {
+                foreach (Ads::campaigns($acc, $range, false, Scope::campaignFilter($clientId, $acc)) as $c) {
                     if ($c['effective_status'] === 'ACTIVE' || $c['metrics']['spend'] > 0) {
                         $out[] = ['name' => $c['name'], 'id' => $c['id'], 'status' => $c['effective_status'], 'account' => $acc, 'spend' => $c['metrics']['spend']];
                     }
@@ -355,7 +355,7 @@ final class Sales
             return null;
         }
         try {
-            $ov = Ads::overview($range, false, $accounts);
+            $ov = Ads::overview($range, false, $accounts, $clientId);
         } catch (\Throwable) {
             return null;
         }
@@ -395,7 +395,7 @@ final class Sales
         $meta = [];
         foreach ($accounts as $acc) {
             try {
-                foreach (Ads::campaigns($acc, $range) as $c) {
+                foreach (Ads::campaigns($acc, $range, false, Scope::campaignFilter($clientId, $acc)) as $c) {
                     $meta[] = $c + ['account' => $acc];
                 }
             } catch (\Throwable) {

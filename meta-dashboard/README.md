@@ -56,6 +56,15 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 - **Objetivo mensual por campaña** (cantidad y/o facturación): avance del mes, línea de ritmo esperado, cierre estimado y estado (en camino, ajustado, atrasado, cumplido).
 - **Usuario de solo lectura** (gerencia): ve todo, incluidos presupuestos y el portal de cada cliente, pero no puede editar ni entrar a Configuración. Se crea en *Configuración → Equipo y gerencia*.
 
+### Varias marcas en una misma cuenta publicitaria
+
+Si una cuenta tiene campañas de distintas marcas (ej. PayLab Gestión con campañas de Go Celular, Osacra, Clover), cada cliente puede tomar **sólo sus campañas**:
+
+- *Clientes → {cliente} → Activos asignados → Cuentas publicitarias*: elegí **"Solo algunas campañas"** y escribí palabras clave separadas por coma (ej. `go celular, gocel`). Se muestra al instante qué campañas toma. Mayúsculas, tildes y signos no importan; un número se toma como ID exacto de campaña. Las campañas nuevas que respeten el nombre entran solas.
+- *Clientes → Detectar marcas en campañas*: agrupa las campañas por el nombre (lo que va antes de " - " o " | ") y las asigna a un cliente existente o nuevo con un clic.
+- El portal, las métricas, la serie diaria, las ventas por campaña, el ROAS real y los objetivos del cliente usan sólo sus campañas. El acceso se valida en el servidor (también para conjuntos y anuncios), y el cliente ve el nombre de su marca en lugar del de la cuenta compartida.
+- *Presupuestos → Por marca / cliente*: presupuesto mensual propio de cada marca, gasto +35%, gasto de hoy, cierre estimado y diario sugerido; cada campaña muestra la etiqueta de su marca.
+
 ## 1. Requisitos
 
 - PHP 8.1 o superior con extensiones `curl`, `openssl`, `pdo_mysql` (vienen en cPanel).
