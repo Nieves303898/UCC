@@ -2139,6 +2139,14 @@ function budgetBar(spent, planned, projected) {
     </div>`;
 }
 
+/** Objetivo del mes en la tabla de presupuestos (el avance se ve en Ventas). */
+function budgetGoalCell(c, a) {
+  const g = c.goal;
+  const parts = g ? [g.target_orders ? `${fmt.int(g.target_orders)} ventas` : '', g.target_revenue ? fmt.moneyShort(g.target_revenue, a.currency) : ''].filter(Boolean) : [];
+  const edit = isAdmin() ? `<button class="btn btn-sm ${parts.length ? 'btn-ghost' : ''} !h-7" data-bgoal="${esc(a.id)}|${esc(c.id)}">${icon(parts.length ? 'sliders' : 'plus', 13)}${parts.length ? '' : 'Objetivo'}</button>` : '';
+  return `<div class="flex items-center justify-end gap-1.5">${parts.length ? `<span class="num font-medium">${parts.join(' · ')}</span>` : (edit ? '' : '<span class="t3">—</span>')}${edit}</div>`;
+}
+
 async function viewBudgets() {
   crumbs([{ label: 'Presupuestos' }]);
   const d = await api('budgets');
@@ -2169,6 +2177,7 @@ async function viewBudgets() {
         <td>${m(c.spent_mtd)}</td>
         <td class="font-medium">${m(c.spent_mtd_tax)}</td>
         <td>${c.remaining ? m(c.remaining) : '—'}${c.stop_time ? `<div class="sub">hasta ${fmt.date(c.stop_time)}</div>` : ''}</td>
+        <td>${budgetGoalCell(c, a)}</td>
       </tr>`).join('');
     return `
       <div class="card mb-5" data-acc="${esc(a.id)}">
@@ -2192,7 +2201,7 @@ async function viewBudgets() {
           ${budgetBar(a.spent_mtd_tax, a.planned, a.projected_budgets)}
         </div>
         ${a.campaigns.length ? `<details class="hair-t" ${a.campaigns.length <= 8 ? 'open' : ''}><summary class="px-5 py-3 cursor-pointer t2 text-[13px] select-none">Campañas del mes (${a.campaigns.length})</summary>
-          <div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Campaña</th><th>Diario Meta</th><th>Diario +${tax}</th><th>Hoy +${tax}</th><th>Mes Meta</th><th>Mes +${tax}</th><th>Restante (total)</th></tr></thead><tbody>${rows}</tbody></table></div></details>` : ''}
+          <div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Campaña</th><th>Diario Meta</th><th>Diario +${tax}</th><th>Hoy +${tax}</th><th>Mes Meta</th><th>Mes +${tax}</th><th>Restante (total)</th><th>Objetivo del mes</th></tr></thead><tbody>${rows}</tbody></table></div></details>` : ''}
       </div>`;
   };
 
@@ -2204,6 +2213,12 @@ async function viewBudgets() {
     mount() {
       $('#bud-search').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('#bud-list [data-acc]').forEach((el) => { el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none'; }); });
       $('#view').addEventListener('click', async (e) => {
+        const g = e.target.closest('[data-bgoal]');
+        if (g) {
+          const [accId, campId] = g.dataset.bgoal.split('|');
+          const acc = d.accounts.find((x) => x.id === accId);
+          return goalModal(acc.campaigns.find((x) => x.id === campId), acc.currency, () => render({ silent: true }));
+        }
         const b = e.target.closest('[data-plan-save]');
         if (!b) return;
         const acc = b.dataset.planSave;

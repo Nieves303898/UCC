@@ -27,6 +27,13 @@ final class Budgets
         $elapsed = (int) date('j') - 1 + (int) date('G') / 24 + 0.0001; // días transcurridos, con fracción de hoy
         $daysLeft = $daysInMonth - (int) date('j') + 1; // incluye hoy
 
+        $goals = [];
+        foreach (Db::all('SELECT campaign_id, target_orders, target_revenue FROM campaign_targets WHERE month = ?', [$month]) as $g) {
+            $goals[$g['campaign_id']] = [
+                'target_orders'  => $g['target_orders'] !== null ? (float) $g['target_orders'] : null,
+                'target_revenue' => $g['target_revenue'] !== null ? (float) $g['target_revenue'] : null,
+            ];
+        }
         $planned = [];
         foreach (Db::all('SELECT account_id, amount, note FROM ad_budgets WHERE month = ?', [$month]) as $r) {
             $planned[$r['account_id']] = ['amount' => (float) $r['amount'], 'note' => $r['note']];
@@ -97,6 +104,7 @@ final class Budgets
                         'spent_today' => $spentToday, 'spent_today_tax' => $spentToday * (1 + $tax),
                         'today_pct' => $daily ? min(999, $spentToday / $daily * 100) : null,
                         'spent_mtd' => $spentMtd, 'spent_mtd_tax' => $spentMtd * (1 + $tax),
+                        'goal' => $goals[$c['id']] ?? null,
                     ];
                 }
                 // Campañas que gastaron este mes pero ya no están activas ni pausadas (archivadas, etc.).
@@ -104,7 +112,7 @@ final class Budgets
                     if (!isset($seen[$cid]) && $spent > 0) {
                         $camps[] = ['id' => $cid, 'name' => $mtdNames[$cid], 'effective_status' => 'ARCHIVED', 'objective' => null, 'budget_type' => null,
                             'daily' => null, 'daily_tax' => null, 'lifetime' => null, 'remaining' => null, 'stop_time' => null,
-                            'spent_today' => 0, 'spent_today_tax' => 0, 'today_pct' => null, 'spent_mtd' => $spent, 'spent_mtd_tax' => $spent * (1 + $tax)];
+                            'spent_today' => 0, 'spent_today_tax' => 0, 'today_pct' => null, 'spent_mtd' => $spent, 'spent_mtd_tax' => $spent * (1 + $tax), 'goal' => $goals[$cid] ?? null];
                     }
                 }
                 usort($camps, fn ($x, $y) => $y['spent_mtd'] <=> $x['spent_mtd']);
