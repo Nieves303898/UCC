@@ -334,3 +334,4 @@ kbd { font-family: "Geist Mono", monospace; font-size: 11px; padding: 1px 5px; b
 #brand-list > *, #brand-list .grid > * { min-width: 0; }
 #brand-list .card > .flex:first-child { flex-wrap: wrap; }
 .lib-grid > * { min-width: 0; }
+.split-banner { border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-soft); border-radius: 12px; padding: 14px 16px; }

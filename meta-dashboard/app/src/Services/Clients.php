@@ -239,6 +239,53 @@ final class Clients
         return $out;
     }
 
+    /**
+     * Separa por marca las campañas que todavía no tienen dueña: usa el cliente
+     * existente cuyo nombre aparece en la campaña o crea la marca a partir del
+     * nombre (lo que va antes de " - " o " | "). Devuelve qué hizo.
+     */
+    public static function autoAssign(): array
+    {
+        $palette = ['#0e7c66', '#d9822b', '#3a6fd8', '#b9468b', '#7c8a3a', '#6b5bd6', '#2c9db0', '#8a6d55'];
+        $clients = Db::all('SELECT id, name FROM clients ORDER BY LENGTH(name) DESC');
+        $out = ['created' => [], 'assigned' => [], 'skipped' => [], 'mixed' => []];
+        foreach (self::detectGroups() as $acc) {
+            $full = Db::all("SELECT c.name FROM client_assets a JOIN clients c ON c.id = a.client_id WHERE a.asset_type = 'ad_account' AND a.external_id = ?", [$acc['account']]);
+            if ($full && count($acc['groups']) > 1) {
+                $out['mixed'][] = ['account' => $acc['name'], 'owner' => $full[0]['name'], 'brands' => array_column($acc['groups'], 'label')];
+            }
+            foreach ($acc['groups'] as $g) {
+                if ($g['assigned_to']) {
+                    continue;
+                }
+                $label = SalesImport::normName($g['label']);
+                $target = null;
+                foreach ($clients as $c) {
+                    $n = SalesImport::normName($c['name']);
+                    if ($n !== '' && (str_contains($label, $n) || str_contains($n, $label))) {
+                        $target = $c;
+                        break;
+                    }
+                }
+                // Sin separador en el nombre no hay marca clara: mejor no inventarla.
+                $hasBrand = array_filter($g['campaigns'], fn ($n) => SalesImport::normName($n) !== $label);
+                if (!$target && !$hasBrand) {
+                    array_push($out['skipped'], ...$g['campaigns']);
+                    continue;
+                }
+                if (!$target) {
+                    $id = self::save(['name' => $g['label'], 'color' => $palette[count($clients) % count($palette)]]);
+                    $target = ['id' => $id, 'name' => $g['label']];
+                    $clients[] = $target;
+                    $out['created'][] = $g['label'];
+                }
+                self::addRule((int) $target['id'], $acc['account'], $target['name']);
+                $out['assigned'][] = ['brand' => $target['name'], 'account' => $acc['name'], 'campaigns' => count($g['campaigns'])];
+            }
+        }
+        return $out;
+    }
+
     /** Primer segmento del nombre antes de un separador (" - ", " | ", " · ", ":"). */
     public static function brandOf(string $name): string
     {
