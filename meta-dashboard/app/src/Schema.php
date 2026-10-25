@@ -129,6 +129,7 @@ final class Schema
                 orders DECIMAL(14,2) NOT NULL DEFAULT 0,
                 revenue DECIMAL(16,2) NOT NULL DEFAULT 0,
                 leads DECIMAL(14,2) NULL,
+                spend DECIMAL(16,2) NULL,
                 UNIQUE (source_id, day, dim, campaign)
             )$suffix",
 
@@ -279,6 +280,12 @@ final class Schema
             Db::one('SELECT kind FROM clients LIMIT 1');
         } catch (\Throwable) {
             Db::pdo()->exec("ALTER TABLE clients ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'cliente'");
+        }
+        // v10: costo de campaña que el equipo anota en la planilla (para cotejar con Meta).
+        try {
+            Db::one('SELECT spend FROM sales_daily LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec('ALTER TABLE sales_daily ADD COLUMN spend DECIMAL(16,2) NULL');
         }
         // v9: palabras con las que se reconocen las campañas de cada marca (ej. Clover: "clover, activa pos").
         try {

@@ -18,7 +18,8 @@ final class SalesImport
         'date'    => ['fecha', 'dia', 'día', 'date', 'day', 'fecha de venta', 'fecha turno', 'fecha de verificacion'],
         'orders'  => ['ventas', 'cantidad', 'cant', 'operaciones', 'conversiones', 'pedidos', 'ordenes', 'órdenes', 'turnos', 'verificaciones', 'unidades', 'orders', 'sales', 'qty'],
         'revenue' => ['facturacion', 'facturación', 'monto', 'importe', 'total', 'ingresos', 'revenue', 'recaudacion', 'recaudación', 'neto', 'valor'],
-        'leads'   => ['consultas', 'leads', 'contactos', 'visitas', 'mensajes', 'solicitudes', 'reservas', 'turnos solicitados'],
+        'leads'   => ['consultas', 'leads', 'contactos', 'visitas', 'mensajes', 'solicitudes', 'reservas', 'turnos solicitados', 'interacciones', 'interacc', 'conversaciones'],
+        'spend'   => ['costo campaña', 'costo campana', 'costo de campaña', 'inversion', 'inversión', 'gasto', 'spend', 'importe gastado'],
         'campaign' => ['campaña', 'campana', 'campaign', 'nombre de campaña', 'campaña meta', 'anuncio'],
         'dim'     => ['sucursal', 'planta', 'canal', 'origen', 'producto', 'servicio', 'local', 'sede', 'categoria', 'categoría', 'medio'],
     ];
@@ -241,23 +242,40 @@ final class SalesImport
     public static function suggest(array $headers, array $rows = []): array
     {
         $norm = fn ($s) => trim(preg_replace('/\s+/', ' ', strtolower(strtr((string) $s, 'áéíóúÁÉÍÓÚñÑ', 'aeiouAEIOUnN'))));
-        $noise = ['costo', 'inversion', 'gasto', 'presupuesto', 'interacc', 'impuesto', 'cpl', 'cpa', 'ctr', 'cpm', '%', 'promedio', 'prom '];
+        $ratio = ['cpl', 'cpa', 'ctr', 'cpm', '%', 'promedio', 'prom ', ' x ', 'por ', 'costo x', 'costo por'];
+        // Qué palabras descartan una columna para cada campo.
+        $noise = [
+            'orders' => ['costo', 'inversion', 'gasto', 'presupuesto', 'interacc', 'impuesto', ...$ratio],
+            'revenue' => ['costo', 'inversion', 'gasto', 'presupuesto', 'interacc', 'impuesto', ...$ratio],
+            'leads' => ['costo', 'inversion', 'gasto', 'impuesto', ...$ratio],
+            'spend' => ['impuesto', 'presupuesto', 'total gastado', ...$ratio],
+            'campaign' => ['costo', 'interacc', 'cant'],
+            'dim' => [],
+        ];
+        $multi = ['leads', 'spend']; // se suman todas las columnas que coinciden (ej. una por campaña)
         $out = [];
         $used = [];
         foreach (self::FIELDS as $field => $words) {
-            $out[$field] = null;
+            $out[$field] = in_array($field, $multi, true) ? [] : null;
             foreach ($words as $w) {
                 foreach ($headers as $i => $h) {
                     $hn = $norm($h);
-                    if (in_array($i, $used, true) || ($field !== 'date' && array_filter($noise, fn ($x) => str_contains($hn, $x)))) {
+                    if (in_array($i, $used, true) || ($field !== 'date' && array_filter($noise[$field] ?? [], fn ($x) => str_contains($hn, $x)))) {
                         continue;
                     }
                     if ($hn === $norm($w) || preg_match('/(^|[^a-z])' . preg_quote($norm($w), '/') . '/', $hn)) {
-                        $out[$field] = $i;
                         $used[] = $i;
+                        if (in_array($field, $multi, true)) {
+                            $out[$field][] = $i;
+                            continue;
+                        }
+                        $out[$field] = $i;
                         continue 3;
                     }
                 }
+            }
+            if (in_array($field, $multi, true)) {
+                $out[$field] = $out[$field] ?: null;
             }
         }
         if ($out['date'] === null && $rows) {
@@ -283,8 +301,21 @@ final class SalesImport
         if (!isset($map['date']) || $map['date'] === '' || $map['date'] === null) {
             throw new InvalidArgumentException('Elegí qué columna tiene la fecha.');
         }
-        $col = fn ($k) => isset($map[$k]) && $map[$k] !== '' && $map[$k] !== null ? (int) $map[$k] : null;
-        [$d, $o, $r, $l, $dim, $camp] = [$col('date'), $col('orders'), $col('revenue'), $col('leads'), $col('dim'), $col('campaign')];
+        $col = fn ($k) => isset($map[$k]) && $map[$k] !== '' && $map[$k] !== null && !is_array($map[$k]) ? (int) $map[$k] : null;
+        $cols = fn ($k) => isset($map[$k]) && $map[$k] !== '' && $map[$k] !== null ? array_map('intval', (array) $map[$k]) : [];
+        [$d, $o, $r, $dim, $camp] = [$col('date'), $col('orders'), $col('revenue'), $col('dim'), $col('campaign')];
+        $l = $cols('leads') ?: null;
+        $sp = $cols('spend') ?: null;
+        $sum = function (array $row, array $idx): ?float {
+            $t = null;
+            foreach ($idx as $i) {
+                $v = self::parseNumber($row[$i] ?? null);
+                if ($v !== null) {
+                    $t = ($t ?? 0) + $v;
+                }
+            }
+            return $t;
+        };
         $days = [];
         $skipped = 0;
         foreach ($rows as $row) {
@@ -293,17 +324,21 @@ final class SalesImport
                 $skipped++;
                 continue;
             }
-            if ($o !== null && trim((string) ($row[$o] ?? '')) === '' && ($r === null || trim((string) ($row[$r] ?? '')) === '')) {
+            if ($o !== null && trim((string) ($row[$o] ?? '')) === '' && ($r === null || trim((string) ($row[$r] ?? '')) === '')
+                && ($l === null || $sum($row, $l) === null) && ($sp === null || $sum($row, $sp) === null)) {
                 continue; // día todavía sin cargar
             }
             $key = mb_substr(trim((string) ($dim !== null ? ($row[$dim] ?? '') : '')), 0, 120);
             $campaign = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) ($camp !== null ? ($row[$camp] ?? '') : ''))), 0, 190);
             $agg = &$days[$day . '|' . $key . '|' . $campaign];
-            $agg ??= ['day' => $day, 'dim' => $key, 'campaign' => $campaign, 'orders' => 0.0, 'revenue' => 0.0, 'leads' => null];
+            $agg ??= ['day' => $day, 'dim' => $key, 'campaign' => $campaign, 'orders' => 0.0, 'revenue' => 0.0, 'leads' => null, 'spend' => null];
             $agg['orders'] += $o !== null ? (self::parseNumber($row[$o] ?? null) ?? 0) : 1;
             $agg['revenue'] += $r !== null ? (self::parseNumber($row[$r] ?? null) ?? 0) : 0;
-            if ($l !== null) {
-                $agg['leads'] = ($agg['leads'] ?? 0) + (self::parseNumber($row[$l] ?? null) ?? 0);
+            if ($l !== null && ($v = $sum($row, $l)) !== null) {
+                $agg['leads'] = ($agg['leads'] ?? 0) + $v;
+            }
+            if ($sp !== null && ($v = $sum($row, $sp)) !== null) {
+                $agg['spend'] = ($agg['spend'] ?? 0) + $v;
             }
             unset($agg);
         }

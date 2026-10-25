@@ -38,7 +38,7 @@ final class Api
     private const CLIENT_ACTIONS = [
         'bootstrap', 'assets', 'overview', 'account', 'adsets', 'ads', 'timeseries', 'breakdown',
         'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales', 'top_ads', 'org_overview', 'sheets',
-        'portal_users', 'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete', 'clients_delete',
+        'portal_users', 'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete', 'sales_monthly',
     ];
 
     /** Usuarios internos de solo lectura (ej. gerencia): todo lo del cliente + vistas de agencia. */
@@ -59,7 +59,7 @@ final class Api
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete', 'sales_connect',
         'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
         'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brand_map_save', 'client_kind_save', 'sheet_add', 'sheet_delete', 'sheet_refresh', 'client_user_save',
-        'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete',
+        'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete', 'clients_delete',
         'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
     ];
 
@@ -297,6 +297,11 @@ final class Api
                 return Sales::preview($_FILES['file'] ?? null, isset($body['url']) && $body['url'] !== '' ? (string) $body['url'] : null);
             case 'sales_import':
                 return Sales::import($ownClient((int) ($body['client_id'] ?? 0)), $body);
+            case 'sales_monthly':
+                if ($client === null) {
+                    throw new InvalidArgumentException('Elegí una marca.');
+                }
+                return Sales::monthly($client, (int) ($q['months'] ?? 6));
             case 'sales_connect':
                 return Sales::connect($ownClient((int) ($body['client_id'] ?? 0)), (string) ($body['url'] ?? ''), (string) ($body['name'] ?? ''));
             case 'sales_sync':
@@ -434,6 +439,9 @@ final class Api
             case 'client_save':
                 return ['id' => Clients::save($body)];
             case 'clients_delete':
+                if (!Auth::isAdmin()) { // doble control: sólo la dueña del sistema
+                    throw new AccessDenied('No tenés permiso para esta acción.');
+                }
                 $ids = array_values(array_unique(array_filter(array_map('intval', (array) ($body['ids'] ?? [])))));
                 foreach ($ids as $cid) {
                     Clients::find($cid);

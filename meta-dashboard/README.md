@@ -63,6 +63,13 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 - **Accesos con rol** (Cliente → Accesos): *Dueño*, *Gerente de operaciones* y *Gerente* ven **todas** las marcas (también las nuevas) y un **resumen consolidado** (inversión +35%, conversaciones, ventas/gestiones, costo por venta, avance del objetivo de cada marca). *Supervisor*, *Asesor* y *Usuario* ven sólo las marcas tildadas; no ven las cuentas completas del cliente porque mezclan marcas. Arriba del portal hay un selector de marca.
 - **Planillas** (Cliente o Marca → Planillas): cualquier Google Sheets (cobranzas, turnos, leads, asesores…) se ve dentro del portal tal cual, con todas sus pestañas y un buscador, y se vuelve a leer cada 5 minutos. Las ventas cargadas en planillas también se releen cada 5 minutos.
 
+### Mes a mes y cotejo planilla vs Meta
+
+- **Varias planillas a la vez**: en Ventas → Conectar se pueden pegar varios links (uno por renglón: julio, agosto, septiembre…). Si los meses son pestañas de un mismo archivo, alcanza con un link. Cada link se conecta una sola vez: no conectes el mismo mes en dos archivos distintos, porque se sumaría dos veces.
+- Además de las ventas, se leen solas las columnas de **interacciones** y de **costo de campaña** que anota el equipo (se suman todas, ej. una por campaña).
+- **Mes a mes** (en Ventas de cada marca): ventas, facturación, inversión real de Meta +35%, costo por venta, conversaciones y conversión, con gráfico.
+- **Cotejo**: compara el costo anotado (sin impuestos) y las interacciones anotadas con lo que informa Meta para las campañas de la marca, en los mismos días (del 1 al último día cargado). Verde = coincide (±5%), amarillo = hasta 15%, rojo = revisar la carga.
+
 ### Campañas nuevas que se asignan solas
 
 Cada marca tiene **palabras para reconocer sus campañas** (en *Marcas y cuentas*; siempre incluye su nombre — ej. Clover: "activa pos"). En las cuentas compartidas entre marcas (ej. PayLab Gestión), una campaña nueva cuyo nombre contenga esas palabras se suma sola a la marca (y por lo tanto a su cliente). Las campañas asignadas a mano siempre mandan sobre las palabras. Las que no coincidan con ninguna aparecen en el plan como "sin marca".

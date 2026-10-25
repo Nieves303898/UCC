@@ -2420,6 +2420,50 @@ const freshness = (d) => {
   return `<span class="pill ${cls}">Datos hasta el ${fmt.date(d.last_day)}${days > 1 ? ` · hace ${days} días` : ''}</span>`;
 };
 
+/** Mes a mes: lo cargado en la planilla contra lo real de Meta, con el cotejo de diferencias. */
+async function monthlyBlock(box, cid) {
+  if (!box) return;
+  let d;
+  try { d = await api('sales_monthly', { client: cid, months: 6 }); } catch (e) { box.innerHTML = errorBox(e.message, false); return; }
+  const cur = d.client.currency;
+  const m = (v) => fmt.money(v, cur);
+  const L = d.client.sales_label || 'Ventas';
+  const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
+  const rows = d.months;
+  if (!rows.some((r) => r.days || r.meta_spend)) { box.innerHTML = ''; return; }
+  const name = (k) => cap(new Date(k + '-15').toLocaleDateString(LOCALE, { month: 'long', year: 'numeric' }));
+  const check = (diff) => (diff === null || diff === undefined ? '<span class="t3">—</span>'
+    : Math.abs(diff) <= 5 ? `<span class="pill green plain">${icon('check', 11)}Coincide</span>`
+    : `<span class="pill ${Math.abs(diff) <= 15 ? 'amber' : 'red'} plain">${diff > 0 ? '+' : ''}${fmt.dec(diff, 0)}%</span>`);
+  const hasSheetCheck = rows.some((r) => r.sheet_spend !== null || r.sheet_leads !== null);
+  const hasMeta = rows.some((r) => r.meta_spend);
+  box.innerHTML = `<div class="card overflow-hidden">
+    <div class="card-h"><div><div class="h2">Mes a mes</div><div class="t3 text-xs mt-0.5">${esc(L)} de las planillas${hasMeta ? ` · inversión real de Meta +${tax}` : ''}${hasSheetCheck ? ' · cotejo de lo anotado en la planilla contra Meta' : ''}</div></div></div>
+    ${rows.filter((r) => r.orders).length > 1 ? `<div class="p-4 h-[240px] hair-b"><canvas id="monthly-chart"></canvas></div>` : ''}
+    <div class="scroll-x"><table class="tbl"><thead><tr>
+      <th style="text-align:left">Mes</th><th>${esc(L)}</th><th>Facturación</th>${hasMeta ? `<th>Inversión +${tax}</th><th>Costo por ${esc(lower(L).replace(/s$/, ''))}</th><th>Conversaciones</th><th>Conversión</th>` : ''}
+      ${hasSheetCheck ? '<th>Costo anotado vs Meta</th><th>Interacciones anotadas vs Meta</th>' : ''}
+    </tr></thead><tbody>
+    ${[...rows].reverse().map((r) => `<tr>
+      <td style="text-align:left"><div class="font-medium">${esc(name(r.month))}</div><div class="sub">${r.partial ? `en curso · ${r.days} días cargados` : `${r.days} días cargados`}</div></td>
+      <td class="font-semibold">${fmt.int(r.orders)}</td>
+      <td>${r.revenue ? m(r.revenue) : '—'}</td>
+      ${hasMeta ? `<td>${r.meta_spend_tax !== null ? m(r.meta_spend_tax) : '—'}</td><td class="font-semibold">${r.cost_per_sale ? m(r.cost_per_sale) : '—'}</td><td>${r.meta_messages !== null ? fmt.int(r.meta_messages) : '—'}</td><td>${fmt.pct(r.conversion)}</td>` : ''}
+      ${hasSheetCheck ? `<td><div class="flex items-center justify-end gap-2">${check(r.spend_diff)}</div><div class="sub">${r.sheet_spend !== null ? `${m(r.sheet_spend)} vs ${m(r.check_spend)}` : 'sin costo anotado'}</div></td>
+        <td><div class="flex items-center justify-end gap-2">${check(r.leads_diff)}</div><div class="sub">${r.sheet_leads !== null ? `${fmt.int(r.sheet_leads)} vs ${fmt.int(r.check_messages)}` : 'sin interacciones anotadas'}${r.check_until && r.sheet_spend !== null && r.check_until < (r.month + '-31') && r.partial ? ` · al ${fmt.date(r.check_until)}` : ''}</div></td>` : ''}
+    </tr>`).join('')}</tbody></table></div>
+    ${hasSheetCheck ? `<div class="px-5 py-3 hair-t t3 text-xs">El cotejo compara lo que el equipo anota en la planilla (costo de campaña sin impuestos e interacciones) con lo que informa Meta para las campañas de esta marca, en los mismos días (del 1 al último día anotado). Verde: coincide (±5%). Amarillo: hasta 15% de diferencia. Rojo: revisar la carga.</div>` : ''}
+  </div>`;
+  hydrateIcons(box);
+  const withData = rows.filter((r) => r.days || r.meta_spend);
+  if ($('#monthly-chart')) {
+    chart($('#monthly-chart'), withData.map((r) => cap(new Date(r.month + '-15').toLocaleDateString(LOCALE, { month: 'short' }))), [
+      { label: L, data: withData.map((r) => r.orders), type: 'bar', fmt: fmt.int, color: cssVar('--accent'), alpha: 'cc' },
+      ...(hasMeta ? [{ label: `Costo por ${lower(L).replace(/s$/, '')}`, data: withData.map((r) => r.cost_per_sale), axis: 'y1', fmt: m, color: cssVar('--c2') }] : []),
+    ], { fmtY: fmt.int, fmtY1: (v) => fmt.moneyShort(v, cur) });
+  }
+}
+
 async function viewSales(cid) {
   cid = +cid || portalClient();
   const brand = await clientBrand(cid);
@@ -2449,6 +2493,7 @@ async function viewSales(cid) {
     ${isClient() ? backLink('#/', 'Inicio') : ''}
     ${pageHead(esc(L.sales), `${esc(brand.name)} · ${fmt.dateLong(d.range.since)} – ${fmt.dateLong(d.range.until)}`, `<div class="flex items-center gap-2">${freshness(d)}<a class="btn" href="${state.preview ? `#/preview/${cid}/report` : '#/report'}">${icon('report', 15)}Reporte</a></div>`)}
     ${salesKpis(d)}
+    <div id="sales-monthly" class="mb-6"><div class="sk h-64"></div></div>
     <div class="grid xl:grid-cols-3 gap-6 mb-6">
       ${projectionCard(d.month, L, cur).replace('class="card p-5 flex flex-col"', 'class="card p-5 flex flex-col xl:col-span-2"')}
       <div class="card p-5">
@@ -2476,6 +2521,7 @@ async function viewSales(cid) {
   return {
     html,
     mount() {
+      monthlyBlock($('#sales-monthly'), cid);
       mountTable('sales-days');
       $('#view').addEventListener('click', (e) => {
         const b = e.target.closest('[data-copy-name]');
@@ -2550,7 +2596,7 @@ function salesPane(c) {
           <div class="p-5 space-y-4" data-step="1">
             <div class="seg" id="imp-kind"><button class="on" data-k="gsheet">Google Sheets (automático)</button><button data-k="upload">Excel / CSV</button></div>
             <div data-k-pane="gsheet" class="space-y-2">
-              <input class="input" id="imp-url" placeholder="Pegá el link de la planilla: https://docs.google.com/spreadsheets/d/…">
+              <textarea class="input !h-20 py-2" id="imp-url" placeholder="Pegá el link de la planilla (o varios, uno por renglón: julio, agosto, septiembre…)"></textarea>
               <p class="t3 text-xs">1) En Google Sheets: <b>Compartir → “Cualquier persona con el enlace” → Lector</b>. 2) Pegá el link y tocá <b>Conectar</b>: la fecha y las ventas se detectan solas, en <b>todas las pestañas</b> (agregás la del mes nuevo y entra sola). Se vuelve a leer cada 5 minutos.</p>
             </div>
             <div data-k-pane="upload" class="hidden space-y-2">
@@ -2619,21 +2665,32 @@ function mountSalesPane(c) {
   // Un paso: pegar el link y listo (detecta fecha y ventas solas, en todas las pestañas).
   $('#imp-connect').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
-    const url = $('#imp-url').value.trim();
-    if (!url) return toast('Pegá el link de la planilla.', 'error');
-    btn.disabled = true; btn.textContent = 'Conectando…';
-    try {
-      const r = await api('sales_connect', {}, { client_id: c.id, url });
-      if (r.needs_mapping) {
-        toast('No pudimos reconocer solas las columnas: elegilas una vez y queda guardado.', 'error');
-        $('#imp-preview').classList.remove('hidden');
-        return showStep2(r);
-      }
-      $('#imp-result').innerHTML = `<div class="split-banner !border-[color:var(--pos)] mt-1" style="background:var(--pos-soft)"><div class="font-semibold t1">Conectada: ${fmt.int(r.orders)} ${esc(lower(c.sales_label))} en ${r.days} días (${fmt.date(r.min)} → ${fmt.date(r.max)})</div>
-        <div class="t2 text-[13px] mt-1">Leímos ${esc(Object.entries(r.columns).map(([k, v]) => `${k}: “${v}”`).join(' · '))}${r.tabs?.length > 1 ? ` en ${r.tabs.length} pestañas (${esc(r.tabs.join(', '))})` : ''}. Se actualiza sola cada 5 minutos; cuando agregues la pestaña del mes nuevo entra sola.</div></div>`;
-      toast('Planilla conectada');
-      setTimeout(() => render({ silent: true }), 2500);
-    } catch (err) { toast(err.message, 'error'); } finally { btn.disabled = false; btn.innerHTML = `${icon('link', 14)}Conectar`; }
+    const urls = [...new Set(($('#imp-url').value.match(/https:\/\/docs\.google\.com\/spreadsheets\/[^\s,;]+/g) || []))];
+    if (!urls.length) return toast('Pegá el link de la planilla de Google Sheets.', 'error');
+    btn.disabled = true;
+    const out = [];
+    for (const [i, url] of urls.entries()) {
+      btn.textContent = urls.length > 1 ? `Conectando ${i + 1} de ${urls.length}…` : 'Conectando…';
+      try {
+        const r = await api('sales_connect', {}, { client_id: c.id, url });
+        if (r.needs_mapping) {
+          if (urls.length === 1) {
+            btn.disabled = false; btn.innerHTML = `${icon('link', 14)}Conectar`;
+            toast('No pudimos reconocer solas las columnas: elegilas una vez y queda guardado.', 'error');
+            $('#imp-preview').classList.remove('hidden');
+            return showStep2(r);
+          }
+          out.push(`<li class="t-warn">Planilla ${i + 1}: no se reconocieron las columnas. Conectala sola para elegirlas.</li>`);
+          continue;
+        }
+        out.push(`<li><b class="t1">${fmt.int(r.orders)} ${esc(lower(c.sales_label))}</b> en ${r.days} días (${fmt.date(r.min)} → ${fmt.date(r.max)}) · ${esc(Object.entries(r.columns).map(([k, v]) => `${k}: “${v}”`).join(' · '))}${r.tabs?.length > 1 ? ` · ${r.tabs.length} pestañas` : ''}</li>`);
+      } catch (err) { out.push(`<li class="t-bad">Planilla ${i + 1}: ${esc(err.message)}</li>`); }
+    }
+    btn.disabled = false; btn.innerHTML = `${icon('link', 14)}Conectar`;
+    $('#imp-result').innerHTML = `<div class="split-banner mt-1" style="background:var(--pos-soft);border-color:color-mix(in srgb, var(--pos) 35%, transparent)"><div class="font-semibold t1">${urls.length > 1 ? `${urls.length} planillas procesadas` : 'Planilla conectada'}</div>
+      <ul class="t2 text-[13px] mt-1 space-y-1 list-disc pl-5">${out.join('')}</ul><div class="t3 text-xs mt-2">Se actualizan solas cada 5 minutos; las pestañas nuevas entran solas.</div></div>`;
+    hydrateIcons($('#imp-result'));
+    setTimeout(() => render({ silent: true }), 4000);
   });
   $('#imp-preview').addEventListener('click', async (e) => {
     const btn = e.currentTarget;

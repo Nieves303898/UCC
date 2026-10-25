@@ -573,6 +573,7 @@ final class Sales
                 Db::insert('sales_daily', [
                     'client_id' => $clientId, 'source_id' => $sourceId, 'day' => $d['day'], 'dim' => $d['dim'], 'campaign' => $d['campaign'] ?? '',
                     'orders' => round($d['orders'], 2), 'revenue' => round($d['revenue'], 2), 'leads' => $d['leads'] !== null ? round($d['leads'], 2) : null,
+                    'spend' => isset($d['spend']) && $d['spend'] !== null ? round($d['spend'], 2) : null,
                 ]);
             }
             $pdo->commit();
@@ -612,9 +613,57 @@ final class Sales
     {
         $out = [];
         foreach (array_keys(SalesImport::FIELDS) as $f) {
-            $out[$f] = isset($m[$f]) && $m[$f] !== '' && $m[$f] !== null ? (int) $m[$f] : null;
+            $v = $m[$f] ?? null;
+            $out[$f] = $v === '' || $v === null || $v === [] ? null : (is_array($v) ? array_map('intval', $v) : (int) $v);
         }
         return $out;
+    }
+
+    /**
+     * Mes a mes de una marca: lo cargado en las planillas (ventas, facturación,
+     * interacciones y costo anotado) contra lo real de Meta (gasto, gasto +imp.,
+     * conversaciones), con el cotejo de las diferencias.
+     */
+    public static function monthly(int $clientId, int $months = 6): array
+    {
+        $c = Clients::find($clientId);
+        $first = Db::one('SELECT MIN(day) AS d FROM sales_daily WHERE client_id = ?', [$clientId])['d'] ?? null;
+        $start = new DateTimeImmutable(date('Y-m-01'));
+        $oldest = $start->modify('-' . ($months - 1) . ' months');
+        if ($first && $first > $oldest->format('Y-m-d')) {
+            $oldest = (new DateTimeImmutable($first))->modify('first day of this month');
+        }
+        $accounts = Clients::allowed($clientId)['ad_account'];
+        $tax = \App\Settings::taxRate();
+        $out = [];
+        for ($m = $oldest; $m <= $start; $m = $m->modify('+1 month')) {
+            $end = $m->modify('last day of this month');
+            $until = min($end->format('Y-m-d'), date('Y-m-d'));
+            $r = Db::one('SELECT SUM(orders) AS o, SUM(revenue) AS rv, SUM(leads) AS l, SUM(spend) AS sp, COUNT(DISTINCT day) AS days, MAX(day) AS last
+                          FROM sales_daily WHERE client_id = ? AND day BETWEEN ? AND ?', [$clientId, $m->format('Y-m-d'), $until]);
+            $ads = $accounts ? Reports::adsTotals($clientId, $accounts, new DateRange($m, new DateTimeImmutable($until), 'custom')) : null;
+            $orders = (float) ($r['o'] ?? 0);
+            $sheetSpend = $r['sp'] !== null ? (float) $r['sp'] : null;
+            $sheetLeads = $r['l'] !== null ? (float) $r['l'] : null;
+            $diff = fn ($a, $b) => $a !== null && $b ? ($a - $b) / $b * 100 : null;
+            // El cotejo se hace sobre los mismos días: del 1 al último día anotado en la planilla.
+            $check = $ads;
+            if ($accounts && ($sheetSpend !== null || $sheetLeads !== null) && $r['last'] && $r['last'] < $until) {
+                $check = Reports::adsTotals($clientId, $accounts, new DateRange($m, new DateTimeImmutable($r['last']), 'custom'));
+            }
+            $out[] = [
+                'month' => $m->format('Y-m'), 'partial' => $until < $end->format('Y-m-d'), 'days' => (int) $r['days'], 'last' => $r['last'],
+                'orders' => $orders, 'revenue' => (float) ($r['rv'] ?? 0),
+                'sheet_leads' => $sheetLeads, 'sheet_spend' => $sheetSpend,
+                'meta_spend' => $ads['spend'] ?? null, 'meta_spend_tax' => $ads['spend_tax'] ?? null, 'meta_messages' => $ads['messages'] ?? null, 'meta_results' => $ads['results'] ?? null,
+                'cost_per_sale' => $orders > 0 && ($ads['spend_tax'] ?? 0) > 0 ? $ads['spend_tax'] / $orders : null,
+                'conversion' => $orders > 0 && ($ads['messages'] ?? 0) > 0 ? $orders / $ads['messages'] * 100 : ($orders > 0 && $sheetLeads ? $orders / $sheetLeads * 100 : null),
+                'check_spend' => $check['spend'] ?? null, 'check_messages' => $check['messages'] ?? null, 'check_until' => $check === $ads ? $until : $r['last'],
+                'spend_diff' => $diff($sheetSpend, $check['spend'] ?? null),
+                'leads_diff' => $diff($sheetLeads, $check['messages'] ?? null),
+            ];
+        }
+        return ['client' => ['id' => $c['id'], 'name' => $c['name'], 'currency' => $c['currency'], 'sales_label' => $c['sales_label']], 'tax_rate' => $tax, 'months' => $out];
     }
 
     /** Google Sheets se resincroniza solo al abrir el tablero si pasaron más de 20 minutos. */
