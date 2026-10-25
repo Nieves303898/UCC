@@ -65,7 +65,9 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 
 ### Mes a mes y cotejo planilla vs Meta
 
-- **Varias planillas a la vez**: en Ventas → Conectar se pueden pegar varios links (uno por renglón: julio, agosto, septiembre…). Si los meses son pestañas de un mismo archivo, alcanza con un link. Cada link se conecta una sola vez: no conectes el mismo mes en dos archivos distintos, porque se sumaría dos veces.
+- **Varias planillas a la vez**: en Ventas → Conectar se pueden pegar varios links (uno por renglón) cuando los meses están en **archivos distintos**. Si los meses son **pestañas de un mismo archivo**, alcanza con un link: se leen todas. Si se pega el mismo archivo más de una vez (por ejemplo, el link de cada pestaña), se actualiza la misma fuente y no se duplica; las fuentes duplicadas que hubieran quedado se limpian solas al abrir el panel.
+- **Cada pestaña se lee con sus propios títulos**: si cada mes tiene campañas distintas (ej. "Día de la Madre" en septiembre, "Primavera Saldo x4" en octubre), se toman todas sus columnas de interacciones y costo. Las pestañas sin carga diaria (ej. "Histórico") se ignoran.
+- **Día por día**: tocando un mes en *Mes a mes* se ve cada día con ventas, interacciones anotadas, conversaciones de Meta, costo anotado, gasto de Meta (con y sin impuestos) y costo por venta, y avisa si algún día viene de dos planillas.
 - Además de las ventas, se leen solas las columnas de **interacciones** y de **costo de campaña** que anota el equipo (se suman todas, ej. una por campaña).
 - **Mes a mes** (en Ventas de cada marca): ventas, facturación, inversión real de Meta +35%, costo por venta, conversaciones y conversión, con gráfico.
 - **Cotejo**: compara el costo anotado (sin impuestos) y las interacciones anotadas con lo que informa Meta para las campañas de la marca, en los mismos días (del 1 al último día cargado). Verde = coincide (±5%), amarillo = hasta 15%, rojo = revisar la carga.

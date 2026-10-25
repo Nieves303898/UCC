@@ -2444,17 +2444,19 @@ async function monthlyBlock(box, cid) {
       <th style="text-align:left">Mes</th><th>${esc(L)}</th><th>Facturación</th>${hasMeta ? `<th>Inversión +${tax}</th><th>Costo por ${esc(lower(L).replace(/s$/, ''))}</th><th>Conversaciones</th><th>Conversión</th>` : ''}
       ${hasSheetCheck ? '<th>Costo anotado vs Meta</th><th>Interacciones anotadas vs Meta</th>' : ''}
     </tr></thead><tbody>
-    ${[...rows].reverse().map((r) => `<tr>
-      <td style="text-align:left"><div class="font-medium">${esc(name(r.month))}</div><div class="sub">${r.partial ? `en curso · ${r.days} días cargados` : `${r.days} días cargados`}</div></td>
+    ${[...rows].reverse().map((r) => `<tr class="clickable" data-month="${r.month}" title="Ver día por día">
+      <td style="text-align:left"><div class="font-medium flex items-center gap-1.5">${esc(name(r.month))}<span class="t3">${icon('down', 12)}</span></div><div class="sub">${r.partial ? `en curso · ${r.days} días cargados` : `${r.days} días cargados`}</div></td>
       <td class="font-semibold">${fmt.int(r.orders)}</td>
       <td>${r.revenue ? m(r.revenue) : '—'}</td>
       ${hasMeta ? `<td>${r.meta_spend_tax !== null ? m(r.meta_spend_tax) : '—'}</td><td class="font-semibold">${r.cost_per_sale ? m(r.cost_per_sale) : '—'}</td><td>${r.meta_messages !== null ? fmt.int(r.meta_messages) : '—'}</td><td>${fmt.pct(r.conversion)}</td>` : ''}
       ${hasSheetCheck ? `<td><div class="flex items-center justify-end gap-2">${check(r.spend_diff)}</div><div class="sub">${r.sheet_spend !== null ? `${m(r.sheet_spend)} vs ${m(r.check_spend)}` : 'sin costo anotado'}</div></td>
         <td><div class="flex items-center justify-end gap-2">${check(r.leads_diff)}</div><div class="sub">${r.sheet_leads !== null ? `${fmt.int(r.sheet_leads)} vs ${fmt.int(r.check_messages)}` : 'sin interacciones anotadas'}${r.check_until && r.sheet_spend !== null && r.check_until < (r.month + '-31') && r.partial ? ` · al ${fmt.date(r.check_until)}` : ''}</div></td>` : ''}
     </tr>`).join('')}</tbody></table></div>
-    ${hasSheetCheck ? `<div class="px-5 py-3 hair-t t3 text-xs">El cotejo compara lo que el equipo anota en la planilla (costo de campaña sin impuestos e interacciones) con lo que informa Meta para las campañas de esta marca, en los mismos días (del 1 al último día anotado). Verde: coincide (±5%). Amarillo: hasta 15% de diferencia. Rojo: revisar la carga.</div>` : ''}
+    <div id="month-days"></div>
+    ${hasSheetCheck ? `<div class="px-5 py-3 hair-t t3 text-xs">Tocá un mes para ver el detalle día por día. El cotejo compara lo que el equipo anota en la planilla (costo de campaña sin impuestos e interacciones) con lo que informa Meta para las campañas de esta marca, en los mismos días (del 1 al último día anotado). Verde: coincide (±5%). Amarillo: hasta 15% de diferencia. Rojo: revisar la carga.</div>` : ''}
   </div>`;
   hydrateIcons(box);
+  box.addEventListener('click', (e) => { const tr = e.target.closest('[data-month]'); if (tr) monthDays($('#month-days', box), cid, tr.dataset.month, name(tr.dataset.month)); });
   const withData = rows.filter((r) => r.days || r.meta_spend);
   if ($('#monthly-chart')) {
     chart($('#monthly-chart'), withData.map((r) => cap(new Date(r.month + '-15').toLocaleDateString(LOCALE, { month: 'short' }))), [
@@ -2462,6 +2464,37 @@ async function monthlyBlock(box, cid) {
       ...(hasMeta ? [{ label: `Costo por ${lower(L).replace(/s$/, '')}`, data: withData.map((r) => r.cost_per_sale), axis: 'y1', fmt: m, color: cssVar('--c2') }] : []),
     ], { fmtY: fmt.int, fmtY1: (v) => fmt.moneyShort(v, cur) });
   }
+}
+
+/** Detalle día por día de un mes: planilla contra Meta, para revisar la carga. */
+async function monthDays(box, cid, month, title) {
+  if (!box) return;
+  if (box.dataset.month === month) { box.innerHTML = ''; box.dataset.month = ''; return; }
+  box.dataset.month = month;
+  box.innerHTML = '<div class="p-5 hair-t"><div class="sk h-48"></div></div>';
+  let d;
+  try { d = await api('sales_days', { client: cid, month }); } catch (e) { box.innerHTML = `<div class="p-5 hair-t t-bad">${esc(e.message)}</div>`; return; }
+  const m = (v) => (v === null || v === undefined ? '—' : fmt.money(v, d.currency));
+  const n = (v) => (v === null || v === undefined ? '—' : fmt.int(v));
+  const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
+  const sum = (k) => d.days.reduce((t, r) => t + (r[k] || 0), 0);
+  const L = d.sales_label || 'Ventas';
+  const dup = d.days.some((r) => r.sources > 1);
+  box.innerHTML = `<div class="hair-t">
+    <div class="px-5 py-3 flex flex-wrap items-center gap-2"><div class="h2">${esc(title)} · día por día</div><div class="flex-1"></div>
+      <span class="t3 text-xs">Fuentes: ${esc(d.sources.map((x) => x.name).join(' · ') || '—')}</span></div>
+    ${dup ? '<div class="mx-5 mb-3 split-banner text-[13px]">Hay días que vienen de <b>dos planillas distintas</b> y se están sumando. Revisá en Clientes → Ventas que el mismo mes no esté en dos archivos.</div>' : ''}
+    <div class="scroll-x max-h-[520px] overflow-y-auto"><table class="tbl sheet-tbl"><thead><tr>
+      <th style="text-align:left">Día</th><th>${esc(L)}</th><th>Interacciones anotadas</th><th>Conversaciones Meta</th><th>Costo anotado</th><th>Gasto Meta</th><th>Gasto Meta +${tax}</th><th>Costo por ${esc(lower(L).replace(/s$/, ''))}</th>
+    </tr></thead><tbody>
+    ${d.days.map((r) => `<tr class="${r.orders === null ? 'opacity-60' : ''}">
+      <td style="text-align:left">${new Date(r.day + 'T12:00:00').toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' })}${r.sources > 1 ? ' <span class="pill amber plain">duplicado</span>' : ''}</td>
+      <td class="font-semibold">${n(r.orders)}</td><td>${n(r.sheet_leads)}</td><td>${n(r.meta_messages)}</td>
+      <td>${m(r.sheet_spend)}</td><td>${m(r.meta_spend)}</td><td>${m(r.meta_spend_tax)}</td>
+      <td>${r.orders && r.meta_spend_tax ? m(r.meta_spend_tax / r.orders) : '—'}</td></tr>`).join('')}
+    <tr class="font-semibold"><td style="text-align:left">Total</td><td>${n(sum('orders'))}</td><td>${n(sum('sheet_leads'))}</td><td>${n(sum('meta_messages'))}</td><td>${m(sum('sheet_spend'))}</td><td>${m(sum('meta_spend'))}</td><td>${m(sum('meta_spend_tax'))}</td><td>${sum('orders') ? m(sum('meta_spend_tax') / sum('orders')) : '—'}</td></tr>
+    </tbody></table></div></div>`;
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function viewSales(cid) {
@@ -2596,7 +2629,7 @@ function salesPane(c) {
           <div class="p-5 space-y-4" data-step="1">
             <div class="seg" id="imp-kind"><button class="on" data-k="gsheet">Google Sheets (automático)</button><button data-k="upload">Excel / CSV</button></div>
             <div data-k-pane="gsheet" class="space-y-2">
-              <textarea class="input !h-20 py-2" id="imp-url" placeholder="Pegá el link de la planilla (o varios, uno por renglón: julio, agosto, septiembre…)"></textarea>
+              <textarea class="input !h-20 py-2" id="imp-url" placeholder="Pegá el link de la planilla. Si los meses son pestañas del mismo archivo, alcanza con UN link. Si son archivos distintos, uno por renglón."></textarea>
               <p class="t3 text-xs">1) En Google Sheets: <b>Compartir → “Cualquier persona con el enlace” → Lector</b>. 2) Pegá el link y tocá <b>Conectar</b>: la fecha y las ventas se detectan solas, en <b>todas las pestañas</b> (agregás la del mes nuevo y entra sola). Se vuelve a leer cada 5 minutos.</p>
             </div>
             <div data-k-pane="upload" class="hidden space-y-2">
@@ -2683,12 +2716,12 @@ function mountSalesPane(c) {
           out.push(`<li class="t-warn">Planilla ${i + 1}: no se reconocieron las columnas. Conectala sola para elegirlas.</li>`);
           continue;
         }
-        out.push(`<li><b class="t1">${fmt.int(r.orders)} ${esc(lower(c.sales_label))}</b> en ${r.days} días (${fmt.date(r.min)} → ${fmt.date(r.max)}) · ${esc(Object.entries(r.columns).map(([k, v]) => `${k}: “${v}”`).join(' · '))}${r.tabs?.length > 1 ? ` · ${r.tabs.length} pestañas` : ''}</li>`);
+        out.push(`<li>${r.updated ? '<span class="pill blue plain">Mismo archivo: se actualizó</span> ' : ''}<b class="t1">${fmt.int(r.orders)} ${esc(lower(c.sales_label))}</b> en ${r.days} días (${fmt.date(r.min)} → ${fmt.date(r.max)}) · ${esc(Object.entries(r.columns).map(([k, v]) => `${k}: “${v}”`).join(' · '))}${r.tabs?.length > 1 ? ` · ${r.tabs.length} pestañas` : ''}</li>`);
       } catch (err) { out.push(`<li class="t-bad">Planilla ${i + 1}: ${esc(err.message)}</li>`); }
     }
     btn.disabled = false; btn.innerHTML = `${icon('link', 14)}Conectar`;
     $('#imp-result').innerHTML = `<div class="split-banner mt-1" style="background:var(--pos-soft);border-color:color-mix(in srgb, var(--pos) 35%, transparent)"><div class="font-semibold t1">${urls.length > 1 ? `${urls.length} planillas procesadas` : 'Planilla conectada'}</div>
-      <ul class="t2 text-[13px] mt-1 space-y-1 list-disc pl-5">${out.join('')}</ul><div class="t3 text-xs mt-2">Se actualizan solas cada 5 minutos; las pestañas nuevas entran solas.</div></div>`;
+      <ul class="t2 text-[13px] mt-1 space-y-1 list-disc pl-5">${out.join('')}</ul><div class="t3 text-xs mt-2">Un archivo con varias pestañas (julio, agosto…) se conecta <b>una sola vez</b>: se leen todas. Se actualizan solas cada 5 minutos.</div></div>`;
     hydrateIcons($('#imp-result'));
     setTimeout(() => render({ silent: true }), 4000);
   });

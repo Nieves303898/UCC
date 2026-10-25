@@ -115,6 +115,10 @@ switch ($route) {
             redirect('index.php?r=login');
         }
         Schema::install(); // asegura tablas nuevas tras actualizar
+        try {
+            \App\Services\Sales::dedupeAll(); // una misma planilla conectada varias veces cuenta una sola vez
+        } catch (\Throwable) {
+        }
         $flash = $_SESSION['flash'] ?? null;
         unset($_SESSION['flash']);
         view('app', ['flash' => $flash]);

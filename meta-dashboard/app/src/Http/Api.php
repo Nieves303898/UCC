@@ -38,7 +38,7 @@ final class Api
     private const CLIENT_ACTIONS = [
         'bootstrap', 'assets', 'overview', 'account', 'adsets', 'ads', 'timeseries', 'breakdown',
         'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales', 'top_ads', 'org_overview', 'sheets',
-        'portal_users', 'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete', 'sales_monthly',
+        'portal_users', 'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete', 'sales_monthly', 'sales_days',
     ];
 
     /** Usuarios internos de solo lectura (ej. gerencia): todo lo del cliente + vistas de agencia. */
@@ -302,6 +302,11 @@ final class Api
                     throw new InvalidArgumentException('Elegí una marca.');
                 }
                 return Sales::monthly($client, (int) ($q['months'] ?? 6));
+            case 'sales_days':
+                if ($client === null) {
+                    throw new InvalidArgumentException('Elegí una marca.');
+                }
+                return Sales::days($client, (string) ($q['month'] ?? date('Y-m')));
             case 'sales_connect':
                 return Sales::connect($ownClient((int) ($body['client_id'] ?? 0)), (string) ($body['url'] ?? ''), (string) ($body['name'] ?? ''));
             case 'sales_sync':

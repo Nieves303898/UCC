@@ -89,9 +89,9 @@ final class Ads
                 }
                 foreach ($dailyRows as $n) {
                     $day = $n['date'];
-                    $daily[$currency][$day] ??= ['spend' => 0, 'results' => 0, 'purchase_value' => 0, 'link_clicks' => 0, 'impressions' => 0];
-                    foreach (['spend', 'results', 'purchase_value', 'link_clicks', 'impressions'] as $f) {
-                        $daily[$currency][$day][$f] += $n[$f];
+                    $daily[$currency][$day] ??= ['spend' => 0, 'results' => 0, 'purchase_value' => 0, 'link_clicks' => 0, 'impressions' => 0, 'messages' => 0];
+                    foreach (['spend', 'results', 'purchase_value', 'link_clicks', 'impressions', 'messages'] as $f) {
+                        $daily[$currency][$day][$f] += $n[$f] ?? 0;
                     }
                 }
                 $rows[] = [

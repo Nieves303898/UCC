@@ -96,15 +96,17 @@ final class Sales
         Clients::find($clientId);
         $table = SalesImport::readGoogleSheet($url);
         $map = SalesImport::suggest($table['headers'], $table['rows']);
+        $map += ['_auto' => true];
         $agg = $map['date'] !== null ? SalesImport::aggregateTable($table, $map) : ['days' => []];
         if ($map['date'] === null || $map['orders'] === null || !$agg['days']) {
             return ['needs_mapping' => true] + self::preview(null, $url);
         }
-        // Si ya estaba conectada esa planilla, se actualiza en lugar de duplicarse.
-        $csv = SalesImport::googleCsvUrl($url);
-        $existing = Db::one("SELECT id, name FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' AND url = ?", [$clientId, $csv]);
-        $res = self::store($clientId, $agg, $map + ['_auto' => true], ['kind' => 'gsheet', 'url' => $url, 'source_id' => $existing['id'] ?? 0, 'name' => $name ?: ($existing['name'] ?? 'Planilla de ventas (Sheets)')]);
+        // El mismo archivo (aunque sea el link de otra pestaña) se actualiza, no se duplica:
+        // ya se leen todas sus pestañas.
+        $existing = self::sameFile($clientId, $url);
+        $res = self::store($clientId, $agg, $map, ['kind' => 'gsheet', 'url' => $url, 'source_id' => $existing['id'] ?? 0, 'name' => $name ?: ($existing['name'] ?? 'Planilla de ventas (Sheets)')]);
         return $res + [
+            'updated' => (bool) $existing,
             'orders' => array_sum(array_column($agg['days'], 'orders')),
             'revenue' => array_sum(array_column($agg['days'], 'revenue')),
             'columns' => array_filter(['Fecha' => $table['headers'][$map['date']] ?? null, 'Ventas' => $table['headers'][$map['orders']] ?? null,
@@ -627,6 +629,7 @@ final class Sales
     public static function monthly(int $clientId, int $months = 6): array
     {
         $c = Clients::find($clientId);
+        self::autoSync($clientId);
         $first = Db::one('SELECT MIN(day) AS d FROM sales_daily WHERE client_id = ?', [$clientId])['d'] ?? null;
         $start = new DateTimeImmutable(date('Y-m-01'));
         $oldest = $start->modify('-' . ($months - 1) . ' months');
@@ -667,8 +670,99 @@ final class Sales
     }
 
     /** Google Sheets se resincroniza solo al abrir el tablero si pasaron más de 20 minutos. */
+    /** Desglose día por día de un mes: lo de la planilla contra lo de Meta. */
+    public static function days(int $clientId, string $month): array
+    {
+        if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+            throw new InvalidArgumentException('Mes inválido.');
+        }
+        $c = Clients::find($clientId);
+        $start = new DateTimeImmutable($month . '-01');
+        $end = $start->modify('last day of this month');
+        $until = min($end->format('Y-m-d'), date('Y-m-d'));
+        $sheet = [];
+        foreach (Db::all('SELECT day, SUM(orders) AS o, SUM(revenue) AS rv, SUM(leads) AS l, SUM(spend) AS sp, COUNT(DISTINCT source_id) AS n
+                          FROM sales_daily WHERE client_id = ? AND day BETWEEN ? AND ? GROUP BY day', [$clientId, $start->format('Y-m-d'), $until]) as $r) {
+            $sheet[$r['day']] = $r;
+        }
+        $meta = [];
+        $accounts = Clients::allowed($clientId)['ad_account'];
+        if ($accounts) {
+            try {
+                $ov = Ads::overview(new DateRange($start, new DateTimeImmutable($until), 'custom'), false, $accounts, $clientId);
+                foreach ($ov['daily'] as $series) {
+                    foreach ($series as $day => $v) {
+                        $meta[$day] = ['spend' => ($meta[$day]['spend'] ?? 0) + $v['spend'], 'messages' => ($meta[$day]['messages'] ?? 0) + ($v['messages'] ?? 0)];
+                    }
+                }
+            } catch (\Throwable) {
+            }
+        }
+        $tax = \App\Settings::taxRate();
+        $rows = [];
+        for ($d = $start; $d->format('Y-m-d') <= $until; $d = $d->modify('+1 day')) {
+            $k = $d->format('Y-m-d');
+            $s = $sheet[$k] ?? null;
+            $m = $meta[$k] ?? null;
+            $rows[] = [
+                'day' => $k,
+                'orders' => $s ? (float) $s['o'] : null, 'revenue' => $s ? (float) $s['rv'] : null,
+                'sheet_leads' => $s && $s['l'] !== null ? (float) $s['l'] : null, 'sheet_spend' => $s && $s['sp'] !== null ? (float) $s['sp'] : null,
+                'sources' => $s ? (int) $s['n'] : 0,
+                'meta_spend' => $m['spend'] ?? null, 'meta_spend_tax' => isset($m['spend']) ? $m['spend'] * (1 + $tax) : null, 'meta_messages' => $m['messages'] ?? null,
+            ];
+        }
+        return ['month' => $month, 'currency' => $c['currency'], 'sales_label' => $c['sales_label'], 'tax_rate' => $tax, 'days' => $rows,
+            'sources' => array_map(fn ($x) => ['id' => (int) $x['id'], 'name' => $x['name'], 'kind' => $x['kind'], 'last_sync_at' => $x['last_sync_at']], Db::all('SELECT id, name, kind, last_sync_at FROM sales_sources WHERE client_id = ? ORDER BY id', [$clientId]))];
+    }
+
+    /** Limpia fuentes duplicadas en todos los clientes (se llama al abrir el panel). */
+    public static function dedupeAll(): void
+    {
+        foreach (Db::all("SELECT DISTINCT client_id FROM sales_sources WHERE kind = 'gsheet'") as $r) {
+            self::dedupe((int) $r['client_id']);
+        }
+    }
+
+    /** Fuente de Google Sheets del mismo archivo ya conectada para este cliente. */
+    private static function sameFile(int $clientId, string $url): ?array
+    {
+        $id = SalesImport::googleFileId($url);
+        foreach (Db::all("SELECT id, name, url FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' ORDER BY id", [$clientId]) as $s) {
+            if ($id && SalesImport::googleFileId((string) $s['url']) === $id) {
+                return $s;
+            }
+        }
+        return null;
+    }
+
+    /** Si el mismo archivo quedó conectado varias veces (un link por pestaña), deja una sola fuente. */
+    public static function dedupe(int $clientId): int
+    {
+        $seen = [];
+        $removed = 0;
+        foreach (Db::all("SELECT id, url FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' ORDER BY id", [$clientId]) as $s) {
+            $fid = SalesImport::googleFileId((string) $s['url']);
+            if ($fid === null) {
+                continue;
+            }
+            if (isset($seen[$fid])) {
+                Db::exec('DELETE FROM sales_daily WHERE source_id = ?', [$s['id']]);
+                Db::exec('DELETE FROM sales_sources WHERE id = ?', [$s['id']]);
+                $removed++;
+                continue;
+            }
+            $seen[$fid] = (int) $s['id'];
+        }
+        if ($removed) { // la que queda se vuelve a leer completa
+            Db::exec("UPDATE sales_sources SET last_sync_at = NULL WHERE client_id = ? AND kind = 'gsheet'", [$clientId]);
+        }
+        return $removed;
+    }
+
     private static function autoSync(int $clientId): void
     {
+        self::dedupe($clientId);
         $limit = date('Y-m-d H:i:s', time() - self::AUTO_SYNC_MINUTES * 60);
         foreach (Db::all("SELECT id FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' AND (last_sync_at IS NULL OR last_sync_at < ?)", [$clientId, $limit]) as $s) {
             try {

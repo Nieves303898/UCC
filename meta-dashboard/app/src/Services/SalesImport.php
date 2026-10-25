@@ -179,7 +179,7 @@ final class SalesImport
                 $pos[$i] = $generic($h) ? $i : ($index[$key($h)] ?? (isset($t['headers'][$i]) && $generic($t['headers'][$i]) ? $i : null));
             }
             $rows = array_map(fn ($r) => array_map(fn ($j) => $j === null ? '' : ($r[$j] ?? ''), $pos), $t['rows']);
-            $tabs[] = ['name' => (string) $name, 'rows' => $rows];
+            $tabs[] = ['name' => (string) $name, 'rows' => $rows, 'own_headers' => $t['headers'], 'own_rows' => $t['rows']];
             array_push($all, ...$rows);
         }
         return ['headers' => $headers, 'rows' => $all, 'tabs' => $tabs];
@@ -194,7 +194,16 @@ final class SalesImport
         $days = [];
         $skipped = 0;
         foreach ($table['tabs'] as $tab) {
-            $agg = self::aggregate($tab['rows'], $map);
+            if (!empty($map['_auto']) && isset($tab['own_headers'])) {
+                // Cada mes tiene sus propias campañas (y columnas): se detecta pestaña por pestaña.
+                $own = self::suggest($tab['own_headers'], $tab['own_rows']);
+                if ($own['date'] === null || $own['orders'] === null) {
+                    continue; // pestaña de resumen / histórico sin carga diaria
+                }
+                $agg = self::aggregate($tab['own_rows'], $own);
+            } else {
+                $agg = self::aggregate($tab['rows'], $map);
+            }
             $skipped += $agg['skipped'];
             foreach ($agg['days'] as $d) {
                 $k = $d['day'] . '|' . $d['dim'] . '|' . $d['campaign'];
@@ -205,6 +214,12 @@ final class SalesImport
         }
         $dates = array_column($days, 'day');
         return ['days' => array_values($days), 'skipped' => $skipped, 'min' => $dates ? min($dates) : null, 'max' => $dates ? max($dates) : null];
+    }
+
+    /** ID del archivo de Google (el mismo para todas sus pestañas). */
+    public static function googleFileId(string $url): ?string
+    {
+        return preg_match('#/spreadsheets/d/(e/)?([a-zA-Z0-9_-]+)#', $url, $m) ? $m[1] . $m[2] : null;
     }
 
     public static function googleCsvUrl(string $url): string
