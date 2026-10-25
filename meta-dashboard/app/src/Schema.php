@@ -280,6 +280,12 @@ final class Schema
         } catch (\Throwable) {
             Db::pdo()->exec("ALTER TABLE clients ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'cliente'");
         }
+        // v9: palabras con las que se reconocen las campañas de cada marca (ej. Clover: "clover, activa pos").
+        try {
+            Db::one('SELECT aliases FROM clients LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec('ALTER TABLE clients ADD COLUMN aliases VARCHAR(500) NULL');
+        }
         // v8: usuarios del cliente que pueden gestionar los accesos de su empresa (ej. gerente de operaciones).
         try {
             Db::one('SELECT can_manage_users FROM users LIMIT 1');

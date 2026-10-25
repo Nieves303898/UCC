@@ -142,7 +142,7 @@ final class Scope
         if ($patterns === null) {
             return null;
         }
-        return fn (array $c) => Clients::matches($patterns, (string) $c['id'], (string) ($c['name'] ?? ''));
+        return fn (array $c) => Clients::matches($patterns, (string) $c['id'], (string) ($c['name'] ?? ''), $accountId);
     }
 
     /**

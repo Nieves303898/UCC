@@ -149,6 +149,17 @@ final class SalesImport
         if (!$tables) {
             throw new InvalidArgumentException('La planilla está vacía.');
         }
+        // La pestaña modelo es la que más se parece a una carga diaria (fecha + ventas),
+        // aunque no sea la primera (ej. un "Resumen" adelante).
+        $score = function (array $t): int {
+            $s = self::suggest($t['headers'], $t['rows']);
+            if ($s['date'] === null) {
+                return 0;
+            }
+            $dated = count(array_filter($t['rows'], fn ($r) => self::parseDate($r[$s['date']] ?? null) !== null));
+            return $dated * 2 + ($s['orders'] !== null ? 1000 : 0);
+        };
+        uasort($tables, fn ($a, $b) => $score($b) <=> $score($a));
         $template = reset($tables);
         $headers = $template['headers'];
         $generic = fn ($h) => (bool) preg_match('/^Columna \d+$/', $h);

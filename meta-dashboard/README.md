@@ -63,6 +63,10 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 - **Accesos con rol** (Cliente → Accesos): *Dueño*, *Gerente de operaciones* y *Gerente* ven **todas** las marcas (también las nuevas) y un **resumen consolidado** (inversión +35%, conversaciones, ventas/gestiones, costo por venta, avance del objetivo de cada marca). *Supervisor*, *Asesor* y *Usuario* ven sólo las marcas tildadas; no ven las cuentas completas del cliente porque mezclan marcas. Arriba del portal hay un selector de marca.
 - **Planillas** (Cliente o Marca → Planillas): cualquier Google Sheets (cobranzas, turnos, leads, asesores…) se ve dentro del portal tal cual, con todas sus pestañas y un buscador, y se vuelve a leer cada 5 minutos. Las ventas cargadas en planillas también se releen cada 5 minutos.
 
+### Campañas nuevas que se asignan solas
+
+Cada marca tiene **palabras para reconocer sus campañas** (en *Marcas y cuentas*; siempre incluye su nombre — ej. Clover: "activa pos"). En las cuentas compartidas entre marcas (ej. PayLab Gestión), una campaña nueva cuyo nombre contenga esas palabras se suma sola a la marca (y por lo tanto a su cliente). Las campañas asignadas a mano siempre mandan sobre las palabras. Las que no coincidan con ninguna aparecen en el plan como "sin marca".
+
 ### Accesos (panel general y del cliente)
 
 - **Agencia → Accesos** (sólo administradores): todas las personas del sistema —tu equipo y los usuarios de cada cliente— con filtros por tipo y cliente. Desde ahí se crea cualquier acceso, se cambia rol y marcas, se genera una clave nueva o se da de baja. Los clientes no ven esta pantalla ni saben quién más tiene acceso.
@@ -99,6 +103,8 @@ Menú *Estrategia → Biblioteca de anuncios*. Meta sólo entrega por API los an
 - Equipo y administradores editan; solo lectura ve todo; los clientes no acceden.
 
 ### Planillas mensuales (una pestaña por mes)
+
+**Conectar en un paso**: en la marca → Ventas → pegás el link de Google Sheets y tocás **Conectar**. La fecha y las ventas se detectan solas (aunque la fecha no tenga título y aunque haya una pestaña "Resumen" adelante), se importa y se muestra cuántas ventas entraron. Si no se pueden reconocer, se ofrece elegir las columnas una sola vez. En cada actualización (cada 5 minutos) se vuelven a detectar, así una pestaña o columna nueva no rompe nada.
 
 Las ventas se conectan **por marca** (Clientes → {marca} → Ventas → Google Sheets). Se lee el **archivo completo**: si llevás una pestaña por mes (Octubre, Noviembre…), al agregar la pestaña nueva entra sola, sin volver a pegar el link. Las pestañas se alinean por el título de cada columna. La fecha se detecta aunque la columna no tenga título; se prioriza la columna de **ventas** (ej. "Ventas Brutas WSP") y se ignoran costos, interacciones, impuestos y totales; los días todavía vacíos no cuentan. Los datos de Meta (conversaciones, gasto, costo por resultado) no hace falta cargarlos: se leen de Meta.
 

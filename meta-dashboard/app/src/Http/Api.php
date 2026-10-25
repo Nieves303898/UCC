@@ -47,7 +47,7 @@ final class Api
     /** Equipo: además edita lo operativo (presupuestos, objetivos, ventas, trabajo) de lo que tiene asignado. */
     private const MEMBER_ACTIONS = [
         'client', 'campaign_names', 'budget_save', 'campaign_target_save', 'update_save', 'update_delete', 'report_note_save',
-        'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete', 'brand_goal_save',
+        'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete', 'brand_goal_save', 'sales_connect',
         'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
         'sheet_add', 'sheet_delete', 'sheet_refresh',
     ];
@@ -56,7 +56,7 @@ final class Api
         'sync', 'connection_add_token', 'connection_delete', 'asset_toggle', 'cache_flush',
         'user_add', 'user_delete', 'user_reset_password', 'password_change',
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
-        'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
+        'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete', 'sales_connect',
         'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
         'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brand_map_save', 'client_kind_save', 'sheet_add', 'sheet_delete', 'sheet_refresh', 'client_user_save',
         'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete',
@@ -297,6 +297,8 @@ final class Api
                 return Sales::preview($_FILES['file'] ?? null, isset($body['url']) && $body['url'] !== '' ? (string) $body['url'] : null);
             case 'sales_import':
                 return Sales::import($ownClient((int) ($body['client_id'] ?? 0)), $body);
+            case 'sales_connect':
+                return Sales::connect($ownClient((int) ($body['client_id'] ?? 0)), (string) ($body['url'] ?? ''), (string) ($body['name'] ?? ''));
             case 'sales_sync':
                 $ownClient(Sales::sourceClient((int) ($body['id'] ?? 0)));
                 return Sales::sync((int) ($body['id'] ?? 0));
@@ -376,6 +378,9 @@ final class Api
             case 'brand_map_save':
                 foreach ((array) ($body['brands'] ?? []) as $b) {
                     Clients::setParent((int) ($b['id'] ?? 0), $b['parent_id'] ?? null);
+                    if (array_key_exists('aliases', $b)) {
+                        Db::exec("UPDATE clients SET aliases = ? WHERE id = ? AND kind = 'marca'", [mb_substr(trim((string) $b['aliases']), 0, 500) ?: null, (int) $b['id']]);
+                    }
                 }
                 Clients::saveBrandMap((array) ($body['accounts'] ?? []));
                 return null;

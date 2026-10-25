@@ -2550,15 +2550,16 @@ function salesPane(c) {
           <div class="p-5 space-y-4" data-step="1">
             <div class="seg" id="imp-kind"><button class="on" data-k="gsheet">Google Sheets (automático)</button><button data-k="upload">Excel / CSV</button></div>
             <div data-k-pane="gsheet" class="space-y-2">
-              <input class="input" id="imp-url" placeholder="https://docs.google.com/spreadsheets/d/…">
-              <p class="t3 text-xs">Compartí la planilla como <b>“Cualquier persona con el enlace puede ver”</b>. Se leen <b>todas las pestañas</b> del archivo: si llevás una por mes, agregás la de noviembre y entra sola. Se vuelve a leer cada 20 minutos cuando alguien abre el tablero, y en cada cron.</p>
+              <input class="input" id="imp-url" placeholder="Pegá el link de la planilla: https://docs.google.com/spreadsheets/d/…">
+              <p class="t3 text-xs">1) En Google Sheets: <b>Compartir → “Cualquier persona con el enlace” → Lector</b>. 2) Pegá el link y tocá <b>Conectar</b>: la fecha y las ventas se detectan solas, en <b>todas las pestañas</b> (agregás la del mes nuevo y entra sola). Se vuelve a leer cada 5 minutos.</p>
             </div>
             <div data-k-pane="upload" class="hidden space-y-2">
               <input type="file" class="input !h-auto py-2" id="imp-file" accept=".xlsx,.csv,.txt">
               <p class="t3 text-xs">.xlsx o .csv. Si volvés a subir el archivo, se reemplazan sólo las fechas que trae (ideal para cargar el día).</p>
             </div>
             <input type="hidden" id="imp-source">
-            <button class="btn btn-primary" id="imp-preview">Leer columnas</button>
+            <div class="flex flex-wrap items-center gap-3"><button class="btn btn-primary" id="imp-connect">${icon('link', 14)}Conectar</button><button class="btn btn-ghost hidden" id="imp-preview">Elegir columnas a mano</button></div>
+            <div id="imp-result"></div>
           </div>
           <div class="p-5 space-y-4 hidden" data-step="2"></div>
         </div>
@@ -2608,11 +2609,36 @@ function mountSalesPane(c) {
     kind = b.dataset.k;
     $$('#imp-kind [data-k]').forEach((x) => x.classList.toggle('on', x === b));
     $$('[data-k-pane]', wiz).forEach((p) => p.classList.toggle('hidden', p.dataset.kPane !== kind));
+    $('#imp-connect').classList.toggle('hidden', kind !== 'gsheet');
+    $('#imp-preview').classList.toggle('hidden', kind === 'gsheet');
+    $('#imp-preview').textContent = kind === 'gsheet' ? 'Elegir columnas a mano' : 'Leer columnas';
+    $('#imp-preview').classList.toggle('btn-primary', kind !== 'gsheet');
+    $('#imp-preview').classList.toggle('btn-ghost', kind === 'gsheet');
   });
   const step2 = $('[data-step="2"]', wiz);
+  // Un paso: pegar el link y listo (detecta fecha y ventas solas, en todas las pestañas).
+  $('#imp-connect').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const url = $('#imp-url').value.trim();
+    if (!url) return toast('Pegá el link de la planilla.', 'error');
+    btn.disabled = true; btn.textContent = 'Conectando…';
+    try {
+      const r = await api('sales_connect', {}, { client_id: c.id, url });
+      if (r.needs_mapping) {
+        toast('No pudimos reconocer solas las columnas: elegilas una vez y queda guardado.', 'error');
+        $('#imp-preview').classList.remove('hidden');
+        return showStep2(r);
+      }
+      $('#imp-result').innerHTML = `<div class="split-banner !border-[color:var(--pos)] mt-1" style="background:var(--pos-soft)"><div class="font-semibold t1">Conectada: ${fmt.int(r.orders)} ${esc(lower(c.sales_label))} en ${r.days} días (${fmt.date(r.min)} → ${fmt.date(r.max)})</div>
+        <div class="t2 text-[13px] mt-1">Leímos ${esc(Object.entries(r.columns).map(([k, v]) => `${k}: “${v}”`).join(' · '))}${r.tabs?.length > 1 ? ` en ${r.tabs.length} pestañas (${esc(r.tabs.join(', '))})` : ''}. Se actualiza sola cada 5 minutos; cuando agregues la pestaña del mes nuevo entra sola.</div></div>`;
+      toast('Planilla conectada');
+      setTimeout(() => render({ silent: true }), 2500);
+    } catch (err) { toast(err.message, 'error'); } finally { btn.disabled = false; btn.innerHTML = `${icon('link', 14)}Conectar`; }
+  });
   $('#imp-preview').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     let p;
+    const label = btn.textContent;
     btn.disabled = true; btn.textContent = 'Leyendo…';
     try {
       if (kind === 'gsheet') {
@@ -2623,7 +2649,10 @@ function mountSalesPane(c) {
         const fd = new FormData(); fd.append('file', f);
         p = await api('sales_preview', {}, fd);
       }
-    } catch (err) { toast(err.message, 'error'); return; } finally { btn.disabled = false; btn.textContent = 'Leer columnas'; }
+    } catch (err) { toast(err.message, 'error'); return; } finally { btn.disabled = false; btn.textContent = label; }
+    showStep2(p);
+  });
+  function showStep2(p) {
     const opt = (field) => `<option value="">— ninguna —</option>${p.headers.map((h, i) => `<option value="${i}" ${p.suggest[field] === i ? 'selected' : ''}>${esc(h)}</option>`).join('')}`;
     const fields = [['date', 'Fecha', true], ['orders', `${c.sales_label} (cantidad)`], ['revenue', 'Facturación / monto'], ['campaign', 'Campaña de Meta'], ['leads', `${c.leads_label}`], ['dim', `${c.dim_label} / canal`]];
     step2.innerHTML = `
@@ -2644,7 +2673,7 @@ function mountSalesPane(c) {
         render({ silent: true });
       } catch { /* toast */ }
     };
-  });
+  }
   $('#sales-entry').addEventListener('submit', async (e) => {
     e.preventDefault();
     try { await post('sales_entry', { ...Object.fromEntries(new FormData(e.target)), client_id: c.id }, 'Día guardado'); render({ silent: true }); } catch { /* toast */ }
@@ -2886,7 +2915,7 @@ async function brandsModal(after) {
           <div class="min-w-0 flex-1"><div class="truncate t1 text-[13px]" title="${esc(c.name)}">${esc(c.name)}</div><div class="sub">${statusPill(c.status)} <span class="ml-1">${fmt.moneyShort(c.spend, a.currency)}</span></div></div>
           <select class="select select-sm w-48" data-camp="${i}|${esc(c.id)}">${brandOpts((a.campaign_brand || {})[c.id])}</select>
         </div>`).join('') : '<div class="px-4 py-3 t3 text-xs">Sin campañas con actividad en los últimos 90 días.</div>'}
-        <div class="px-4 py-2 t3 text-xs">Las campañas nuevas de esta cuenta van a aparecer en el plan como “sin marca” para que las asignes.</div></div>` : ''}
+        <div class="px-4 py-2 t3 text-xs">Las campañas nuevas de esta cuenta se asignan solas si su nombre tiene el de la marca o sus palabras; si no, aparecen en el plan como “sin marca”.</div></div>` : ''}
       ${a.error ? `<div class="px-4 pb-3 t-warn text-xs">${esc(a.error)}</div>` : ''}
     </div>`;
   };
@@ -2897,13 +2926,14 @@ async function brandsModal(after) {
         ${d.brands.length ? `<div class="card divide mb-3">${d.brands.map((b) => `
           <div class="px-4 py-2 flex flex-wrap items-center gap-3">
             <span class="mono-avatar w-7 h-7 text-[10px]" style="background:${esc(b.color)};color:#fff">${esc(initials(b.name))}</span>
-            <div class="font-medium t1 flex-1 min-w-[120px]">${esc(b.name)}</div>
+            <div class="font-medium t1 min-w-[110px]">${esc(b.name)}</div>
+            <input class="input select-sm flex-1 min-w-[160px]" data-alias="${b.id}" value="${esc(b.aliases || '')}" placeholder="Otras palabras de sus campañas (ej. activa pos)" title="Las campañas nuevas que contengan el nombre de la marca o estas palabras se asignan solas">
             <span class="t3 text-xs">Cliente</span>
             <select class="select select-sm w-48" data-parent="${b.id}"><option value="">— Sin cliente —</option>${d.parents.map((p) => `<option value="${p.id}" ${b.parent_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
             <button class="btn btn-ghost btn-icon btn-sm" data-unbrand="${b.id}" title="No es marca">${icon('x', 13)}</button>
           </div>`).join('')}</div>` : ''}
         <form class="flex flex-wrap gap-2" id="bm-add"><input class="input select-sm w-52" name="name" placeholder="Agregar marca (ej. Clover)" list="bm-clients" required><datalist id="bm-clients">${d.clients.map((n) => `<option value="${esc(n)}">`).join('')}</datalist><button class="btn btn-sm">${icon('plus', 13)}Agregar</button></form>
-        <p class="t3 text-xs mt-2">El <b>cliente</b> es la empresa (ej. PayLab Gestión). Las <b>marcas</b> son lo que vende y con lo que se nombra cada planilla de ventas (ej. Clover, aunque la cuenta se llame ActivaPost).${d.parents.length ? '' : ' Para asignarles un cliente, creálo primero en Clientes.'}</p></div>
+        <p class="t3 text-xs mt-2"><b>Campañas nuevas automáticas:</b> en las cuentas compartidas, una campaña nueva que contenga el nombre de la marca o sus palabras (ej. Clover: “activa pos”) se suma sola a esa marca. Las que asignás a mano abajo siempre mandan. El <b>cliente</b> es la empresa (ej. PayLab Gestión). Las <b>marcas</b> son lo que vende y con lo que se nombra cada planilla de ventas (ej. Clover, aunque la cuenta se llame ActivaPost).${d.parents.length ? '' : ' Para asignarles un cliente, creálo primero en Clientes.'}</p></div>
       <div class="flex flex-wrap items-center gap-2 mb-2"><div class="eyebrow">2 · De qué marca es cada cuenta publicitaria</div><div class="flex-1"></div><input class="input select-sm w-56" id="bm-q" placeholder="Buscar cuenta" value="${esc(q)}"></div>
       ${d.brands.length ? d.accounts.map(accRow).join('') : '<div class="t3 text-sm mb-3">Agregá primero tus marcas.</div>'}
       <div class="flex gap-2 mt-4 sticky bottom-0 py-3" style="background:var(--panel)"><button class="btn btn-primary" id="bm-save" ${d.brands.length ? '' : 'disabled'}>Guardar</button><button class="btn btn-ghost" data-close>Cancelar</button></div>`;
@@ -2926,6 +2956,8 @@ async function brandsModal(after) {
     }
     const c = e.target.closest('[data-camp]');
     if (c) { const [i, id] = c.dataset.camp.split('|'); d.accounts[+i].campaign_brand[id] = c.value ? +c.value : null; return; }
+    const al = e.target.closest('[data-alias]');
+    if (al) { d.brands.find((b) => b.id === +al.dataset.alias).aliases = al.value; return; }
     const pa = e.target.closest('[data-parent]');
     if (pa) { d.brands.find((b) => b.id === +pa.dataset.parent).parent_id = pa.value ? +pa.value : null; return; }
     if (e.target.id === 'bm-parent-all' && e.target.value) { d.brands.forEach((b) => { b.parent_id = +e.target.value; }); paint(); }
@@ -2956,7 +2988,7 @@ async function brandsModal(after) {
       campaigns: Object.fromEntries(Object.entries(a.campaign_brand || {}).filter(([, b]) => b)) }))
       // una cuenta compartida cuyas campañas no se llegaron a cargar no se toca
       .filter((x, i) => !(x.mode === 'multi' && !d.accounts[i].campaigns));
-    const brands = d.brands.map((b) => ({ id: b.id, parent_id: b.parent_id }));
+    const brands = d.brands.map((b) => ({ id: b.id, parent_id: b.parent_id, aliases: b.aliases || '' }));
     try { await post('brand_map_save', { accounts, brands }, 'Marcas y cuentas guardadas'); closeModal(); after(); } catch { e.target.disabled = false; }
   });
   await load();

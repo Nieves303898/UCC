@@ -50,7 +50,7 @@ final class Budgets
         $brandsOf = function (string $accountId, string $campaignId, string $name) use ($brands): array {
             $out = [];
             foreach ($brands as $cid => $b) {
-                if (in_array($accountId, $b['full'], true) || (isset($b['rules'][$accountId]) && Clients::matches($b['rules'][$accountId], $campaignId, $name))) {
+                if (in_array($accountId, $b['full'], true) || (isset($b['rules'][$accountId]) && Clients::matches($b['rules'][$accountId], $campaignId, $name, $accountId))) {
                     $out[] = $cid;
                 }
             }

@@ -97,6 +97,9 @@ final class Clients
         if (isset($data['kind']) || empty($data['id'])) {
             $row['kind'] = ($data['kind'] ?? '') === 'marca' ? 'marca' : 'cliente';
         }
+        if (array_key_exists('aliases', $data)) {
+            $row['aliases'] = mb_substr(trim((string) $data['aliases']), 0, 500) ?: null;
+        }
         if (array_key_exists('gestion', $data)) {
             $row['gestion'] = isset(self::GESTIONES[$data['gestion']]) ? $data['gestion'] : null;
         }
@@ -201,16 +204,75 @@ final class Clients
         return $cache[$clientId];
     }
 
+    /** IDs de campaña asignados a mano (por ID) en una cuenta, a cualquier cliente o marca. */
+    public static function claimedIds(string $accountId): array
+    {
+        static $cache = [];
+        return $cache[$accountId] ??= array_values(array_filter(
+            array_column(Db::all('SELECT pattern FROM client_campaign_rules WHERE account_id = ?', [$accountId]), 'pattern'),
+            fn ($p) => ctype_digit((string) $p)
+        ));
+    }
+
+    /** Palabras de una marca para reconocer sus campañas (siempre incluye su nombre). */
+    public static function aliasesOf(array $c): array
+    {
+        $out = [];
+        foreach (preg_split('/[,;\n]+/', (string) ($c['name'] . ',' . ($c['aliases'] ?? ''))) as $a) {
+            $a = trim($a);
+            if (mb_strlen($a) >= 3 && !in_array(SalesImport::normName($a), array_map([SalesImport::class, 'normName'], $out), true)) {
+                $out[] = mb_substr($a, 0, 80);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * En las cuentas compartidas entre marcas (las que tienen campañas asignadas por ID),
+     * cada marca reconoce además sus campañas nuevas por sus palabras clave.
+     */
+    public static function syncAliases(): void
+    {
+        $brands = Db::all("SELECT id, name, aliases FROM clients WHERE kind = 'marca'");
+        if (!$brands) {
+            return;
+        }
+        $ids = array_map(fn ($b) => (int) $b['id'], $brands);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $shared = array_column(Db::all("SELECT DISTINCT account_id FROM client_campaign_rules WHERE client_id IN ($ph)", $ids), 'account_id');
+        foreach ($shared as $acc) {
+            foreach (Db::all("SELECT id, pattern FROM client_campaign_rules WHERE account_id = ? AND client_id IN ($ph)", [$acc, ...$ids]) as $r) {
+                if (!ctype_digit((string) $r['pattern'])) {
+                    Db::exec('DELETE FROM client_campaign_rules WHERE id = ?', [$r['id']]);
+                }
+            }
+            foreach ($brands as $b) {
+                if (Db::one("SELECT 1 AS x FROM client_assets WHERE client_id = ? AND asset_type = 'ad_account' AND external_id = ?", [$b['id'], $acc])) {
+                    continue;
+                }
+                foreach (self::aliasesOf($b) as $a) {
+                    Db::insert('client_campaign_rules', ['client_id' => (int) $b['id'], 'account_id' => $acc, 'pattern' => $a, 'created_at' => Db::now()]);
+                }
+            }
+        }
+    }
+
     /** ¿La campaña cumple alguna palabra clave? Un patrón numérico se compara con el ID exacto. */
-    public static function matches(array $patterns, string $campaignId, string $campaignName): bool
+    public static function matches(array $patterns, string $campaignId, string $campaignName, ?string $accountId = null): bool
     {
         $name = SalesImport::normName($campaignName);
         $compact = str_replace(' ', '', $name);
         foreach ($patterns as $p) {
+            if (ctype_digit($p) && $p === $campaignId) {
+                return true;
+            }
+        }
+        // Si la campaña se asignó a mano (por ID) a otra marca, las palabras clave no la reclaman.
+        if ($accountId !== null && in_array($campaignId, self::claimedIds($accountId), true)) {
+            return false;
+        }
+        foreach ($patterns as $p) {
             if (ctype_digit($p)) {
-                if ($p === $campaignId) {
-                    return true;
-                }
                 continue;
             }
             $np = SalesImport::normName($p);
@@ -251,7 +313,7 @@ final class Clients
                 $groups[$k]['spend'] += $c['metrics']['spend'];
                 foreach ($owners as $oid => $o) {
                     $mine = in_array($a['external_id'], $o['full'], true)
-                        || (isset($o['rules'][$a['external_id']]) && self::matches($o['rules'][$a['external_id']], $c['id'], $c['name']));
+                        || (isset($o['rules'][$a['external_id']]) && self::matches($o['rules'][$a['external_id']], $c['id'], $c['name'], $a['external_id']));
                     if ($mine && !in_array($o['name'], $groups[$k]['assigned_to'], true)) {
                         $groups[$k]['assigned_to'][] = $o['name'];
                     }
@@ -380,8 +442,8 @@ final class Clients
      */
     public static function brandMap(): array
     {
-        $brands = array_map(fn ($b) => ['id' => (int) $b['id'], 'name' => $b['name'], 'color' => $b['color'], 'parent_id' => $b['parent_id'] !== null ? (int) $b['parent_id'] : null],
-            Db::all("SELECT id, name, color, parent_id FROM clients WHERE kind = 'marca' ORDER BY name"));
+        $brands = array_map(fn ($b) => ['id' => (int) $b['id'], 'name' => $b['name'], 'color' => $b['color'], 'parent_id' => $b['parent_id'] !== null ? (int) $b['parent_id'] : null, 'aliases' => $b['aliases']],
+            Db::all("SELECT id, name, color, parent_id, aliases FROM clients WHERE kind = 'marca' ORDER BY name"));
         $brandIds = array_column($brands, 'id');
         $accounts = [];
         foreach (Assets::list('ad_account') as $a) {
@@ -427,7 +489,7 @@ final class Clients
         foreach ($brandIds as $bid) {
             $patterns = self::rules($bid)[$acc] ?? null;
             foreach ($patterns ? $camps : [] as $c) {
-                if (!isset($byCamp[$c['id']]) && self::matches($patterns, $c['id'], $c['name'])) {
+                if (!isset($byCamp[$c['id']]) && self::matches($patterns, $c['id'], $c['name'], $acc)) {
                     $byCamp[$c['id']] = $bid;
                 }
             }
@@ -465,6 +527,7 @@ final class Clients
                 }
             }
         }
+        self::syncAliases();
         Cache::flush();
     }
 

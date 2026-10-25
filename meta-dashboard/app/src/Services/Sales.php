@@ -82,6 +82,39 @@ final class Sales
             throw new InvalidArgumentException('No encontramos fechas válidas en la columna elegida.');
         }
 
+        $result = self::store($clientId, $agg, $map, $d);
+        @unlink($path);
+        return $result;
+    }
+
+    /**
+     * Conexión en un paso: lee el Google Sheets, detecta solo la fecha y las ventas
+     * (también en todas las pestañas) e importa. Si no puede detectarlas, pide elegirlas.
+     */
+    public static function connect(int $clientId, string $url, string $name = ''): array
+    {
+        Clients::find($clientId);
+        $table = SalesImport::readGoogleSheet($url);
+        $map = SalesImport::suggest($table['headers'], $table['rows']);
+        $agg = $map['date'] !== null ? SalesImport::aggregateTable($table, $map) : ['days' => []];
+        if ($map['date'] === null || $map['orders'] === null || !$agg['days']) {
+            return ['needs_mapping' => true] + self::preview(null, $url);
+        }
+        // Si ya estaba conectada esa planilla, se actualiza en lugar de duplicarse.
+        $csv = SalesImport::googleCsvUrl($url);
+        $existing = Db::one("SELECT id, name FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' AND url = ?", [$clientId, $csv]);
+        $res = self::store($clientId, $agg, $map + ['_auto' => true], ['kind' => 'gsheet', 'url' => $url, 'source_id' => $existing['id'] ?? 0, 'name' => $name ?: ($existing['name'] ?? 'Planilla de ventas (Sheets)')]);
+        return $res + [
+            'orders' => array_sum(array_column($agg['days'], 'orders')),
+            'revenue' => array_sum(array_column($agg['days'], 'revenue')),
+            'columns' => array_filter(['Fecha' => $table['headers'][$map['date']] ?? null, 'Ventas' => $table['headers'][$map['orders']] ?? null,
+                'Facturación' => $map['revenue'] !== null ? $table['headers'][$map['revenue']] : null]),
+            'tabs' => array_column($table['tabs'] ?? [], 'name'),
+        ];
+    }
+
+    private static function store(int $clientId, array $agg, array $map, array $d): array
+    {
         $kind = ($d['kind'] ?? '') === 'gsheet' ? 'gsheet' : 'upload';
         $url = $kind === 'gsheet' ? SalesImport::googleCsvUrl((string) ($d['url'] ?? '')) : null;
         $sourceId = (int) ($d['source_id'] ?? 0);
@@ -100,7 +133,6 @@ final class Sales
         }
         // Planilla completa (Sheets) reemplaza todo; un archivo reemplaza sólo las fechas que trae.
         self::replaceRows($clientId, $sourceId, $agg, $kind === 'gsheet');
-        @unlink($path);
         return ['source_id' => $sourceId, 'days' => count(array_unique(array_column($agg['days'], 'day'))), 'skipped' => $agg['skipped'], 'min' => $agg['min'], 'max' => $agg['max']];
     }
 
@@ -112,7 +144,15 @@ final class Sales
         }
         try {
             $table = SalesImport::readGoogleSheet((string) $src['url']);
-            $agg = SalesImport::aggregateTable($table, json_decode((string) $src['mapping_json'], true) ?: []);
+            $map = json_decode((string) $src['mapping_json'], true) ?: [];
+            if (!empty($map['_auto'])) { // conectada en un paso: se vuelve a detectar (pestañas o columnas nuevas)
+                $fresh = SalesImport::suggest($table['headers'], $table['rows']);
+                if ($fresh['date'] !== null && $fresh['orders'] !== null) {
+                    $map = $fresh + ['_auto' => true];
+                    Db::exec('UPDATE sales_sources SET mapping_json = ? WHERE id = ?', [json_encode($map), $sourceId]);
+                }
+            }
+            $agg = SalesImport::aggregateTable($table, $map);
             self::replaceRows((int) $src['client_id'], $sourceId, $agg, true);
             return ['days' => count($agg['days']), 'max' => $agg['max']];
         } catch (\Throwable $e) {
