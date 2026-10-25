@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Auth;
+use App\Cache;
 use App\Db;
 use InvalidArgumentException;
 
@@ -267,88 +268,97 @@ final class Clients
     }
 
     /**
-     * Posibles marcas leídas de los nombres de campaña (lo que va antes de " - " o " | "),
-     * unificadas entre cuentas, con el cliente existente que coincide por nombre.
+     * Mapa de marcas por cuenta publicitaria: cada cuenta es de una marca, de ninguna,
+     * o compartida (cada campaña se asigna a una marca por su ID).
      */
-    public static function brandCandidates(): array
+    public static function brandMap(): array
     {
-        $clients = Db::all('SELECT id, name, kind FROM clients ORDER BY LENGTH(name) DESC');
-        $out = [];
-        foreach (self::detectGroups() as $acc) {
-            foreach ($acc['groups'] as $g) {
-                $k = SalesImport::normName($g['label']);
-                $branded = array_filter($g['campaigns'], fn ($n) => SalesImport::normName($n) !== $k);
-                if ($k === '' || !$branded) {
-                    continue; // sin separador en el nombre no hay marca clara
-                }
-                $out[$k] ??= ['label' => $g['label'], 'key' => $k, 'campaigns' => 0, 'spend' => 0.0, 'accounts' => [], 'examples' => [], 'client' => null];
-                $out[$k]['campaigns'] += count($g['campaigns']);
-                $out[$k]['spend'] += $g['spend'];
-                $out[$k]['accounts'][] = $acc['name'];
-                $out[$k]['examples'] = array_slice(array_merge($out[$k]['examples'], $g['campaigns']), 0, 3);
-            }
-        }
-        foreach ($out as &$c) {
-            foreach ($clients as $cl) {
-                $n = SalesImport::normName($cl['name']);
-                if ($n !== '' && ($n === $c['key'] || str_contains($c['key'], $n) || str_contains($n, $c['key']))) {
-                    $c['client'] = ['id' => (int) $cl['id'], 'name' => $cl['name'], 'kind' => $cl['kind']];
-                    break;
+        $brands = array_map(fn ($b) => ['id' => (int) $b['id'], 'name' => $b['name'], 'color' => $b['color']],
+            Db::all("SELECT id, name, color FROM clients WHERE kind = 'marca' ORDER BY name"));
+        $brandIds = array_column($brands, 'id');
+        $accounts = [];
+        foreach (Assets::list('ad_account') as $a) {
+            $acc = $a['external_id'];
+            $full = array_map('intval', array_column(Db::all("SELECT client_id FROM client_assets WHERE asset_type = 'ad_account' AND external_id = ?", [$acc]), 'client_id'));
+            $fullBrand = array_values(array_intersect($full, $brandIds))[0] ?? null;
+            $ruled = $brandIds ? (int) Db::one('SELECT COUNT(*) AS n FROM client_campaign_rules WHERE account_id = ? AND client_id IN (' . implode(',', $brandIds) . ')', [$acc])['n'] : 0;
+            $mode = $fullBrand ? 'single' : ($ruled ? 'multi' : 'none');
+            $suggest = null;
+            if ($mode === 'none') { // la cuenta se llama como una marca (ej. "Osacra")
+                foreach ($brands as $b) {
+                    if (str_contains(SalesImport::normName($a['name']), SalesImport::normName($b['name']))) {
+                        $suggest = $b['id'];
+                        break;
+                    }
                 }
             }
+            $accounts[] = [
+                'id' => $acc, 'name' => $a['name'], 'business' => $a['data']['business']['name'] ?? null, 'currency' => $a['data']['currency'] ?? 'ARS',
+                'status' => (int) ($a['data']['account_status'] ?? 1), 'lifetime' => ($a['data']['amount_spent'] ?? 0) / 100,
+                'mode' => $mode, 'brand_id' => $fullBrand, 'suggest' => $suggest,
+                'clients' => array_column(Db::all("SELECT c.name FROM client_assets x JOIN clients c ON c.id = x.client_id WHERE x.asset_type = 'ad_account' AND x.external_id = ? AND c.kind <> 'marca'", [$acc]), 'name'),
+            ];
         }
-        unset($c);
-        $out = array_values($out);
-        usort($out, fn ($a, $b) => $b['spend'] <=> $a['spend']);
-        $brands = Db::all("SELECT id, name, color FROM clients WHERE kind = 'marca' ORDER BY name");
-        return ['candidates' => $out, 'brands' => array_map(fn ($b) => ['id' => (int) $b['id'], 'name' => $b['name'], 'color' => $b['color']], $brands)];
+        // Primero las que ya tienen marca (o sugerencia), después el resto por nombre.
+        usort($accounts, fn ($x, $y) => [($x['mode'] === 'none' && !$x['suggest']), $x['name']] <=> [($y['mode'] === 'none' && !$y['suggest']), $y['name']]);
+        $others = array_column(Db::all("SELECT name FROM clients WHERE kind <> 'marca' ORDER BY name"), 'name');
+        return ['brands' => $brands, 'accounts' => $accounts, 'clients' => $others];
+    }
+
+    /** Campañas con actividad (90 días) de una cuenta y la marca asignada a cada una. */
+    public static function brandMapCampaigns(string $acc): array
+    {
+        $brandIds = array_map('intval', array_column(Db::all("SELECT id FROM clients WHERE kind = 'marca'"), 'id'));
+        $camps = [];
+        foreach (Ads::campaigns($acc, \App\DateRange::fromRequest(['preset' => 'last_90d'])) as $c) {
+            if ($c['effective_status'] === 'ACTIVE' || $c['metrics']['spend'] > 0) {
+                $camps[] = ['id' => (string) $c['id'], 'name' => $c['name'], 'status' => $c['effective_status'], 'spend' => $c['metrics']['spend']];
+            }
+        }
+        usort($camps, fn ($x, $y) => ($y['status'] === 'ACTIVE') <=> ($x['status'] === 'ACTIVE') ?: $y['spend'] <=> $x['spend']);
+        $byCamp = [];
+        foreach ($brandIds as $bid) {
+            $patterns = self::rules($bid)[$acc] ?? null;
+            foreach ($patterns ? $camps : [] as $c) {
+                if (!isset($byCamp[$c['id']]) && self::matches($patterns, $c['id'], $c['name'])) {
+                    $byCamp[$c['id']] = $bid;
+                }
+            }
+        }
+        return ['campaigns' => $camps, 'campaign_brand' => (object) $byCamp];
     }
 
     /**
-     * Guarda las marcas elegidas: usa el cliente existente (lo pasa a "marca") o crea
-     * la marca, y le asigna en cada cuenta las campañas que empiezan con su nombre.
-     * $items: [['label' => 'Go Celular', 'name' => 'Go Celular'], …]
+     * Guarda el mapa. Sólo toca las asignaciones de cuentas de las MARCAS; las de los
+     * clientes (ej. PayLab Gestión con su cuenta entera) quedan como estaban.
+     * $accounts: [['account' => 'act_1', 'mode' => 'single|multi|none', 'brand_id' => 3, 'campaigns' => ['123' => 3]], …]
      */
-    public static function applyBrands(array $items): array
+    public static function saveBrandMap(array $accounts): void
     {
-        $palette = ['#0e7c66', '#d9822b', '#3a6fd8', '#b9468b', '#7c8a3a', '#6b5bd6', '#2c9db0', '#8a6d55'];
-        $groups = self::detectGroups();
-        $clients = Db::all('SELECT id, name FROM clients');
-        $out = ['created' => [], 'marked' => [], 'assigned' => []];
-        foreach (array_slice($items, 0, 40) as $it) {
-            $label = trim((string) ($it['label'] ?? ''));
-            $name = trim((string) ($it['name'] ?? '')) ?: $label;
-            if ($label === '' || $name === '') {
+        $brandIds = array_map('intval', array_column(Db::all("SELECT id FROM clients WHERE kind = 'marca'"), 'id'));
+        if (!$brandIds) {
+            throw new InvalidArgumentException('Primero agregá tus marcas.');
+        }
+        $ph = implode(',', array_fill(0, count($brandIds), '?'));
+        foreach ($accounts as $a) {
+            $acc = (string) ($a['account'] ?? '');
+            if (!preg_match('/^act_\d+$/', $acc) || !Db::one("SELECT id FROM assets WHERE type = 'ad_account' AND external_id = ?", [$acc])) {
                 continue;
             }
-            $key = SalesImport::normName($label);
-            $target = null;
-            foreach ($clients as $cl) {
-                $n = SalesImport::normName($cl['name']);
-                if ($n === SalesImport::normName($name) || $n === $key) {
-                    $target = $cl;
-                    break;
-                }
-            }
-            if (!$target) {
-                $id = self::save(['name' => $name, 'color' => $palette[count($clients) % count($palette)], 'kind' => 'marca']);
-                $target = ['id' => $id, 'name' => $name];
-                $clients[] = $target;
-                $out['created'][] = $name;
-            } else {
-                self::setKind((int) $target['id'], 'marca');
-                $out['marked'][] = $target['name'];
-            }
-            foreach ($groups as $acc) {
-                foreach ($acc['groups'] as $g) {
-                    if (SalesImport::normName($g['label']) === $key) {
-                        self::addRule((int) $target['id'], $acc['account'], $label);
-                        $out['assigned'][] = ['brand' => $name, 'account' => $acc['name'], 'campaigns' => count($g['campaigns'])];
+            Db::exec("DELETE FROM client_assets WHERE asset_type = 'ad_account' AND external_id = ? AND client_id IN ($ph)", [$acc, ...$brandIds]);
+            Db::exec("DELETE FROM client_campaign_rules WHERE account_id = ? AND client_id IN ($ph)", [$acc, ...$brandIds]);
+            $mode = (string) ($a['mode'] ?? 'none');
+            if ($mode === 'single' && in_array((int) ($a['brand_id'] ?? 0), $brandIds, true)) {
+                Db::insert('client_assets', ['client_id' => (int) $a['brand_id'], 'asset_type' => 'ad_account', 'external_id' => $acc]);
+            } elseif ($mode === 'multi') {
+                foreach ((array) ($a['campaigns'] ?? []) as $cid => $bid) {
+                    if (preg_match('/^\d+$/', (string) $cid) && in_array((int) $bid, $brandIds, true)) {
+                        Db::insert('client_campaign_rules', ['client_id' => (int) $bid, 'account_id' => $acc, 'pattern' => (string) $cid, 'created_at' => Db::now()]);
                     }
                 }
             }
         }
-        return $out;
+        Cache::flush();
     }
 
     /** Primer segmento del nombre antes de un separador (" - ", " | ", " · ", ":"). */

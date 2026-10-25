@@ -54,7 +54,7 @@ final class Api
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
         'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
-        'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brands_apply', 'client_kind_save',
+        'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brand_map_save', 'client_kind_save',
         'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
     ];
 
@@ -298,12 +298,34 @@ final class Api
                 return null;
             case 'budget_plan':
                 // Sólo las marcas (si todavía no se definieron, todos los clientes).
-                return Planner::plan(Clients::brandIds($internal['clients'] ?? null), (string) ($q['month'] ?? 'next'), (string) ($q['basis'] ?? 'avg3'))
-                    + ['has_brands' => Clients::hasBrands(), 'can_split' => Auth::isAdmin()];
-            case 'brand_candidates':
-                return Clients::brandCandidates();
-            case 'brands_apply':
-                return Clients::applyBrands((array) ($body['brands'] ?? []));
+                $ids = Clients::brandIds($internal['clients'] ?? null);
+                $loose = [];
+                if (Clients::hasBrands() && $internal === null) {
+                    // Cuentas compartidas entre marcas: campañas activas que todavía no tienen marca (ej. nuevas).
+                    try {
+                        foreach (Budgets::overview(null, false, $ids)['accounts'] as $a) {
+                            $tagged = array_filter($a['campaigns'], fn ($c) => $c['brands']);
+                            if (!$tagged || count($tagged) === count($a['campaigns'])) {
+                                continue;
+                            }
+                            foreach ($a['campaigns'] as $c) {
+                                if (!$c['brands'] && $c['active']) {
+                                    $loose[] = ['account' => $a['name'], 'name' => $c['name']];
+                                }
+                            }
+                        }
+                    } catch (\Throwable) {
+                    }
+                }
+                return Planner::plan($ids, (string) ($q['month'] ?? 'next'), (string) ($q['basis'] ?? 'avg3'))
+                    + ['has_brands' => Clients::hasBrands(), 'can_split' => Auth::isAdmin(), 'unassigned' => $loose];
+            case 'brand_map':
+                return Clients::brandMap();
+            case 'brand_map_campaigns':
+                return Clients::brandMapCampaigns($id('account'));
+            case 'brand_map_save':
+                Clients::saveBrandMap((array) ($body['accounts'] ?? []));
+                return null;
             case 'client_kind_save':
                 Clients::setKind((int) ($body['id'] ?? 0), (string) ($body['kind'] ?? 'cliente'));
                 return null;

@@ -2615,50 +2615,106 @@ async function planSection(box) {
   await load();
 }
 
-/** Elegir qué clientes son marcas (entran al plan y a "Por marca") y asignarles sus campañas. */
+/** Marcas y de qué cuentas / campañas es cada una. */
 async function brandsModal(after) {
-  const el = modal(`${modalHead('Tus marcas', 'Las marcas entran al plan por objetivos y a “Por marca”. Los demás quedan como clientes de la agencia.')}<div class="p-5" id="bm"><div class="sk h-48"></div></div>`);
+  const el = modal(`${modalHead('Marcas y cuentas publicitarias', 'Indicá de qué marca es cada cuenta. Si una cuenta tiene campañas de varias marcas, elegí la marca campaña por campaña.')}<div class="p-5" id="bm"><div class="sk h-64"></div></div>`);
   let d;
-  try { d = await api('brand_candidates'); } catch (e) { $('#bm', el).innerHTML = errorBox(e.message, false); return; }
-  const isBrand = (c) => c.client && c.client.kind === 'marca';
-  $('#bm', el).innerHTML = `
-    ${d.brands.length ? `<div class="mb-5"><div class="eyebrow mb-2">Marcas actuales</div><div class="flex flex-wrap gap-2">${d.brands.map((b) => `
-      <span class="pill plain !h-8 !pl-3 !pr-1.5 gap-2" style="background:color-mix(in srgb, ${esc(b.color)} 14%, transparent);color:${esc(b.color)}">${esc(b.name)}
-        <button class="btn btn-ghost btn-icon !w-6 !h-6" data-unbrand="${b.id}" title="No es marca (vuelve a ser cliente)">${icon('x', 12)}</button></span>`).join('')}</div></div>` : ''}
-    <div class="eyebrow mb-2">Encontradas en los nombres de tus campañas</div>
-    <p class="t3 text-xs mb-3">Tildá sólo las marcas reales. Podés corregir el nombre. Se toman las campañas que empiezan con ese nombre (antes de “ - ” o “ | ”).</p>
-    ${d.candidates.length ? `<div class="card divide max-h-[46vh] overflow-y-auto">${d.candidates.map((c, i) => `
-      <label class="px-4 py-3 flex items-center gap-3 cursor-pointer">
-        <input type="checkbox" class="w-4 h-4" data-cand="${i}" ${isBrand(c) ? 'checked' : ''}>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2 flex-wrap"><input class="input select-sm !w-44" data-cand-name="${i}" value="${esc(c.client ? c.client.name : c.label)}">
-            ${isBrand(c) ? '<span class="pill green plain">Ya es marca</span>' : c.client ? `<span class="pill plain">Cliente existente</span>` : '<span class="pill blue plain">Nueva</span>'}</div>
-          <div class="t3 text-xs mt-1 truncate" title="${esc(c.examples.join('\n'))}">${c.campaigns} campaña${c.campaigns > 1 ? 's' : ''} · ${esc([...new Set(c.accounts)].join(', '))} · ej.: ${esc(c.examples.join(' · '))}</div>
-        </div>
-      </label>`).join('')}</div>` : '<div class="t3">No encontramos nombres de campaña con marca.</div>'}
-    <div class="flex gap-2 mt-4"><button class="btn btn-primary" id="bm-save">Guardar marcas</button><button class="btn btn-ghost" data-close>Cancelar</button></div>
-    <p class="t3 text-xs mt-3">Los clientes que se crearon por error podés borrarlos en Clientes. Una marca también se puede marcar desde Clientes → Editar → Tipo.</p>`;
-  hydrateIcons(el);
+  const load = async () => {
+    try { d = await api('brand_map'); } catch (e) { $('#bm', el).innerHTML = errorBox(e.message, false); return; }
+    d.accounts.forEach((a) => { if (a.mode === 'none' && a.suggest) { a.mode = 'single'; a.brand_id = a.suggest; a.suggested = true; } });
+    paint();
+    d.accounts.forEach((a, i) => { if (a.mode === 'multi') loadCamps(i); });
+  };
+  const loadCamps = async (i) => {
+    const a = d.accounts[i];
+    if (a.campaigns) return;
+    a.loading = true;
+    try { const r = await api('brand_map_campaigns', { account: a.id }); a.campaigns = r.campaigns; a.campaign_brand = { ...r.campaign_brand, ...(a.campaign_brand || {}) }; } catch (e) { a.error = e.message; a.campaigns = []; }
+    a.loading = false;
+    paint();
+  };
+  const brandOpts = (sel, empty = '— Sin marca —') => `<option value="">${empty}</option>${d.brands.map((b) => `<option value="${b.id}" ${+sel === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}`;
+  const accRow = (a, i) => {
+    const val = a.mode === 'multi' ? 'multi' : a.mode === 'single' ? String(a.brand_id) : '';
+    return `<div class="card mb-3 overflow-hidden" data-acc-i="${i}">
+      <div class="px-4 py-3 flex flex-wrap items-center gap-3">
+        <div class="min-w-0 flex-1"><div class="font-medium t1 truncate">${esc(a.name)} <span class="t3 font-normal mono text-xs">${esc(a.id)}</span></div>
+          <div class="t3 text-xs mt-0.5">${a.business ? esc(a.business) : 'Sin portfolio'} · histórico ${fmt.moneyShort(a.lifetime, a.currency)}${a.clients.length ? ` · cliente: ${esc(a.clients.join(', '))}` : ''}${a.suggested ? ' · <span class="t-accent">sugerida por el nombre</span>' : ''}</div></div>
+        <select class="select select-sm w-60" data-acc-mode="${i}">
+          <option value="" ${val === '' ? 'selected' : ''}>No es de ninguna marca</option>
+          ${d.brands.map((b) => `<option value="${b.id}" ${val === String(b.id) ? 'selected' : ''}>Toda la cuenta: ${esc(b.name)}</option>`).join('')}
+          <option value="multi" ${val === 'multi' ? 'selected' : ''}>Varias marcas (elegir por campaña)</option>
+        </select>
+      </div>
+      ${a.mode === 'multi' ? `<div class="hair-t">${!a.campaigns ? '<div class="p-4"><div class="sk h-16"></div></div>' : a.campaigns.length ? a.campaigns.map((c) => `
+        <div class="px-4 py-2 flex flex-wrap items-center gap-3 hair-b">
+          <div class="min-w-0 flex-1"><div class="truncate t1 text-[13px]" title="${esc(c.name)}">${esc(c.name)}</div><div class="sub">${statusPill(c.status)} <span class="ml-1">${fmt.moneyShort(c.spend, a.currency)}</span></div></div>
+          <select class="select select-sm w-48" data-camp="${i}|${esc(c.id)}">${brandOpts((a.campaign_brand || {})[c.id])}</select>
+        </div>`).join('') : '<div class="px-4 py-3 t3 text-xs">Sin campañas con actividad en los últimos 90 días.</div>'}
+        <div class="px-4 py-2 t3 text-xs">Las campañas nuevas de esta cuenta van a aparecer en el plan como “sin marca” para que las asignes.</div></div>` : ''}
+      ${a.error ? `<div class="px-4 pb-3 t-warn text-xs">${esc(a.error)}</div>` : ''}
+    </div>`;
+  };
+  const paint = () => {
+    $('#bm', el).innerHTML = `
+      <div class="mb-5"><div class="eyebrow mb-2">1 · Tus marcas</div>
+        <div class="flex flex-wrap items-center gap-2">${d.brands.map((b) => `<span class="pill plain !h-8 !pl-3 !pr-1.5 gap-2" style="background:color-mix(in srgb, ${esc(b.color)} 14%, transparent);color:${esc(b.color)}">${esc(b.name)}<button class="btn btn-ghost btn-icon !w-6 !h-6" data-unbrand="${b.id}" title="No es marca">${icon('x', 12)}</button></span>`).join('')}
+          <form class="flex gap-2" id="bm-add"><input class="input select-sm w-44" name="name" placeholder="Agregar marca (ej. Clover)" list="bm-clients" required><datalist id="bm-clients">${d.clients.map((n) => `<option value="${esc(n)}">`).join('')}</datalist><button class="btn btn-sm">${icon('plus', 13)}Agregar</button></form></div>
+        <p class="t3 text-xs mt-2">La marca es lo que vendés y con lo que se nombra la planilla de ventas (ej. Clover, aunque la cuenta se llame ActivaPost).</p></div>
+      <div class="flex flex-wrap items-center gap-2 mb-2"><div class="eyebrow">2 · De qué marca es cada cuenta publicitaria</div><div class="flex-1"></div><input class="input select-sm w-56" id="bm-q" placeholder="Buscar cuenta" value="${esc(q)}"></div>
+      ${d.brands.length ? d.accounts.map(accRow).join('') : '<div class="t3 text-sm mb-3">Agregá primero tus marcas.</div>'}
+      <div class="flex gap-2 mt-4 sticky bottom-0 py-3" style="background:var(--panel)"><button class="btn btn-primary" id="bm-save" ${d.brands.length ? '' : 'disabled'}>Guardar</button><button class="btn btn-ghost" data-close>Cancelar</button></div>`;
+    hydrateIcons(el);
+    filter();
+  };
+  let q = '';
+  const filter = () => $$('[data-acc-i]', el).forEach((r) => { const a = d.accounts[+r.dataset.accI]; r.style.display = !q || (a.name + ' ' + a.id + ' ' + (a.business || '')).toLowerCase().includes(q) ? '' : 'none'; });
+  $('#bm', el).addEventListener('input', (e) => { if (e.target.id === 'bm-q') { q = e.target.value.toLowerCase(); filter(); } });
+  $('#bm', el).addEventListener('change', (e) => {
+    const m = e.target.closest('[data-acc-mode]');
+    if (m) {
+      const a = d.accounts[+m.dataset.accMode];
+      a.mode = m.value === 'multi' ? 'multi' : m.value ? 'single' : 'none';
+      a.brand_id = a.mode === 'single' ? +m.value : null;
+      a.suggested = false;
+      paint();
+      if (a.mode === 'multi') loadCamps(+m.dataset.accMode);
+      return;
+    }
+    const c = e.target.closest('[data-camp]');
+    if (c) { const [i, id] = c.dataset.camp.split('|'); d.accounts[+i].campaign_brand[id] = c.value ? +c.value : null; }
+  });
+  $('#bm', el).addEventListener('submit', async (e) => {
+    if (e.target.id !== 'bm-add') return;
+    e.preventDefault();
+    const name = new FormData(e.target).get('name').trim();
+    const ex = (await api('clients')).find((c) => c.name.toLowerCase() === name.toLowerCase());
+    try {
+      if (ex) await post('client_kind_save', { id: ex.id, kind: 'marca' }, `${ex.name} ahora es marca`);
+      else await post('client_save', { name, kind: 'marca', color: ['#0e7c66', '#d9822b', '#3a6fd8', '#b9468b', '#6b5bd6', '#2c9db0'][d.brands.length % 6] }, 'Marca creada');
+      const keep = d.accounts;
+      d = await api('brand_map');
+      // conservar lo que ya se eligió en pantalla
+      d.accounts = d.accounts.map((a) => ({ ...a, ...(keep.find((k) => k.id === a.id) || {}) }));
+      paint();
+    } catch { /* toast */ }
+  });
   $('#bm', el).addEventListener('click', async (e) => {
     const ub = e.target.closest('[data-unbrand]');
-    if (ub) { e.preventDefault(); await post('client_kind_save', { id: +ub.dataset.unbrand, kind: 'cliente' }, 'Ya no es marca'); return brandsModal(after); }
+    if (ub) { await post('client_kind_save', { id: +ub.dataset.unbrand, kind: 'cliente' }, 'Ya no es marca'); return load(); }
     if (e.target.id !== 'bm-save') return;
-    const brands = $$('[data-cand]', el).filter((x) => x.checked).map((x) => ({ label: d.candidates[+x.dataset.cand].label, name: $(`[data-cand-name="${x.dataset.cand}"]`, el).value.trim() }));
-    // Las que estaban tildadas y se destildaron vuelven a ser clientes.
-    const unchecked = $$('[data-cand]', el).filter((x) => !x.checked && isBrand(d.candidates[+x.dataset.cand])).map((x) => d.candidates[+x.dataset.cand].client.id);
     e.target.disabled = true;
-    try {
-      for (const id of unchecked) await post('client_kind_save', { id, kind: 'cliente' });
-      const r = await post('brands_apply', { brands }, 'Marcas guardadas');
-      closeModal();
-      if (r.created.length) toast('Marcas nuevas: ' + r.created.join(', '));
-      after();
-    } catch { e.target.disabled = false; }
+    const accounts = d.accounts.map((a) => ({ account: a.id, mode: a.mode, brand_id: a.brand_id,
+      campaigns: Object.fromEntries(Object.entries(a.campaign_brand || {}).filter(([, b]) => b)) }))
+      // una cuenta compartida cuyas campañas no se llegaron a cargar no se toca
+      .filter((x, i) => !(x.mode === 'multi' && !d.accounts[i].campaigns));
+    try { await post('brand_map_save', { accounts }, 'Marcas y cuentas guardadas'); closeModal(); after(); } catch { e.target.disabled = false; }
   });
+  await load();
 }
 
 function planHtml(d, cfg) {
-  d.brands = d.brands.filter((b) => b.has_ads || b.goal_orders !== null); // clientes sin campañas no tienen presupuesto que planificar
+  if (!d.has_brands) d.brands = d.brands.filter((b) => b.has_ads || b.goal_orders !== null); // sin marcas definidas: ocultar clientes sin campañas
   const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
   const cur = d.which === 'current';
   const div = cfg.gran === 'day' ? d.month.days : cfg.gran === 'week' ? d.month.days / 7 : 1;
@@ -2679,7 +2735,7 @@ function planHtml(d, cfg) {
     return `<span class="num">${m(b.cost)}</span>${note}${cheaper}`;
   };
   const brandCell = (b) => `<div class="flex items-center gap-2.5"><div class="mono-avatar w-7 h-7 text-[10px] shrink-0" style="background:${esc(b.color)};color:#fff">${b.logo_url ? `<img src="${esc(b.logo_url)}" class="w-full h-full object-contain rounded-[8px] bg-white" alt="">` : esc(initials(b.name))}</div>
-    <div class="min-w-0"><a class="font-medium hover:underline" href="#/preview/${b.id}">${esc(b.name)}</a>${b.goal_from === 'cliente' ? '<div class="sub">objetivo fijo de la ficha</div>' : ''}</div></div>`;
+    <div class="min-w-0"><a class="font-medium hover:underline" href="#/preview/${b.id}">${esc(b.name)}</a>${!b.has_ads ? '<div class="sub t-warn">sin cuenta asignada</div>' : b.goal_from === 'cliente' ? '<div class="sub">objetivo fijo de la ficha</div>' : ''}</div></div>`;
   const st = (b) => { const [l, c] = PLAN_STATUS[b.status] || PLAN_STATUS.plan; return `<span class="pill ${c}">${l}</span>`; };
   const apply = (b) => (canEdit() && b.required ? `<button class="btn btn-sm btn-ghost !h-7" data-plan-apply="${b.id}|${d.month.key}|${b.required}" title="Guardar ${fmt.money(b.required, b.currency)} como presupuesto planificado de ${esc(d.month.name)}">${icon('check', 13)}${b.planned && Math.abs(b.planned - b.required) < 1 ? 'Aplicado' : 'Usar'}</button>` : '');
 
@@ -2742,17 +2798,17 @@ function planHtml(d, cfg) {
     ? `<th style="text-align:left">Marca</th><th>Objetivo</th><th>Vendidas</th><th>Proyección</th><th>Costo por venta</th><th>Inversión ${GRAN[cfg.gran][1]}</th><th>Faltan</th><th>Diario necesario</th>`
     : `<th style="text-align:left">Marca</th><th>Objetivo</th><th>Costo por venta</th><th>Inversión ${GRAN[cfg.gran][1]} +${tax}</th><th>Al ritmo actual</th><th>Ajuste diario</th><th>Planificado</th><th></th>`;
 
-  const banner = !d.has_brands ? `<div class="mx-5 mb-5 split-banner">
-      <div class="flex flex-wrap items-start gap-3">
-        <span class="t-warn mt-0.5">${icon('alert', 16)}</span>
-        <div class="flex-1 min-w-[220px]"><div class="font-semibold t1">Definí cuáles son tus marcas</div>
-          <div class="t2 text-[13px] mt-0.5">El plan se arma sólo con las marcas (ej. Go Celular, GetNet, Osacra, Clover). Los demás clientes de la agencia no entran. Mientras no elijas, se muestran todos los clientes.</div></div>
-        ${d.can_split ? `<button class="btn btn-primary" data-brands-edit>${icon('users', 14)}Elegir marcas</button>` : '<span class="t3 text-xs">Pedile al administrador que defina las marcas.</span>'}
-      </div></div>` : '';
+  const loose = d.unassigned || [];
+  const warn = (title, text, btn) => `<div class="mx-5 mb-5 split-banner"><div class="flex flex-wrap items-start gap-3">
+      <span class="t-warn mt-0.5">${icon('alert', 16)}</span><div class="flex-1 min-w-[220px]"><div class="font-semibold t1">${title}</div><div class="t2 text-[13px] mt-0.5">${text}</div></div>
+      ${d.can_split ? `<button class="btn btn-primary" data-brands-edit>${icon('users', 14)}${btn}</button>` : '<span class="t3 text-xs">Pedile al administrador que lo configure.</span>'}</div></div>`;
+  const banner = !d.has_brands
+    ? warn('Definí tus marcas y de qué cuentas son', 'El plan se arma por marca (ej. Go Celular, GetNet, Osacra, Clover). Indicá qué cuenta publicitaria es de cada marca y, en las cuentas compartidas, qué campaña es de cuál. Mientras tanto se muestran todos los clientes.', 'Marcas y cuentas')
+    : loose.length ? warn(`${loose.length} campaña${loose.length > 1 ? 's' : ''} activa${loose.length > 1 ? 's' : ''} sin marca en cuentas compartidas`, `${loose.slice(0, 4).map((c) => `<b>${esc(c.name)}</b> (${esc(c.account)})`).join(' · ')}${loose.length > 4 ? ' …' : ''}. Su gasto no suma a ninguna marca hasta que la asignes.`, 'Asignar') : '';
 
   return `<div class="card mb-8 overflow-hidden" data-plan-body>
     <div class="p-5 flex flex-wrap items-end gap-4">
-      <div class="min-w-[240px] flex-1"><div class="h2 flex items-center gap-2">Plan por objetivos · ${esc(monthTitle)}${d.has_brands && d.can_split ? `<button class="btn btn-sm btn-ghost !h-7" data-brands-edit>${icon('sliders', 13)}Marcas</button>` : ''}</div>
+      <div class="min-w-[240px] flex-1"><div class="h2 flex items-center gap-2">Plan por objetivos · ${esc(monthTitle)}${d.has_brands && d.can_split ? `<button class="btn btn-sm btn-ghost !h-7" data-brands-edit>${icon('sliders', 13)}Marcas y cuentas</button>` : ''}</div>
         <div class="t3 text-xs mt-0.5">Cargá cuántas ${esc('ventas')} querés por marca: calculamos cuánto invertir con su costo por venta real (Meta +${tax} ÷ ventas de la planilla).</div></div>
       <div><div class="t3 text-xs mb-1.5">Mes</div><div class="seg">${[['current', 'En curso'], ['next', 'Siguiente']].map(([v, l]) => `<button data-plan-cfg="month" data-v="${v}" class="${cfg.month === v ? 'on' : ''}">${l} · ${esc(monthOf(v))}</button>`).join('')}</div></div>
       <label class="field"><span>Costo por venta según</span><select class="input select-sm" id="plan-basis">${Object.entries(d.bases).map(([k, l]) => `<option value="${k}" ${d.basis === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
