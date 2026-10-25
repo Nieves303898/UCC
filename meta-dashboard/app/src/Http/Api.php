@@ -21,11 +21,13 @@ use App\Services\AssetSync;
 use App\Services\Clients;
 use App\Services\Connections;
 use App\Services\Instagram;
+use App\Services\Org;
 use App\Services\Pages;
 use App\Services\Planner;
 use App\Services\Reports;
 use App\Services\Sales;
 use App\Services\Scope;
+use App\Services\Sheets;
 use App\Services\Webhooks;
 use InvalidArgumentException;
 
@@ -35,7 +37,7 @@ final class Api
     /** Lo único que puede pedir un usuario cliente. Todo lo demás es sólo para admins. */
     private const CLIENT_ACTIONS = [
         'bootstrap', 'assets', 'overview', 'account', 'adsets', 'ads', 'timeseries', 'breakdown',
-        'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales', 'top_ads',
+        'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales', 'top_ads', 'org_overview', 'sheets',
     ];
 
     /** Usuarios internos de solo lectura (ej. gerencia): todo lo del cliente + vistas de agencia. */
@@ -46,6 +48,7 @@ final class Api
         'client', 'campaign_names', 'budget_save', 'campaign_target_save', 'update_save', 'update_delete', 'report_note_save',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete', 'brand_goal_save',
         'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
+        'sheet_add', 'sheet_delete', 'sheet_refresh',
     ];
 
     private const POST_ACTIONS = [
@@ -54,7 +57,7 @@ final class Api
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
         'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
-        'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brand_map_save', 'client_kind_save',
+        'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brand_map_save', 'client_kind_save', 'sheet_add', 'sheet_delete', 'sheet_refresh', 'client_user_save',
         'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
     ];
 
@@ -153,6 +156,9 @@ final class Api
                 return [
                     'user'        => ['id' => (int) $user['id'], 'name' => $user['name'], 'username' => $user['username'], 'role' => $user['role']],
                     'client'      => $client ? Clients::brand($client) : null,
+                    'org'         => self::portalOrg($client),
+                    'gestiones'   => Clients::GESTIONES,
+                    'client_roles' => Clients::CLIENT_ROLES,
                     'counts'      => $allowed ? array_map('count', $allowed) : Assets::counts(),
                     'connections' => Auth::isAdmin() ? count(Connections::all()) : null,
                     'presets'     => DateRange::PRESETS,
@@ -196,6 +202,30 @@ final class Api
             case 'ads':
                 [$obj, $acc] = $inAccount();
                 return Ads::ads($obj, $acc, $range(), $force);
+            case 'org_overview':
+                $org = self::portalOrg($client);
+                if (!$org) {
+                    throw new InvalidArgumentException('Este cliente no tiene marcas.');
+                }
+                return Org::overview($org['id'], array_column($org['brands'], 'id'), $range());
+            case 'sheets':
+                if ($client === null) {
+                    throw new InvalidArgumentException('Elegí un cliente.');
+                }
+                return Sheets::list($client);
+            case 'sheet_add':
+                return ['id' => Sheets::add($ownClient((int) ($body['client_id'] ?? 0)), (string) ($body['name'] ?? ''), (string) ($body['url'] ?? ''))];
+            case 'sheet_delete':
+                $ownClient(Sheets::owner((int) ($body['id'] ?? 0)));
+                Sheets::delete((int) $body['id']);
+                return null;
+            case 'sheet_refresh':
+                $ownClient(Sheets::owner((int) ($body['id'] ?? 0)));
+                Sheets::sync((int) $body['id']);
+                return null;
+            case 'client_user_save':
+                Clients::setClientUser((int) ($body['id'] ?? 0), $body['client_role'] ?? null, (array) ($body['brands'] ?? []));
+                return null;
             case 'top_ads':
                 $accs = !empty($q['account']) ? [$adAccount()] : array_map(fn ($a) => $a['external_id'], Assets::list('ad_account', false, $allowed['ad_account'] ?? null));
                 $filters = [];
@@ -438,7 +468,11 @@ final class Api
             case 'user_add':
                 $role = in_array($body['role'] ?? '', ['client', 'viewer', 'member'], true) ? $body['role'] : 'admin';
                 $clientId = $role === 'client' ? Clients::find((int) ($body['client_id'] ?? 0))['id'] : null;
-                return ['id' => Auth::createUser((string) ($body['username'] ?? ''), (string) ($body['name'] ?? ''), (string) ($body['password'] ?? ''), $role, $clientId)];
+                $newId = Auth::createUser((string) ($body['username'] ?? ''), (string) ($body['name'] ?? ''), (string) ($body['password'] ?? ''), $role, $clientId);
+                if ($role === 'client') {
+                    Clients::setClientUser($newId, $body['client_role'] ?? null, (array) ($body['brands'] ?? []));
+                }
+                return ['id' => $newId];
             case 'user_delete':
                 if ((int) ($body['id'] ?? 0) === (int) Auth::user()['id']) {
                     throw new InvalidArgumentException('No podés borrar tu propio usuario.');
@@ -457,6 +491,41 @@ final class Api
     }
 
     /** Logo del reporte de agencia o de un cliente. Sólo PNG, JPG o WebP (máx. 2 MB). */
+    /**
+     * Cliente "organización" que se está viendo en el portal y las marcas que el usuario puede abrir.
+     * Si el cliente activo es una marca, la organización es su cliente dueño.
+     */
+    private static function portalOrg(?int $client): ?array
+    {
+        if ($client === null) {
+            return null;
+        }
+        $c = Clients::find($client);
+        $orgId = !empty($c['parent_id']) ? (int) $c['parent_id'] : $client;
+        $brands = Clients::children($orgId);
+        $u = Auth::user();
+        $canOpen = true;
+        if (($u['role'] ?? '') === 'client') {
+            $allowed = Clients::portalClients($u);
+            $brands = array_values(array_filter($brands, fn ($b) => in_array($b['id'], $allowed, true)));
+            $canOpen = in_array($orgId, $allowed, true);
+            // Usuario de una sola marca: no hay nada que consolidar.
+            if (!$canOpen && count($brands) < 2) {
+                return null;
+            }
+        } else {
+            $internal = Scope::internal();
+            if ($internal !== null) {
+                $brands = array_values(array_filter($brands, fn ($b) => in_array($b['id'], $internal['clients'], true)));
+            }
+        }
+        if (!$brands) {
+            return null;
+        }
+        $o = Clients::find($orgId);
+        return ['id' => $orgId, 'name' => $o['name'], 'logo_url' => $o['logo_url'], 'color' => $o['color'], 'brands' => $brands, 'can_open' => $canOpen];
+    }
+
     /** Guarda una imagen subida (PNG/JPG/WebP) en public/uploads y devuelve su URL. */
     private static function storeImage(?array $file, string $prefix, int $maxMb): string
     {

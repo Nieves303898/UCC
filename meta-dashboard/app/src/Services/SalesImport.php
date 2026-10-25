@@ -67,6 +67,51 @@ final class SalesImport
         return self::table(self::readCsv($body));
     }
 
+    /**
+     * Libro de Google tal cual, para mostrarlo (no para importar): [['name' => pestaña, 'rows' => matriz], …].
+     * Recorta filas y columnas vacías.
+     */
+    public static function readGoogleRaw(string $url, int $maxRows = 3000, int $maxCols = 60): array
+    {
+        $csvUrl = self::googleCsvUrl($url);
+        $xlsxUrl = preg_replace(['#/export\?format=csv(&gid=\d+)?#', '#/pub\?output=csv(&gid=\d+)?#'], ['/export?format=xlsx', '/pub?output=xlsx'], $csvUrl);
+        $sheets = null;
+        [$body, $status] = self::download($xlsxUrl);
+        if (is_string($body) && $status < 400 && str_starts_with($body, "PK")) {
+            $tmp = tempnam(sys_get_temp_dir(), 'gsx');
+            file_put_contents($tmp, $body);
+            try {
+                $sheets = self::readXlsxSheets($tmp);
+            } catch (InvalidArgumentException) {
+            } finally {
+                @unlink($tmp);
+            }
+        }
+        if ($sheets === null) {
+            [$body, $status, $type] = self::download($csvUrl);
+            if (!is_string($body) || $status >= 400 || str_contains($type, 'text/html')) {
+                throw new InvalidArgumentException('No pudimos leer la planilla. En Google Sheets: Compartir → Acceso general → "Cualquier persona con el enlace" → Lector.');
+            }
+            $sheets = ['Hoja 1' => self::readCsv($body)];
+        }
+        $out = [];
+        foreach ($sheets as $name => $m) {
+            $m = array_values(array_filter($m, fn ($r) => count(array_filter($r, fn ($c) => trim((string) $c) !== '')) > 0));
+            $m = array_slice($m, 0, $maxRows);
+            $width = 0;
+            foreach ($m as $r) {
+                foreach ($r as $i => $c) {
+                    if (trim((string) $c) !== '') {
+                        $width = max($width, $i + 1);
+                    }
+                }
+            }
+            $width = min($width, $maxCols);
+            $out[] = ['name' => (string) $name, 'rows' => array_map(fn ($r) => array_map(fn ($i) => (string) ($r[$i] ?? ''), $width ? range(0, $width - 1) : []), $m)];
+        }
+        return $out;
+    }
+
     /** @return array{0: string|false, 1: int, 2: string} */
     private static function download(string $url): array
     {

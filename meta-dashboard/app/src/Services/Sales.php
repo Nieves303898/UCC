@@ -16,7 +16,7 @@ use InvalidArgumentException;
 final class Sales
 {
     private const UPLOAD_DIR = APP_ROOT . '/storage/uploads';
-    private const AUTO_SYNC_MINUTES = 20;
+    private const AUTO_SYNC_MINUTES = 5;
 
     // ---------------------------------------------------------------------
     // Fuentes

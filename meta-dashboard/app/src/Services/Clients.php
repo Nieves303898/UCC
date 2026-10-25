@@ -11,6 +11,12 @@ use InvalidArgumentException;
 /** Clientes de la agencia: activos asignados, accesos y "trabajo en curso". */
 final class Clients
 {
+    /** Tipo de gestión de una marca y cómo se llama su conversión por defecto. */
+    public const GESTIONES = ['ventas' => 'Ventas', 'cobranzas' => 'Cobranzas', 'recupero' => 'Recuperos', 'turnos' => 'Turnos', 'leads' => 'Consultas', 'otra' => 'Conversiones'];
+
+    /** Roles de las personas del cliente. Dueño y gerencia ven todas las marcas; el resto, las asignadas. */
+    public const CLIENT_ROLES = ['dueno' => 'Dueño', 'gerente' => 'Gerente', 'supervisor' => 'Supervisor', 'asesor' => 'Asesor', 'usuario' => 'Usuario'];
+
     public const UPDATE_KINDS = [
         'campana' => 'Campaña', 'contenido' => 'Contenido', 'optimizacion' => 'Optimización',
         'reporte' => 'Reporte', 'reunion' => 'Reunión', 'web' => 'Web / landing', 'otro' => 'Otro',
@@ -45,7 +51,10 @@ final class Clients
         return self::find($id) + [
             'assets'  => Db::all('SELECT asset_type, external_id FROM client_assets WHERE client_id = ?', [$id]),
             'rules'   => self::rules($id),
-            'users'   => Db::all('SELECT id, username, name, last_login_at, created_at FROM users WHERE client_id = ? ORDER BY id', [$id]),
+            'users'   => array_map(fn ($u) => $u + ['brands' => array_map('intval', array_column(Db::all("SELECT ref FROM user_scopes WHERE user_id = ? AND kind = 'client'", [$u['id']]), 'ref'))],
+                Db::all('SELECT id, username, name, client_role, last_login_at, created_at FROM users WHERE client_id = ? ORDER BY id', [$id])),
+            'children' => self::children($id),
+            'parent'   => ($p = self::find($id)['parent_id']) ? ['id' => (int) $p, 'name' => self::find((int) $p)['name']] : null,
             'updates' => self::updates($id),
             'sales_sources' => Sales::sources($id),
             'sales_recent'  => Sales::recent($id),
@@ -59,6 +68,9 @@ final class Clients
         return [
             'id' => $c['id'], 'name' => $c['name'], 'color' => $c['color'], 'logo_url' => $c['logo_url'], 'sales_label' => $c['sales_label'],
             'has_sales' => Sales::hasData($c['id']), 'has_ads' => (bool) Clients::allowed($c['id'])['ad_account'],
+            'kind' => $c['kind'] ?? 'cliente', 'gestion' => $c['gestion'] ?? null, 'parent_id' => isset($c['parent_id']) ? (int) $c['parent_id'] ?: null : null,
+            'has_brands' => (bool) self::children($c['id']),
+            'has_sheets' => (bool) Db::one('SELECT id FROM client_sheets WHERE client_id = ? LIMIT 1', [$c['id']]),
         ];
     }
 
@@ -83,6 +95,9 @@ final class Clients
         if (isset($data['kind']) || empty($data['id'])) {
             $row['kind'] = ($data['kind'] ?? '') === 'marca' ? 'marca' : 'cliente';
         }
+        if (array_key_exists('gestion', $data)) {
+            $row['gestion'] = isset(self::GESTIONES[$data['gestion']]) ? $data['gestion'] : null;
+        }
         if (array_key_exists('parent_id', $data) || isset($row['kind'])) {
             $row['parent_id'] = ($row['kind'] ?? 'marca') === 'marca' ? self::validParent($data['parent_id'] ?? null, (int) ($data['id'] ?? 0)) : null;
         }
@@ -97,6 +112,8 @@ final class Clients
 
     public static function delete(int $id): void
     {
+        Db::exec('UPDATE clients SET parent_id = NULL WHERE parent_id = ?', [$id]);
+        Db::exec('DELETE FROM client_sheets WHERE client_id = ?', [$id]);
         Db::exec('DELETE FROM client_assets WHERE client_id = ?', [$id]);
         Db::exec('DELETE FROM client_updates WHERE client_id = ?', [$id]);
         Db::exec('DELETE FROM sales_daily WHERE client_id = ?', [$id]);
@@ -271,6 +288,54 @@ final class Clients
         Db::exec('UPDATE clients SET kind = ?, parent_id = CASE WHEN ? = ? THEN parent_id ELSE NULL END WHERE id = ?', [$kind, $kind, 'marca', $id]);
         if ($kind === 'marca') { // una marca no puede tener marcas
             Db::exec('UPDATE clients SET parent_id = NULL WHERE parent_id = ?', [$id]);
+        }
+    }
+
+    /** Marcas de un cliente. */
+    public static function children(int $id): array
+    {
+        return array_map(fn ($c) => ['id' => (int) $c['id'], 'name' => $c['name'], 'color' => $c['color'], 'logo_url' => $c['logo_url'], 'gestion' => $c['gestion'] ?? null, 'sales_label' => $c['sales_label']],
+            Db::all('SELECT * FROM clients WHERE parent_id = ? ORDER BY name', [$id]));
+    }
+
+    /**
+     * Qué clientes/marcas puede abrir un usuario del portal: su cliente y, si el cliente tiene
+     * marcas, todas (dueño, gerente o sin restricción) o sólo las que se le asignaron.
+     */
+    public static function portalClients(array $user): array
+    {
+        $base = (int) ($user['client_id'] ?? 0);
+        if (!$base) {
+            return [];
+        }
+        $children = array_column(self::children($base), 'id');
+        $assigned = array_map('intval', array_column(Db::all("SELECT ref FROM user_scopes WHERE user_id = ? AND kind = 'client'", [(int) $user['id']]), 'ref'));
+        $all = in_array($user['client_role'] ?? '', ['dueno', 'gerente'], true) || !$assigned;
+        if ($all) {
+            return array_values(array_unique([$base, ...$children]));
+        }
+        // Restringido a algunas marcas: no ve el cliente completo (sus cuentas mezclan marcas).
+        $mine = array_values(array_intersect($children, $assigned));
+        return $mine ?: [$base];
+    }
+
+    /** Guarda rol y marcas visibles de una persona del cliente. */
+    public static function setClientUser(int $userId, ?string $role, array $brandIds): void
+    {
+        $u = Db::one("SELECT id, client_id FROM users WHERE id = ? AND role = 'client'", [$userId]);
+        if (!$u) {
+            throw new InvalidArgumentException('Usuario inexistente.');
+        }
+        Db::exec('UPDATE users SET client_role = ? WHERE id = ?', [isset(self::CLIENT_ROLES[$role]) ? $role : null, $userId]);
+        Db::exec("DELETE FROM user_scopes WHERE user_id = ? AND kind = 'client'", [$userId]);
+        if (in_array($role, ['dueno', 'gerente'], true)) {
+            return; // ven todas, incluidas las marcas nuevas
+        }
+        $valid = array_column(self::children((int) $u['client_id']), 'id');
+        foreach (array_unique(array_map('intval', $brandIds)) as $b) {
+            if (in_array($b, $valid, true)) {
+                Db::insert('user_scopes', ['user_id' => $userId, 'kind' => 'client', 'ref' => (string) $b]);
+            }
         }
     }
 

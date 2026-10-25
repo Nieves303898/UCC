@@ -203,6 +203,18 @@ final class Schema
                 created_at DATETIME NOT NULL
             )$suffix",
 
+            // Planillas de Google de cualquier tipo (operación, cobranzas, turnos…) para ver dentro del panel.
+            "CREATE TABLE IF NOT EXISTS client_sheets (
+                id $id,
+                client_id INT NOT NULL,
+                name VARCHAR(190) NOT NULL,
+                url VARCHAR(500) NOT NULL,
+                data_json MEDIUMTEXT NULL,
+                last_sync_at DATETIME NULL,
+                last_error VARCHAR(500) NULL,
+                created_at DATETIME NOT NULL
+            )$suffix",
+
             // Textos editables de los reportes (qué pasó, ajustes, objetivos, etc.).
             "CREATE TABLE IF NOT EXISTS report_notes (
                 k VARCHAR(190) NOT NULL PRIMARY KEY,
@@ -267,6 +279,17 @@ final class Schema
             Db::one('SELECT kind FROM clients LIMIT 1');
         } catch (\Throwable) {
             Db::pdo()->exec("ALTER TABLE clients ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'cliente'");
+        }
+        // v7: rol de los usuarios del cliente (dueño, gerente, supervisor…) y tipo de gestión de cada marca.
+        try {
+            Db::one('SELECT client_role FROM users LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec('ALTER TABLE users ADD COLUMN client_role VARCHAR(20) NULL');
+        }
+        try {
+            Db::one('SELECT gestion FROM clients LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec('ALTER TABLE clients ADD COLUMN gestion VARCHAR(20) NULL');
         }
         // v6: cada marca pertenece a un cliente (ej. PayLab Gestión → Go Celular, GetNet, Osacra, Clover).
         try {

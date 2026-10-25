@@ -335,3 +335,5 @@ kbd { font-family: "Geist Mono", monospace; font-size: 11px; padding: 1px 5px; b
 #brand-list .card > .flex:first-child { flex-wrap: wrap; }
 .lib-grid > * { min-width: 0; }
 .split-banner { border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-soft); border-radius: 12px; padding: 14px 16px; }
+.sheet-tbl thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.sheet-tbl td { white-space: nowrap; }

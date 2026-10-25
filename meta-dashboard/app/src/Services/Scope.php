@@ -23,7 +23,10 @@ final class Scope
             if (empty($u['client_id'])) {
                 throw new RuntimeException('Tu usuario no tiene un cliente asignado.');
             }
-            return (int) $u['client_id'];
+            // Puede abrir su cliente o una de sus marcas permitidas (?client=ID).
+            $want = (int) ($q['client'] ?? 0);
+            $can = Clients::portalClients($u);
+            return $want && in_array($want, $can, true) ? $want : ($can[0] ?? (int) $u['client_id']);
         }
         return !empty($q['client']) ? (int) $q['client'] : null;
     }
@@ -84,7 +87,11 @@ final class Scope
                 $set['ad_account'][] = $a['external_id'];
             }
         }
-        // Un cliente incluye sus activos.
+        // Un cliente incluye sus marcas, y cada uno sus activos.
+        foreach ($set['clients'] as $cid) {
+            array_push($set['clients'], ...array_column(Clients::children($cid), 'id'));
+        }
+        $set['clients'] = array_values(array_unique($set['clients']));
         foreach ($set['clients'] as $cid) {
             foreach (Clients::allowed($cid) as $type => $ids) {
                 $set[$type] = array_merge($set[$type], $ids);

@@ -23,6 +23,7 @@ const state = {
   force: false,
   timer: null,
   preview: null, // admin viendo el portal de un cliente
+  brand: store.get('brand', null), // marca elegida por un usuario del cliente
 };
 const isClient = () => state.boot?.user.role === 'client';
 const isAdmin = () => state.boot?.user.role === 'admin';
@@ -163,6 +164,8 @@ const OBJECTIVES = {
 // =========================================================================
 async function api(action, params = {}, body = null) {
   const q = new URLSearchParams({ action });
+  // Usuario del cliente con varias marcas: todo se pide para la marca elegida.
+  if (state.brand && (state.boot ? isClient() : true) && (params.client === undefined || params.client === null || params.client === '')) params = { ...params, client: state.brand };
   Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v); });
   if (state.force && !body) q.set('refresh', '1');
   const isForm = body instanceof FormData;
@@ -1330,7 +1333,7 @@ function todayLabel() {
 const previewBanner = (cid, name) => (state.preview ? (crumbs([{ label: 'Clientes', href: '#/clients' }, { label: name, href: isAdmin() ? `#/clients/${cid}` : `#/preview/${cid}` }, { label: 'Vista del cliente' }]), `
   <div class="card mb-5 px-4 py-3 flex flex-wrap items-center gap-3 no-print" style="border-color:var(--accent-line);background:var(--accent-soft)">
     <span class="t-accent">${icon('eye', 16)}</span><div class="flex-1 t1 text-[13px]">Vista previa del portal de <b>${esc(name)}</b>: así lo ve el cliente.</div>
-    <a class="btn btn-sm" href="#/preview/${cid}">Inicio</a><a class="btn btn-sm" href="#/preview/${cid}/sales">Ventas</a><a class="btn btn-sm" href="#/preview/${cid}/work">Trabajo</a><a class="btn btn-sm" href="#/preview/${cid}/report">Reporte</a>
+    <a class="btn btn-sm" href="#/preview/${cid}">Inicio</a><a class="btn btn-sm" href="#/preview/${cid}/sales">Ventas</a><a class="btn btn-sm" href="#/preview/${cid}/work">Trabajo</a><a class="btn btn-sm" href="#/preview/${cid}/report">Reporte</a><a class="btn btn-sm" href="#/preview/${cid}/sheets">Planillas</a>
     <a class="btn btn-sm btn-primary" href="${isAdmin() ? `#/clients/${cid}` : '#/clients'}">Salir de la vista previa</a>
   </div>`) : '');
 
@@ -1356,9 +1359,122 @@ function updateCard(u, compact = false) {
     </div>`;
 }
 
+/** Usuario del cliente: cambia la marca que está mirando. */
+async function switchBrand(id) {
+  state.brand = id || null;
+  store.set('brand', state.brand);
+  state.boot = await api('bootstrap');
+  setAccent(state.boot.client?.color);
+  renderNav();
+  if (location.hash === '#/' || location.hash === '') render(); else location.hash = '#/';
+}
+
+/** Cliente con varias marcas (ej. PayLab Gestión): todas las marcas en una pantalla. */
+async function viewOrgHome(cid, org) {
+  setAccent(org.color);
+  const d = await api('org_overview', rp({ client: cid }));
+  const t = d.totals;
+  const cur = d.org.currency || 'ARS';
+  const m = (v) => fmt.money(v, cur);
+  const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
+  const first = (state.boot.user.name || '').split(' ')[0];
+  const open = (b) => (isClient() ? `data-open-brand="${b.id}"` : `href="#/preview/${b.id}"`);
+  const card = (b) => {
+    const L = esc(b.sales_label || 'Ventas');
+    const gp = b.goal_pct;
+    return `<${isClient() ? 'button' : 'a'} ${open(b)} class="card card-link p-5 text-left block w-full">
+      <div class="flex items-center gap-3">
+        <div class="mono-avatar w-10 h-10 text-xs" style="background:${esc(b.color)};color:#fff">${b.logo_url ? `<img src="${esc(b.logo_url)}" class="w-full h-full object-contain rounded-[10px] bg-white" alt="">` : esc(initials(b.name))}</div>
+        <div class="min-w-0 flex-1"><div class="h2 truncate">${esc(b.name)}</div><div class="t3 text-xs">${esc(b.gestion_label || 'Marca')}${b.last_day ? ` · última carga ${fmt.date(b.last_day)}` : ''}</div></div>
+        <div class="w-24 h-8">${sparkline(b.series, { color: b.color, height: 32 })}</div>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 hair-t">
+        <div><div class="t3 text-[11px]">Inversión +${tax}</div><div class="num font-semibold t1">${b.has_ads ? fmt.moneyShort(b.ads.spend_tax, cur) : '—'}</div></div>
+        <div><div class="t3 text-[11px]">Conversaciones</div><div class="num font-semibold t1">${b.has_ads ? fmt.int(b.ads.messages) : '—'}</div></div>
+        <div><div class="t3 text-[11px]">${L}</div><div class="num font-semibold t1">${fmt.int(b.sales.orders)}</div></div>
+        <div><div class="t3 text-[11px]">Costo por ${esc(lower(b.sales_label || 'venta').replace(/s$/, ''))}</div><div class="num font-semibold t1">${b.cost_per_sale ? fmt.moneyShort(b.cost_per_sale, cur) : '—'}</div></div>
+      </div>
+      ${b.goal ? `<div class="mt-4"><div class="flex text-xs t2"><span>Objetivo del mes</span><span class="flex-1"></span><span class="num"><b class="t1">${fmt.int(b.goal_mtd)}</b> de ${fmt.int(b.goal)} · ${fmt.dec(gp, 0)}%</span></div>
+        <div class="relative h-1.5 rounded-full sunk overflow-hidden mt-1.5"><div class="absolute inset-y-0 left-0 rounded-full" style="width:${Math.min(100, gp)}%;background:${gp >= b.expected_pct ? 'var(--pos)' : gp >= b.expected_pct * 0.8 ? 'var(--warn)' : 'var(--bad)'}"></div><div class="absolute inset-y-0 w-px" style="left:${Math.min(100, b.expected_pct)}%;background:var(--t2)"></div></div></div>` : ''}
+    </${isClient() ? 'button' : 'a'}>`;
+  };
+  const html = `
+    ${previewBanner(cid, org.name)}
+    <div class="flex flex-wrap items-end gap-4 mb-6">
+      <div><div class="eyebrow">${esc(todayLabel())}</div>
+        <h1 class="text-[28px] font-semibold tracking-tight t1 mt-1">${isClient() ? `Hola${first ? ', ' + esc(first) : ''}.` : esc(org.name)}</h1>
+        <div class="t2 mt-1">Todas las marcas de <b class="t1">${esc(d.org.name)}</b> · ${fmt.dateLong(d.range.since)} – ${fmt.dateLong(d.range.until)}</div></div>
+    </div>
+    <div class="kpi-row grid-cols-2 lg:grid-cols-5 mb-6" style="display:grid">
+      ${kpi(`Inversión +${tax}`, fmt.moneyShort(t.spend_tax, cur), { spark: '' })}
+      ${kpi('Conversaciones', fmt.int(t.messages), { spark: '' })}
+      ${kpi('Ventas / gestiones', fmt.int(t.orders), { spark: '' })}
+      ${kpi('Costo por venta', t.cost_per_sale ? m(t.cost_per_sale) : '—', { spark: '' })}
+      ${kpi('Facturación', t.revenue ? fmt.moneyShort(t.revenue, cur) : '—', { spark: '' })}
+    </div>
+    <div class="flex items-center gap-2 mb-3"><div class="h2">Por marca</div><span class="t3 text-xs">${isClient() ? 'tocá una marca para ver su detalle' : 'abrí una marca para ver su portal'}</span></div>
+    <div class="grid md:grid-cols-2 gap-4 mb-6">${d.brands.map(card).join('')}</div>
+    ${d.brands.length > 1 ? `<div class="card mb-6"><div class="card-h"><div class="h2">Inversión y resultados por marca</div></div><div class="p-4 h-[300px]"><canvas id="org-chart"></canvas></div></div>` : ''}`;
+  return {
+    html,
+    mount() {
+      $$('[data-open-brand]').forEach((b) => b.addEventListener('click', () => { switchBrand(+b.dataset.openBrand); const sel = $('#brand-switch'); if (sel) sel.value = b.dataset.openBrand; }));
+      if (d.brands.length > 1) {
+        chart($('#org-chart'), d.brands.map((b) => b.name), [
+          { label: `Inversión +${tax}`, data: d.brands.map((b) => b.ads.spend_tax), type: 'bar', fmt: m, color: cssVar('--t3') },
+          { label: 'Ventas / gestiones', data: d.brands.map((b) => b.sales.orders), type: 'bar', axis: 'y1', fmt: fmt.int, color: cssVar('--accent') },
+        ], { fmtY: (v) => fmt.moneyShort(v, cur), fmtY1: fmt.int });
+      }
+    },
+  };
+}
+
+/** Planillas de Google vinculadas (cualquier tipo): se ven tal cual y se actualizan solas. */
+async function viewSheets(cid) {
+  cid = +cid || portalClient();
+  const brand = await clientBrand(cid);
+  setAccent(brand.color);
+  crumbs([{ label: 'Planillas' }]);
+  const list = await api('sheets', { client: cid });
+  let si = 0, ti = 0, q = '';
+  const html = `${previewBanner(cid, brand.name)}${pageHead('Planillas', `Lo que el equipo va cargando en Google Sheets para <b class="t1">${esc(brand.name)}</b>. Se actualiza solo cada 5 minutos.`)}
+    <div id="sheet-box"></div>`;
+  const paint = () => {
+    const box = $('#sheet-box');
+    if (!list.length) { box.innerHTML = empty('Sin planillas', 'Todavía no hay planillas vinculadas.', '', 'grid'); return; }
+    const s = list[si];
+    const tabs = s.tabs || [];
+    const tab = tabs[ti] || { rows: [] };
+    const [head = [], ...rows] = tab.rows;
+    const shown = q ? rows.filter((r) => r.join(' ').toLowerCase().includes(q)) : rows;
+    box.innerHTML = `
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        ${list.length > 1 ? `<div class="seg">${list.map((x, i) => `<button data-si="${i}" class="${i === si ? 'on' : ''}">${esc(x.name)}</button>`).join('')}</div>` : `<div class="h2">${esc(s.name)}</div>`}
+        <div class="flex-1"></div>
+        <span class="t3 text-xs">${s.last_sync_at ? 'Actualizada ' + fmt.ago(s.last_sync_at) : ''}${s.last_error ? ` · <span class="t-warn">${esc(s.last_error)}</span>` : ''}</span>
+        <input class="input select-sm w-48" id="sheet-q" placeholder="Buscar en la planilla" value="${esc(q)}">
+      </div>
+      ${tabs.length > 1 ? `<div class="flex flex-wrap gap-1.5 mb-3">${tabs.map((x, i) => `<button class="pill ${i === ti ? 'blue' : 'plain'} !h-7 !px-3" data-ti="${i}">${esc(x.name)}</button>`).join('')}</div>` : ''}
+      <div class="card overflow-hidden"><div class="scroll-x max-h-[70vh] overflow-y-auto"><table class="tbl sheet-tbl"><thead><tr>${head.map((h) => `<th style="text-align:left">${esc(h)}</th>`).join('')}</tr></thead>
+        <tbody>${shown.map((r) => `<tr>${head.map((_, i) => `<td style="text-align:left">${esc(r[i] ?? '')}</td>`).join('')}</tr>`).join('') || `<tr><td class="t3" colspan="${head.length || 1}">Sin filas</td></tr>`}</tbody></table></div></div>`;
+  };
+  return {
+    html,
+    mount() {
+      paint();
+      $('#sheet-box').addEventListener('click', (e) => {
+        const a = e.target.closest('[data-si]'); if (a) { si = +a.dataset.si; ti = 0; return paint(); }
+        const b = e.target.closest('[data-ti]'); if (b) { ti = +b.dataset.ti; return paint(); }
+      });
+      $('#sheet-box').addEventListener('input', (e) => { if (e.target.id === 'sheet-q') { q = e.target.value.toLowerCase(); const pos = e.target.selectionStart; paint(); const i = $('#sheet-q'); i.focus(); i.setSelectionRange(pos, pos); } });
+    },
+  };
+}
+
 async function viewClientHome(cid) {
   cid = +cid || portalClient();
   const brand = await clientBrand(cid);
+  if (brand.has_brands && brand.kind !== 'marca') return viewOrgHome(cid, brand);
   setAccent(brand.color);
   const [ov, assets, updates] = await Promise.all([
     api('overview', rp({ client: cid })), api('assets', { client: cid }), api('updates', { client: cid }),
@@ -1547,8 +1663,8 @@ async function viewClients() {
   const list = await api('clients');
   const brandsOf = (c) => list.filter((b) => b.kind === 'marca' && +b.parent_id === c.id);
   const parentName = (b) => list.find((x) => x.id === +b.parent_id)?.name;
-  // Cada cliente seguido de sus marcas; al final, las marcas sin cliente.
-  const ordered = [...list.filter((c) => c.kind !== 'marca').flatMap((c) => [c, ...brandsOf(c)]), ...list.filter((b) => b.kind === 'marca' && !parentName(b))];
+  // Sólo los clientes: sus marcas se ven y se abren desde adentro. Las marcas sueltas, al final.
+  const ordered = [...list.filter((c) => c.kind !== 'marca'), ...list.filter((b) => b.kind === 'marca' && !parentName(b))];
   const html = `
     ${pageHead('Clientes', isViewer() ? 'Abrí el portal de cada cliente para ver sus métricas, ventas, trabajo y reporte.' : 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', isAdmin() ? `<div class="flex gap-2"><button class="btn" id="detect-brands">${icon('sliders', 15)}Marcas y cuentas</button><button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button></div>` : '')}
     ${list.length ? `<div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${ordered.map((c) => `
@@ -1556,8 +1672,9 @@ async function viewClients() {
         <div class="flex items-center gap-3">
           <div class="mono-avatar w-11 h-11" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
           <div class="min-w-0 flex-1"><div class="h2 truncate flex items-center gap-2">${esc(c.name)}${c.kind === 'marca' ? '<span class="pill blue plain">Marca</span>' : ''}</div>
-            <div class="t3 text-xs mt-0.5 truncate">${c.kind === 'marca' ? (parentName(c) ? `Marca de ${esc(parentName(c))}` : 'Marca sin cliente') : brandsOf(c).length ? `Cliente · marcas: ${esc(brandsOf(c).map((b) => b.name).join(', '))}` : `Creado ${fmt.date(c.created_at)}`}</div></div>
+            <div class="t3 text-xs mt-0.5 truncate">${c.kind === 'marca' ? 'Marca sin cliente' : brandsOf(c).length ? `${brandsOf(c).length} marca${brandsOf(c).length > 1 ? 's' : ''}` : `Creado ${fmt.date(c.created_at)}`}</div></div>
         </div>
+        ${brandsOf(c).length ? `<div class="flex flex-wrap gap-1.5 mt-3">${brandsOf(c).map((b) => `<span class="pill plain" style="background:color-mix(in srgb, ${esc(b.color)} 14%, transparent);color:${esc(b.color)}">${esc(b.name)}</span>`).join('')}</div>` : ''}
         <div class="grid grid-cols-3 mt-5 pt-4 hair-t text-center">
           <div><div class="num font-semibold t1 text-lg">${c.assets}</div><div class="t3 text-xs">activos</div></div>
           <div><div class="num font-semibold t1 text-lg">${c.users}</div><div class="t3 text-xs">accesos</div></div>
@@ -1581,7 +1698,10 @@ function clientForm(c = null) {
         <label class="field col-span-2"><span>Nombre</span><input class="input" name="name" value="${esc(c?.name || '')}" required></label>
         <label class="field"><span>Tipo</span><select class="input" name="kind" id="cf-kind"><option value="cliente" ${c?.kind !== 'marca' ? 'selected' : ''}>Cliente</option><option value="marca" ${c?.kind === 'marca' ? 'selected' : ''}>Marca</option></select></label>
       </div>
-      <label class="field ${c?.kind === 'marca' ? '' : 'hidden'}" id="cf-parent-wrap"><span>Marca de (cliente)</span><select class="input" name="parent_id" id="cf-parent"><option value="">— Sin cliente —</option></select></label>
+      <div class="grid grid-cols-2 gap-3 ${c?.kind === 'marca' ? '' : 'hidden'}" id="cf-parent-wrap">
+        <label class="field"><span>Marca de (cliente)</span><select class="input" name="parent_id" id="cf-parent"><option value="">— Sin cliente —</option></select></label>
+        <label class="field"><span>Tipo de gestión</span><select class="input" name="gestion"><option value="">—</option>${Object.entries(state.boot.gestiones || {}).map(([k, l]) => `<option value="${k}" ${c?.gestion === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      </div>
       <p class="t3 text-xs -mt-2">Las <b>marcas</b> (ej. Go Celular, GetNet, Osacra, Clover) entran al plan por objetivos y a Presupuestos → Por marca.</p>
       <div class="flex gap-3 items-end">
         <label class="field"><span>Color de marca</span><input type="color" name="color" value="${esc(c?.color || '#0e7c66')}"></label>
@@ -1611,6 +1731,7 @@ function clientForm(c = null) {
     all.filter((x) => x.kind !== 'marca' && x.id !== c?.id).forEach((x) => sel.insertAdjacentHTML('beforeend', `<option value="${x.id}" ${+c?.parent_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`));
   }).catch(() => {});
   $('#cf-kind', el)?.addEventListener('change', (e) => $('#cf-parent-wrap', el).classList.toggle('hidden', e.target.value !== 'marca'));
+  $('[name=gestion]', el)?.addEventListener('change', (e) => { const l = state.boot.gestiones?.[e.target.value]; if (l && $('[name=sales_label]', el)) $('[name=sales_label]', el).value = l; });
   $('#client-form', el).addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -1621,15 +1742,71 @@ function clientForm(c = null) {
   });
 }
 
+/** Campos de rol y marcas para una persona del cliente. */
+function roleFields(u, brands) {
+  const R = state.boot.client_roles || {};
+  const role = u?.client_role || 'supervisor';
+  return `<label class="field"><span>Rol</span><select class="input" name="client_role">${Object.entries(R).map(([k, l]) => `<option value="${k}" ${k === role ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+    <div data-brand-pick><div class="t3 text-xs mb-1.5">Marcas que ve</div>
+      <div class="flex flex-wrap gap-2">${brands.map((b) => `<label class="pill plain !h-8 !px-3 gap-2 cursor-pointer"><input type="checkbox" name="brands" value="${b.id}" ${u?.brands?.includes(b.id) ? 'checked' : ''}>${esc(b.name)}</label>`).join('')}</div>
+      <p class="t3 text-xs mt-1.5">Sin tildar ninguna, ve todas.</p></div>
+    <p class="t3 text-xs" data-brand-all>Dueño y Gerente ven <b>todas</b> las marcas (también las nuevas).</p>`;
+}
+function roleToggle(form) {
+  if (!form) return;
+  const all = ['dueno', 'gerente'].includes($('[name=client_role]', form)?.value);
+  $('[data-brand-pick]', form)?.classList.toggle('hidden', all);
+  $('[data-brand-all]', form)?.classList.toggle('hidden', !all);
+}
+
 async function viewClient(id, tab = 'assets') {
   const [c, assets] = await Promise.all([api('client', { id }), api('assets', { all: 1 })]);
-  crumbs([{ label: 'Clientes', href: '#/clients' }, { label: c.name }]);
+  crumbs([{ label: 'Clientes', href: '#/clients' }, ...(c.parent ? [{ label: c.parent.name, href: `#/clients/${c.parent.id}` }] : []), { label: c.name }]);
   const assigned = new Set(c.assets.map((a) => `${a.asset_type}:${a.external_id}`));
   const portalUrl = location.origin + location.pathname.replace(/index\.php$/, '');
-  const tabs = [['assets', 'Activos asignados'], ['sales', esc(c.sales_label) + ' / conversiones'], ['users', 'Accesos'], ['work', 'Trabajo en curso']]
-    .filter(([k]) => isAdmin() || ['sales', 'work'].includes(k));
-  tab = store.get('clientTab', tab);
+  const isBrand = c.kind === 'marca';
+  const tabs = [...(isBrand ? [] : [['brands', `Marcas <span class="t3">${c.children.length}</span>`]]), ['assets', 'Activos asignados'], ['sales', esc(c.sales_label) + ' / conversiones'], ['sheets', 'Planillas'], ['users', 'Accesos'], ['work', 'Trabajo en curso']]
+    .filter(([k]) => isAdmin() || ['sales', 'work', 'sheets'].includes(k));
+  tab = store.get('clientTab', isBrand ? tab : 'brands');
   if (!tabs.some(([k]) => k === tab)) tab = tabs[0][0];
+
+  const G = state.boot.gestiones || {};
+  const brandsPane = `
+    <div class="grid lg:grid-cols-5 gap-6">
+      <div class="lg:col-span-3">
+        ${c.children.length ? `<div class="grid sm:grid-cols-2 gap-3">${c.children.map((b) => `
+          <a href="#/clients/${b.id}" class="card card-link p-4 flex items-center gap-3">
+            <div class="mono-avatar w-10 h-10 text-xs" style="background:${esc(b.color)};color:#fff">${b.logo_url ? `<img src="${esc(b.logo_url)}" class="w-full h-full object-contain rounded-[10px] bg-white" alt="">` : esc(initials(b.name))}</div>
+            <div class="min-w-0 flex-1"><div class="font-semibold t1 truncate">${esc(b.name)}</div><div class="t3 text-xs">${esc(G[b.gestion] ? 'Gestión: ' + G[b.gestion] : 'Marca')}${b.sales_label && b.sales_label !== G[b.gestion] ? ' · ' + esc(b.sales_label) : ''}</div></div>
+            ${icon('external', 14)}
+          </a>`).join('')}</div>`
+          : empty('Sin marcas todavía', `Agregá las marcas o unidades de ${esc(c.name)} (ej. Go Celular, GetNet, Osacra, Clover, VTV Buenos Aires…). Cada una tiene sus métricas, planillas y objetivos.`, '', 'layers')}
+        <p class="t3 text-xs mt-3">Las cuentas publicitarias de cada marca se asignan en <a class="link" href="#" id="open-brand-map">Marcas y cuentas</a>.</p>
+      </div>
+      ${isAdmin() ? `<form class="lg:col-span-2 card p-5 space-y-3 self-start" id="brand-form">
+        <div class="h2">Nueva marca de ${esc(c.name)}</div>
+        <label class="field"><span>Nombre</span><input class="input" name="name" required placeholder="Ej: Go Celular, VTV Buenos Aires"></label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="field"><span>Tipo de gestión</span><select class="input" name="gestion">${Object.entries(G).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label>
+          <label class="field"><span>Color</span><input type="color" name="color" value="#3a6fd8"></label>
+        </div>
+        <button class="btn btn-accent w-full">${icon('plus', 14)}Agregar marca</button>
+        <p class="t3 text-xs">El tipo define cómo se llama su resultado (Ventas, Cobranzas, Recuperos, Turnos…). Se puede cambiar después.</p>
+      </form>` : ''}
+    </div>`;
+
+  const sheetsPane = `
+    <div class="grid lg:grid-cols-5 gap-6">
+      <div class="lg:col-span-3 card overflow-hidden"><div class="card-h"><div class="h2">Planillas vinculadas</div><div class="flex-1"></div><a class="btn btn-sm" href="#/preview/${c.id}/sheets">${icon('eye', 13)}Ver</a></div>
+        <div class="divide" id="sheet-list"><div class="p-4"><div class="sk h-10"></div></div></div></div>
+      <form class="lg:col-span-2 card p-5 space-y-3 self-start" id="sheet-form">
+        <div class="h2">Vincular planilla de Google</div>
+        <label class="field"><span>Nombre</span><input class="input" name="name" placeholder="Ej: Cobranzas diarias, Turnos, Leads" required></label>
+        <label class="field"><span>Link de Google Sheets</span><input class="input" name="url" placeholder="https://docs.google.com/spreadsheets/d/…" required></label>
+        <button class="btn btn-accent w-full">Vincular</button>
+        <p class="t3 text-xs">Cualquier planilla (no sólo ventas): se ve tal cual, con todas sus pestañas, y se actualiza sola cada 5 minutos. Compartila como “Cualquier persona con el enlace → Lector”. Para que las ventas entren en las métricas, conectala además en la pestaña de ${esc(lower(c.sales_label))}.</p>
+      </form>
+    </div>`;
 
   // Cuentas publicitarias: completa o sólo campañas por palabra clave (cuentas compartidas entre marcas).
   const accMode = (id) => (assigned.has(`ad_account:${id}`) ? 'full' : c.rules?.[id] ? 'rules' : 'none');
@@ -1660,12 +1837,15 @@ async function viewClient(id, tab = 'assets') {
         </label>`).join('') || '<div class="p-4 t3">No hay activos sincronizados.</div>'}</div>
     </div>`;
 
+  const R = state.boot.client_roles || {};
   const users = `
     <div class="grid lg:grid-cols-5 gap-6">
       <div class="lg:col-span-3 card overflow-hidden">
         <div class="card-h"><div class="h2">Accesos al portal</div><span class="t3 text-xs">${c.users.length}</span></div>
-        ${c.users.length ? `<table class="tbl"><thead><tr><th style="text-align:left">Usuario</th><th>Último ingreso</th><th></th></tr></thead><tbody>${c.users.map((u) => `
+        ${c.users.length ? `<table class="tbl"><thead><tr><th style="text-align:left">Usuario</th>${c.children.length ? '<th style="text-align:left">Rol y marcas</th>' : ''}<th>Último ingreso</th><th></th></tr></thead><tbody>${c.users.map((u) => `
           <tr><td style="text-align:left"><div class="font-medium">${esc(u.name)}</div><div class="sub mono">${esc(u.username)}</div></td>
+            ${c.children.length ? `<td style="text-align:left"><div class="flex items-center gap-2"><span class="pill blue plain">${esc(R[u.client_role] || 'Usuario')}</span><button class="btn btn-sm btn-ghost !h-6 !px-1.5" data-edit-cuser="${u.id}">${icon('sliders', 12)}</button></div>
+              <div class="sub mt-1">${['dueno', 'gerente'].includes(u.client_role) || !u.brands.length ? 'Todas las marcas' : esc(u.brands.map((id) => c.children.find((b) => b.id === id)?.name).filter(Boolean).join(', '))}</div></td>` : ''}
             <td>${u.last_login_at ? fmt.ago(u.last_login_at) : '<span class="t3">Nunca</span>'}</td>
             <td><div class="flex justify-end gap-1"><button class="btn btn-sm btn-ghost" data-reset="${u.id}" data-user="${esc(u.username)}">${icon('key', 14)}Nueva clave</button><button class="btn btn-sm btn-ghost btn-danger" data-del-user="${u.id}">${icon('x', 14)}</button></div></td></tr>`).join('')}</tbody></table>`
           : '<div class="p-5 t3">Todavía no hay accesos. Creá uno con el formulario.</div>'}
@@ -1675,6 +1855,7 @@ async function viewClient(id, tab = 'assets') {
         <label class="field"><span>Nombre de la persona</span><input class="input" name="name" placeholder="Ej: Laura (Marketing)" required></label>
         <label class="field"><span>Usuario</span><input class="input mono" name="username" autocapitalize="none" required pattern="[a-zA-Z0-9._@+\\-]{3,}" placeholder="laura.marca"></label>
         <label class="field"><span>Contraseña</span><div class="flex gap-2"><input class="input mono" name="password" minlength="8" required><button type="button" class="btn" id="gen-pass" title="Generar">${icon('refresh', 14)}</button></div></label>
+        ${c.children.length ? roleFields(null, c.children) : ''}
         <button class="btn btn-accent w-full">Crear acceso</button>
       </form>
     </div>`;
@@ -1695,7 +1876,7 @@ async function viewClient(id, tab = 'assets') {
   const html = `
     <div class="flex flex-wrap items-center gap-4 mb-6">
       <div class="mono-avatar w-12 h-12 text-base" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
-      <div class="min-w-0"><h1 class="h1">${esc(c.name)}</h1><div class="t2 mt-0.5">${c.assets.length + Object.keys(c.rules || {}).length} activos · ${c.users.length} accesos · portal en <span class="mono text-xs">${esc(portalUrl)}</span></div></div>
+      <div class="min-w-0"><h1 class="h1 flex items-center gap-2">${esc(c.name)}${isBrand ? `<span class="pill blue plain">Marca${c.parent ? ' de ' + esc(c.parent.name) : ''}</span>` : ''}</h1><div class="t2 mt-0.5">${isBrand ? '' : `${c.children.length} marcas · `}${c.assets.length + Object.keys(c.rules || {}).length} activos · ${c.users.length} accesos · portal en <span class="mono text-xs">${esc(portalUrl)}</span></div></div>
       <div class="flex-1"></div>
       <a class="btn btn-accent" href="#/preview/${c.id}" style="--accent:${esc(c.color)}">${icon('eye', 15)}Ver como cliente</a>
       ${isAdmin() ? `<button class="btn" id="edit-client">Editar</button>
@@ -1708,7 +1889,9 @@ async function viewClient(id, tab = 'assets') {
       ${adAccountList(assets.ad_accounts)}
       <div class="grid lg:grid-cols-2 gap-4">${assetList('page', assets.pages, 'Páginas de Facebook')}${assetList('ig_account', assets.ig_accounts, 'Instagram')}</div>
     </div>` : ''}
+    ${isBrand ? '' : `<div data-pane="brands" class="${tab === 'brands' ? '' : 'hidden'}">${brandsPane}</div>`}
     <div data-pane="sales" class="${tab === 'sales' ? '' : 'hidden'}">${salesPane(c)}</div>
+    <div data-pane="sheets" class="${tab === 'sheets' ? '' : 'hidden'}">${sheetsPane}</div>
     ${isAdmin() ? `<div data-pane="users" class="${tab === 'users' ? '' : 'hidden'}">${users}</div>` : ''}
     <div data-pane="work" class="${tab === 'work' ? '' : 'hidden'}">${work}</div>`;
 
@@ -1780,9 +1963,57 @@ async function viewClient(id, tab = 'assets') {
         await post('client_assets', { id: c.id, assets: list, rules }, 'Asignación guardada');
         state.boot = await api('bootstrap'); renderNav();
       });
+      $('#open-brand-map')?.addEventListener('click', (e) => { e.preventDefault(); brandsModal(() => render({ silent: true })); });
+      $('#brand-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = Object.fromEntries(new FormData(e.target));
+        try {
+          await post('client_save', { ...f, kind: 'marca', parent_id: c.id, sales_label: G[f.gestion] || 'Ventas', currency: c.currency }, 'Marca agregada');
+          render({ silent: true });
+        } catch { /* toast */ }
+      });
+      const loadSheets = async () => {
+        const box = $('#sheet-list');
+        if (!box) return;
+        try {
+          const list = await api('sheets', { client: c.id });
+          box.innerHTML = list.map((x) => `<div class="px-4 py-3 flex items-center gap-3">
+            <div class="min-w-0 flex-1"><div class="t1 font-medium truncate">${esc(x.name)}</div><div class="t3 text-xs truncate">${(x.tabs || []).length} pestañas · ${x.last_sync_at ? 'actualizada ' + fmt.ago(x.last_sync_at) : ''}${x.last_error ? ` · <span class="t-warn">${esc(x.last_error)}</span>` : ''}</div></div>
+            <button class="btn btn-sm btn-ghost" data-sheet-sync="${x.id}" title="Actualizar ahora">${icon('refresh', 13)}</button>
+            <button class="btn btn-sm btn-ghost btn-danger" data-sheet-del="${x.id}">${icon('x', 13)}</button></div>`).join('') || '<div class="p-4 t3">Todavía no hay planillas vinculadas.</div>';
+          hydrateIcons(box);
+        } catch (err) { box.innerHTML = `<div class="p-4 t-warn">${esc(err.message)}</div>`; }
+      };
+      loadSheets();
+      $('#sheet-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const b = $('button', e.target); b.disabled = true; b.textContent = 'Leyendo la planilla…';
+        try { await post('sheet_add', { ...Object.fromEntries(new FormData(e.target)), client_id: c.id }, 'Planilla vinculada'); e.target.reset(); loadSheets(); } catch { /* toast */ }
+        b.disabled = false; b.textContent = 'Vincular';
+      });
+      $('#sheet-list')?.addEventListener('click', async (e) => {
+        const d = e.target.closest('[data-sheet-del]');
+        if (d && confirm('¿Desvincular esta planilla? (no se borra nada en Google)')) { await post('sheet_delete', { id: +d.dataset.sheetDel }, 'Planilla desvinculada'); return loadSheets(); }
+        const y = e.target.closest('[data-sheet-sync]');
+        if (y) { try { await post('sheet_refresh', { id: +y.dataset.sheetSync }, 'Planilla actualizada'); } catch { /* toast */ } loadSheets(); }
+      });
+      roleToggle($('#cuser-form'));
+      view.addEventListener('change', (e) => { if (e.target.name === 'client_role') roleToggle(e.target.closest('form')); });
+      $$('[data-edit-cuser]').forEach((b) => b.addEventListener('click', () => {
+        const u = c.users.find((x) => x.id === +b.dataset.editCuser);
+        const el = modal(`${modalHead('Rol y marcas', esc(u.name))}<form class="p-5 space-y-3" id="cuser-edit">${roleFields(u, c.children)}<div class="flex gap-2"><button class="btn btn-primary">Guardar</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button></div></form>`, 'sm');
+        roleToggle($('#cuser-edit', el));
+        $('#cuser-edit', el).addEventListener('change', (ev) => { if (ev.target.name === 'client_role') roleToggle(ev.currentTarget); });
+        $('#cuser-edit', el).addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const fd = new FormData(ev.target);
+          await post('client_user_save', { id: u.id, client_role: fd.get('client_role'), brands: fd.getAll('brands').map(Number) }, 'Acceso actualizado');
+          closeModal(); render({ silent: true });
+        });
+      }));
       $('#edit-client')?.addEventListener('click', () => clientForm(c));
       $('#del-client')?.addEventListener('click', async () => {
-        if (!confirm(`¿Eliminar a ${c.name}? Se borran sus accesos y novedades (no afecta nada en Meta).`)) return;
+        if (!confirm(`¿Eliminar a ${c.name}? Se borran sus accesos, novedades, ventas cargadas y planillas vinculadas (no afecta nada en Meta ni en Google).${c.children.length ? ` Sus ${c.children.length} marcas quedan sin cliente (no se borran).` : ''}`)) return;
         await post('client_delete', { id: c.id }, 'Cliente eliminado');
         location.hash = '#/clients';
       });
@@ -1791,9 +2022,10 @@ async function viewClient(id, tab = 'assets') {
       $('#gen-pass')?.addEventListener('click', () => { pass.value = genPassword(); });
       $('#cuser-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const data = Object.fromEntries(new FormData(e.target));
+        const fd = new FormData(e.target);
+        const data = Object.fromEntries(fd);
         try {
-          await post('user_add', { ...data, role: 'client', client_id: c.id });
+          await post('user_add', { ...data, brands: fd.getAll('brands').map(Number), role: 'client', client_id: c.id });
           credentialsModal(data.username, data.password, portalUrl);
           render({ silent: true });
         } catch { /* toast */ }
@@ -3517,13 +3749,21 @@ function renderNav() {
     const cn = state.boot.counts || {};
     const items = CLIENT_NAV.filter(([k]) => (k !== 'ads' || c0.has_ads) && (k !== 'social' || cn.page || cn.ig_account));
     if (c0.has_sales) items.splice(1, 0, ['sales', '#/sales', 'layers', c0.sales_label || 'Ventas']);
+    if (c0.has_sheets) items.splice(items.length - 1, 0, ['sheets', '#/sheets', 'grid', 'Planillas']);
     const html = items.map(([k, href, ic, l]) => `<a href="${href}" data-nav="${k}">${icon(ic)}${esc(l)}</a>`).join('');
     $('#nav').innerHTML = html;
     $('#nav-mobile').innerHTML = html;
     const c = state.boot.client;
+    const o = state.boot.org;
     $('#client-brand').innerHTML = `
       <div class="mono-avatar w-8 h-8 text-xs" style="background:var(--accent);color:var(--on-accent)">${c?.logo_url ? `<img src="${esc(c.logo_url)}" class="w-full h-full object-cover rounded-[10px]" alt="">` : esc(initials(c?.name))}</div>
-      <div class="leading-tight min-w-[90px] max-w-[220px] hidden sm:block"><div class="font-semibold t1 truncate">${esc(c?.name || '')}</div><div class="t3 text-[11px] truncate">por ${esc(state.boot.agency_name)}</div></div>`;
+      <div class="leading-tight min-w-[90px] max-w-[220px] hidden ${o ? '2xl:block' : 'sm:block'}"><div class="font-semibold t1 truncate">${esc(c?.name || '')}</div><div class="t3 text-[11px] truncate">${o && c?.id !== o.id ? esc(o.name) : 'por ' + esc(state.boot.agency_name)}</div></div>
+      ${o ? `<select class="select select-sm w-40" id="brand-switch" title="Cambiar de marca"><option value="org" ${c?.id === o.id || location.hash === '#/org' ? 'selected' : ''}>Todas las marcas</option>${o.brands.map((b) => `<option value="${b.id}" ${c?.id === b.id && location.hash !== '#/org' ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>` : ''}`;
+    $('#brand-switch')?.addEventListener('change', (e) => {
+      if (e.target.value !== 'org') return switchBrand(+e.target.value);
+      if (o.can_open) return switchBrand(o.id);
+      location.hash = '#/org'; // ve sólo algunas marcas: resumen de ésas
+    });
     return;
   }
   const counts = state.boot.counts;
@@ -3605,6 +3845,7 @@ const ADMIN_ROUTES = [
   [/^\/preview\/(\d+)\/work$/, viewWork, 'clients', true],
   [/^\/preview\/(\d+)\/sales$/, viewSales, 'clients', true],
   [/^\/preview\/(\d+)\/report$/, viewReport, 'clients', true],
+  [/^\/preview\/(\d+)\/sheets$/, viewSheets, 'clients', true],
   [/^\/activity$/, viewActivity, 'activity'],
   [/^\/settings$/, viewSettings, 'settings'],
 ];
@@ -3621,6 +3862,8 @@ const CLIENT_ROUTES = [
   [/^\/work$/, () => viewWork(), 'work'],
   [/^\/sales$/, () => viewSales(), 'sales'],
   [/^\/report$/, () => viewReport(), 'report'],
+  [/^\/sheets$/, () => viewSheets(), 'sheets'],
+  [/^\/org$/, () => viewOrgHome(portalClient(), state.boot.org), 'home'],
 ];
 const NO_LIVE = /^#\/(settings|clients)/;
 
@@ -3736,6 +3979,7 @@ function closeMenu() {
   applyChartTheme();
   try {
     state.boot = await api('bootstrap');
+    if (!isClient() && state.brand) { state.brand = null; store.set('brand', null); state.boot = await api('bootstrap'); }
   } catch (e) {
     $('#view').innerHTML = errorBox(e.message);
     return;

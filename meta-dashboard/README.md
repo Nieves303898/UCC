@@ -56,6 +56,13 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 - **Objetivo mensual por campaña** (cantidad y/o facturación): avance del mes, línea de ritmo esperado, cierre estimado y estado (en camino, ajustado, atrasado, cumplido).
 - **Usuario de solo lectura** (gerencia): ve todo, incluidos presupuestos y el portal de cada cliente, pero no puede editar ni entrar a Configuración. Se crea en *Configuración → Equipo y gerencia*.
 
+### Clientes, marcas y roles (ej. PayLab Gestión)
+
+- **Cliente** = la empresa que contrata (ej. *PayLab Gestión*). **Marcas** = sus unidades o gestiones (Go Celular, GetNet, Osacra, Clover, VTV Buenos Aires, ITV Córdoba…), cada una con su **tipo de gestión** (ventas, cobranzas, recupero, turnos, consultas) que define cómo se llama su resultado.
+- En *Clientes* se ven sólo los clientes; las marcas se crean y se abren desde **Cliente → Marcas**. Cada marca tiene sus cuentas, ventas, planillas, objetivos y portal.
+- **Accesos con rol** (Cliente → Accesos): *Dueño* y *Gerente* ven **todas** las marcas (también las nuevas) y un **resumen consolidado** (inversión +35%, conversaciones, ventas/gestiones, costo por venta, avance del objetivo de cada marca). *Supervisor*, *Asesor* y *Usuario* ven sólo las marcas tildadas; no ven las cuentas completas del cliente porque mezclan marcas. Arriba del portal hay un selector de marca.
+- **Planillas** (Cliente o Marca → Planillas): cualquier Google Sheets (cobranzas, turnos, leads, asesores…) se ve dentro del portal tal cual, con todas sus pestañas y un buscador, y se vuelve a leer cada 5 minutos. Las ventas cargadas en planillas también se releen cada 5 minutos.
+
 ### Plan de presupuesto por objetivos
 
 *Presupuestos → Plan por objetivos*: cargás cuántas ventas querés por marca en el mes (ej. Go Celular 300) y el panel calcula cuánto invertir.
