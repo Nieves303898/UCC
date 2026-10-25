@@ -1551,7 +1551,7 @@ async function viewClients() {
       <a href="#/${isViewer() ? 'preview' : 'clients'}/${c.id}" class="card card-link p-5 block">
         <div class="flex items-center gap-3">
           <div class="mono-avatar w-11 h-11" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
-          <div class="min-w-0 flex-1"><div class="h2 truncate">${esc(c.name)}</div><div class="t3 text-xs mt-0.5">Creado ${fmt.date(c.created_at)}</div></div>
+          <div class="min-w-0 flex-1"><div class="h2 truncate flex items-center gap-2">${esc(c.name)}${c.kind === 'marca' ? '<span class="pill blue plain">Marca</span>' : ''}</div><div class="t3 text-xs mt-0.5">Creado ${fmt.date(c.created_at)}</div></div>
         </div>
         <div class="grid grid-cols-3 mt-5 pt-4 hair-t text-center">
           <div><div class="num font-semibold t1 text-lg">${c.assets}</div><div class="t3 text-xs">activos</div></div>
@@ -1598,7 +1598,7 @@ async function detectBrands(clients) {
     try {
       if (target === 'new') {
         const g = data.find((x) => x.account === account).groups[+idx];
-        target = (await post('client_save', { name: g.label })).id;
+        target = (await post('client_save', { name: g.label, kind: 'marca' })).id;
         clients.push({ id: target, name: g.label });
       }
       await post('client_rule_add', { client_id: +target, account, pattern }, 'Campañas asignadas');
@@ -1612,7 +1612,11 @@ async function detectBrands(clients) {
 function clientForm(c = null) {
   const el = modal(`${modalHead(c ? 'Editar cliente' : 'Nuevo cliente')}
     <form class="p-5 space-y-4" id="client-form">
-      <label class="field"><span>Nombre de la marca</span><input class="input" name="name" value="${esc(c?.name || '')}" required></label>
+      <div class="grid grid-cols-3 gap-3">
+        <label class="field col-span-2"><span>Nombre</span><input class="input" name="name" value="${esc(c?.name || '')}" required></label>
+        <label class="field"><span>Tipo</span><select class="input" name="kind"><option value="cliente" ${c?.kind !== 'marca' ? 'selected' : ''}>Cliente</option><option value="marca" ${c?.kind === 'marca' ? 'selected' : ''}>Marca</option></select></label>
+      </div>
+      <p class="t3 text-xs -mt-2">Las <b>marcas</b> (ej. Go Celular, GetNet, Osacra, Clover) entran al plan por objetivos y a Presupuestos → Por marca.</p>
       <div class="flex gap-3 items-end">
         <label class="field"><span>Color de marca</span><input type="color" name="color" value="${esc(c?.color || '#0e7c66')}"></label>
         <label class="field flex-1"><span>Logo (URL https, opcional)</span><input class="input" name="logo_url" value="${esc(c?.logo_url || '')}" placeholder="https://…/logo.png"></label>
@@ -2537,7 +2541,7 @@ async function viewBudgets() {
     html: `${pageHead(`Presupuestos · ${esc(monthName)}`, `Día ${d.day} de ${d.days_in_month} · todos los montos “+${tax}” incluyen impuestos sobre el gasto en Meta`, isAdmin() ? `<a class="btn" href="#/settings">${icon('sliders', 14)}Impuestos: ${tax}</a>` : `<span class="pill plain">Impuestos ${tax}</span>`)}
       ${totals}
       <div id="plan-box"><div class="sk h-64 mb-8"></div></div>
-      ${d.brands.length ? `<div class="flex items-center gap-2 mb-3"><div class="h2">Por marca / cliente</div><span class="t3 text-xs">suma sus campañas aunque compartan cuenta publicitaria</span></div>
+      ${d.brands.length ? `<div class="flex items-center gap-2 mb-3"><div class="h2">Por marca</div><span class="t3 text-xs">${d.has_brands ? 'suma sus campañas aunque compartan cuenta publicitaria' : 'todavía no elegiste tus marcas: se muestran todos los clientes'}</span></div>
         <div class="grid md:grid-cols-2 2xl:grid-cols-3 gap-4 mb-8" id="brand-list">${d.brands.map(brandCard).join('')}</div>` : ''}
       <div class="flex items-center gap-3 mb-3"><div class="h2">Por cuenta publicitaria</div><div class="flex-1"></div><input class="input select-sm w-56" placeholder="Buscar cuenta" id="bud-search"></div>
       <div id="bud-list">${d.accounts.map(accountCard).join('')}</div>`,
@@ -2590,28 +2594,7 @@ async function planSection(box) {
   box.addEventListener('click', async (e) => {
     const s = e.target.closest('[data-plan-cfg]');
     if (s) { cfg[s.dataset.planCfg] = s.dataset.v; return load(); }
-    const sp = e.target.closest('[data-plan-split]');
-    if (sp) {
-      const splitMixed = sp.dataset.planSplit === 'mixed';
-      if (splitMixed && !confirm('La cuenta deja de estar asignada entera a ese cliente y sus campañas se reparten por marca según el nombre (se crean las marcas que falten). ¿Continuar?')) return;
-      sp.disabled = true;
-      sp.textContent = 'Separando…';
-      try {
-        const r = await post('brands_autoassign', { split_mixed: splitMixed });
-        const lines = [
-          r.created.length ? `<li>Marcas creadas: <b>${r.created.map(esc).join(', ')}</b></li>` : '',
-          r.assigned.length ? `<li>${r.assigned.map((a) => `${esc(a.brand)} ← ${a.campaigns} campaña${a.campaigns > 1 ? 's' : ''} de ${esc(a.account)}`).join('<br>')}</li>` : '',
-          r.skipped.length ? `<li class="t-warn">Sin marca clara en el nombre (asignalas a mano en Clientes): ${r.skipped.slice(0, 8).map(esc).join(' · ')}</li>` : '',
-          ...r.unshared.map((u) => `<li>La cuenta <b>${esc(u.account)}</b> ya no está asignada entera a <b>${esc(u.owner)}</b>: sus campañas se repartieron por marca.</li>`),
-          ...(splitMixed ? [] : r.mixed).map((m) => `<li class="t-warn">La cuenta <b>${esc(m.account)}</b> está asignada entera a <b>${esc(m.owner)}</b> pero tiene campañas de ${m.brands.length} marcas (${m.brands.map(esc).join(', ')}). En Clientes → ${esc(m.owner)} cambiala a “Solo algunas campañas” para separarlas.</li>`),
-        ].filter(Boolean);
-        modal(`${modalHead('Marcas separadas')}<div class="p-5"><ul class="space-y-2 t2 text-[13px] list-disc pl-5">${lines.join('') || '<li>No había campañas para separar.</li>'}</ul>
-          <p class="t3 text-xs mt-4">Las campañas nuevas que empiecen con el nombre de la marca se asignan solas. Podés ajustar las palabras clave en Clientes → {marca} → Activos asignados.</p>
-          <div class="mt-4"><button class="btn btn-primary" data-close>Ver el plan por marca</button></div></div>`, 'sm');
-        $('#modal').addEventListener('click', (ev) => { if (ev.target.closest('[data-close]')) render({ silent: true }); }, { once: true });
-      } catch { sp.disabled = false; }
-      return;
-    }
+    if (e.target.closest('[data-brands-edit]')) return brandsModal(() => render({ silent: true }));
     const u = e.target.closest('[data-plan-apply]');
     if (u) {
       const [cid, month, amount] = u.dataset.planApply.split('|');
@@ -2630,6 +2613,48 @@ async function planSection(box) {
   });
   box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.planGoal) e.target.blur(); });
   await load();
+}
+
+/** Elegir qué clientes son marcas (entran al plan y a "Por marca") y asignarles sus campañas. */
+async function brandsModal(after) {
+  const el = modal(`${modalHead('Tus marcas', 'Las marcas entran al plan por objetivos y a “Por marca”. Los demás quedan como clientes de la agencia.')}<div class="p-5" id="bm"><div class="sk h-48"></div></div>`);
+  let d;
+  try { d = await api('brand_candidates'); } catch (e) { $('#bm', el).innerHTML = errorBox(e.message, false); return; }
+  const isBrand = (c) => c.client && c.client.kind === 'marca';
+  $('#bm', el).innerHTML = `
+    ${d.brands.length ? `<div class="mb-5"><div class="eyebrow mb-2">Marcas actuales</div><div class="flex flex-wrap gap-2">${d.brands.map((b) => `
+      <span class="pill plain !h-8 !pl-3 !pr-1.5 gap-2" style="background:color-mix(in srgb, ${esc(b.color)} 14%, transparent);color:${esc(b.color)}">${esc(b.name)}
+        <button class="btn btn-ghost btn-icon !w-6 !h-6" data-unbrand="${b.id}" title="No es marca (vuelve a ser cliente)">${icon('x', 12)}</button></span>`).join('')}</div></div>` : ''}
+    <div class="eyebrow mb-2">Encontradas en los nombres de tus campañas</div>
+    <p class="t3 text-xs mb-3">Tildá sólo las marcas reales. Podés corregir el nombre. Se toman las campañas que empiezan con ese nombre (antes de “ - ” o “ | ”).</p>
+    ${d.candidates.length ? `<div class="card divide max-h-[46vh] overflow-y-auto">${d.candidates.map((c, i) => `
+      <label class="px-4 py-3 flex items-center gap-3 cursor-pointer">
+        <input type="checkbox" class="w-4 h-4" data-cand="${i}" ${isBrand(c) ? 'checked' : ''}>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 flex-wrap"><input class="input select-sm !w-44" data-cand-name="${i}" value="${esc(c.client ? c.client.name : c.label)}">
+            ${isBrand(c) ? '<span class="pill green plain">Ya es marca</span>' : c.client ? `<span class="pill plain">Cliente existente</span>` : '<span class="pill blue plain">Nueva</span>'}</div>
+          <div class="t3 text-xs mt-1 truncate" title="${esc(c.examples.join('\n'))}">${c.campaigns} campaña${c.campaigns > 1 ? 's' : ''} · ${esc([...new Set(c.accounts)].join(', '))} · ej.: ${esc(c.examples.join(' · '))}</div>
+        </div>
+      </label>`).join('')}</div>` : '<div class="t3">No encontramos nombres de campaña con marca.</div>'}
+    <div class="flex gap-2 mt-4"><button class="btn btn-primary" id="bm-save">Guardar marcas</button><button class="btn btn-ghost" data-close>Cancelar</button></div>
+    <p class="t3 text-xs mt-3">Los clientes que se crearon por error podés borrarlos en Clientes. Una marca también se puede marcar desde Clientes → Editar → Tipo.</p>`;
+  hydrateIcons(el);
+  $('#bm', el).addEventListener('click', async (e) => {
+    const ub = e.target.closest('[data-unbrand]');
+    if (ub) { e.preventDefault(); await post('client_kind_save', { id: +ub.dataset.unbrand, kind: 'cliente' }, 'Ya no es marca'); return brandsModal(after); }
+    if (e.target.id !== 'bm-save') return;
+    const brands = $$('[data-cand]', el).filter((x) => x.checked).map((x) => ({ label: d.candidates[+x.dataset.cand].label, name: $(`[data-cand-name="${x.dataset.cand}"]`, el).value.trim() }));
+    // Las que estaban tildadas y se destildaron vuelven a ser clientes.
+    const unchecked = $$('[data-cand]', el).filter((x) => !x.checked && isBrand(d.candidates[+x.dataset.cand])).map((x) => d.candidates[+x.dataset.cand].client.id);
+    e.target.disabled = true;
+    try {
+      for (const id of unchecked) await post('client_kind_save', { id, kind: 'cliente' });
+      const r = await post('brands_apply', { brands }, 'Marcas guardadas');
+      closeModal();
+      if (r.created.length) toast('Marcas nuevas: ' + r.created.join(', '));
+      after();
+    } catch { e.target.disabled = false; }
+  });
 }
 
 function planHtml(d, cfg) {
@@ -2717,29 +2742,17 @@ function planHtml(d, cfg) {
     ? `<th style="text-align:left">Marca</th><th>Objetivo</th><th>Vendidas</th><th>Proyección</th><th>Costo por venta</th><th>Inversión ${GRAN[cfg.gran][1]}</th><th>Faltan</th><th>Diario necesario</th>`
     : `<th style="text-align:left">Marca</th><th>Objetivo</th><th>Costo por venta</th><th>Inversión ${GRAN[cfg.gran][1]} +${tax}</th><th>Al ritmo actual</th><th>Ajuste diario</th><th>Planificado</th><th></th>`;
 
-  const loose = d.unassigned || [];
-  const byBrand = {};
-  loose.forEach((c) => { const k = c.name.split(/\s+[-–—|·:]\s+|\s*\|\s*/)[0].trim(); byBrand[k] = (byBrand[k] || 0) + 1; });
-  const mixed = d.mixed || [];
-  const mixedBanner = mixed.length ? `<div class="mx-5 mb-5 split-banner">
+  const banner = !d.has_brands ? `<div class="mx-5 mb-5 split-banner">
       <div class="flex flex-wrap items-start gap-3">
         <span class="t-warn mt-0.5">${icon('alert', 16)}</span>
-        <div class="flex-1 min-w-[220px]">${mixed.map((m) => `<div class="mb-1.5"><div class="font-semibold t1">La cuenta “${esc(m.account)}” está asignada entera a ${esc(m.owner)}</div>
-          <div class="t2 text-[13px]">pero tiene campañas de ${m.brands.length} marcas: ${m.brands.map((b) => `<span class="pill plain">${esc(b)}</span>`).join(' ')}. Así el gasto no se divide por marca.</div></div>`).join('')}</div>
-        ${d.can_split ? `<button class="btn btn-primary" data-plan-split="mixed">${icon('users', 14)}Dividir por marca</button>` : '<span class="t3 text-xs">Pedile al administrador que la divida por marca.</span>'}
+        <div class="flex-1 min-w-[220px]"><div class="font-semibold t1">Definí cuáles son tus marcas</div>
+          <div class="t2 text-[13px] mt-0.5">El plan se arma sólo con las marcas (ej. Go Celular, GetNet, Osacra, Clover). Los demás clientes de la agencia no entran. Mientras no elijas, se muestran todos los clientes.</div></div>
+        ${d.can_split ? `<button class="btn btn-primary" data-brands-edit>${icon('users', 14)}Elegir marcas</button>` : '<span class="t3 text-xs">Pedile al administrador que defina las marcas.</span>'}
       </div></div>` : '';
-  const banner = mixedBanner + (loose.length || !d.brands.length ? `<div class="mx-5 mb-5 split-banner">
-      <div class="flex flex-wrap items-start gap-3">
-        <span class="t-warn mt-0.5">${icon('alert', 16)}</span>
-        <div class="flex-1 min-w-[220px]"><div class="font-semibold t1">${loose.length ? `${loose.length} campañas todavía no están separadas por marca` : 'Todavía no hay marcas creadas'}</div>
-          <div class="t2 text-[13px] mt-0.5">El plan y los presupuestos se arman por marca (Go Celular, Osacra, GetNet, Clover…). ${loose.length ? 'Estas campañas quedan sólo en “Por cuenta publicitaria”:' : 'Creálas desde los nombres de tus campañas con un clic.'}</div>
-          ${loose.length ? `<div class="flex flex-wrap gap-1.5 mt-2">${Object.entries(byBrand).slice(0, 12).map(([k, n]) => `<span class="pill plain">${esc(k)} · ${n}</span>`).join('')}</div>` : ''}</div>
-        ${d.can_split ? `<button class="btn btn-primary" data-plan-split>${icon('users', 14)}Separar por marca automáticamente</button>` : '<span class="t3 text-xs">Pedile al administrador que separe las marcas.</span>'}
-      </div></div>` : '');
 
   return `<div class="card mb-8 overflow-hidden" data-plan-body>
     <div class="p-5 flex flex-wrap items-end gap-4">
-      <div class="min-w-[240px] flex-1"><div class="h2">Plan por objetivos · ${esc(monthTitle)}</div>
+      <div class="min-w-[240px] flex-1"><div class="h2 flex items-center gap-2">Plan por objetivos · ${esc(monthTitle)}${d.has_brands && d.can_split ? `<button class="btn btn-sm btn-ghost !h-7" data-brands-edit>${icon('sliders', 13)}Marcas</button>` : ''}</div>
         <div class="t3 text-xs mt-0.5">Cargá cuántas ${esc('ventas')} querés por marca: calculamos cuánto invertir con su costo por venta real (Meta +${tax} ÷ ventas de la planilla).</div></div>
       <div><div class="t3 text-xs mb-1.5">Mes</div><div class="seg">${[['current', 'En curso'], ['next', 'Siguiente']].map(([v, l]) => `<button data-plan-cfg="month" data-v="${v}" class="${cfg.month === v ? 'on' : ''}">${l} · ${esc(monthOf(v))}</button>`).join('')}</div></div>
       <label class="field"><span>Costo por venta según</span><select class="input select-sm" id="plan-basis">${Object.entries(d.bases).map(([k, l]) => `<option value="${k}" ${d.basis === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
@@ -3159,9 +3172,10 @@ function progressDeck(d, cfg) {
 async function viewReports() {
   crumbs([{ label: 'Reportes' }]);
   const clients = await api('clients');
-  const cfg = { type: 'progress', period: 'semanal', until: '', as_of: '', clients: clients.map((c) => c.id), company: '', ...store.get('reportCfg', {}) };
+  const brandIds = clients.some((c) => c.kind === 'marca') ? clients.filter((c) => c.kind === 'marca').map((c) => c.id) : clients.map((c) => c.id);
+  const cfg = { type: 'progress', period: 'semanal', until: '', as_of: '', clients: brandIds, company: '', ...store.get('reportCfg', {}) };
   cfg.clients = cfg.clients.filter((id) => clients.some((c) => c.id === id));
-  if (!cfg.clients.length) cfg.clients = clients.map((c) => c.id);
+  if (!cfg.clients.length) cfg.clients = brandIds;
   const yest = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
   const report = state.boot.report || {};
   if (!clients.length) return { html: empty('Primero creá tus clientes / marcas', 'Los reportes se arman por marca (Go Celular, Osacra, GetNet, Clover…). Creálas en Clientes y asignales sus campañas, páginas y ventas.', isAdmin() ? '<a class="btn btn-primary" href="#/clients">Ir a Clientes</a>' : '', 'report') };

@@ -54,7 +54,7 @@ final class Api
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
         'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
-        'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brands_autoassign',
+        'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brands_apply', 'client_kind_save',
         'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
     ];
 
@@ -283,7 +283,7 @@ final class Api
                     'log'           => Db::all('SELECT job, status, message, created_at FROM sync_log ORDER BY id DESC LIMIT 15'),
                 ];
             case 'budgets':
-                return Budgets::overview($internal['ad_account'] ?? null, $force, $internal['clients'] ?? null);
+                return Budgets::overview($internal['ad_account'] ?? null, $force, Clients::brandIds($internal['clients'] ?? null)) + ['has_brands' => Clients::hasBrands()];
             case 'budget_save':
                 $key = !empty($body['client_id']) ? 'client:' . $ownClient((int) $body['client_id']) : $ownAccount(self::id((string) ($body['account'] ?? '')));
                 Budgets::save($key, $body['month'] ?? null, $body['amount'] ?? null, $body['note'] ?? null);
@@ -297,28 +297,16 @@ final class Api
                 Cache::flush(); // las métricas guardadas en caché llevan el impuesto anterior
                 return null;
             case 'budget_plan':
-                $ids = $internal['clients'] ?? array_map('intval', array_column(Db::all('SELECT id FROM clients'), 'id'));
-                $plan = Planner::plan($ids, (string) ($q['month'] ?? 'next'), (string) ($q['basis'] ?? 'avg3'));
-                // Campañas con gasto o activas que no pertenecen a ninguna marca (para ofrecer separarlas).
-                $loose = [];
-                $mixed = [];
-                if ($internal === null) {
-                    try {
-                        $ov = Budgets::overview(null, false, null);
-                        $mixed = Clients::mixedAccounts($ov['accounts']);
-                        foreach ($ov['accounts'] as $a) {
-                            foreach ($a['campaigns'] as $c) {
-                                if (!$c['brands'] && ($c['active'] || $c['spent_mtd'] > 0)) {
-                                    $loose[] = ['account' => $a['name'], 'name' => $c['name']];
-                                }
-                            }
-                        }
-                    } catch (\Throwable) {
-                    }
-                }
-                return $plan + ['unassigned' => $loose, 'mixed' => $mixed, 'can_split' => Auth::isAdmin()];
-            case 'brands_autoassign':
-                return Clients::autoAssign(!empty($body['split_mixed']));
+                // Sólo las marcas (si todavía no se definieron, todos los clientes).
+                return Planner::plan(Clients::brandIds($internal['clients'] ?? null), (string) ($q['month'] ?? 'next'), (string) ($q['basis'] ?? 'avg3'))
+                    + ['has_brands' => Clients::hasBrands(), 'can_split' => Auth::isAdmin()];
+            case 'brand_candidates':
+                return Clients::brandCandidates();
+            case 'brands_apply':
+                return Clients::applyBrands((array) ($body['brands'] ?? []));
+            case 'client_kind_save':
+                Clients::setKind((int) ($body['id'] ?? 0), (string) ($body['kind'] ?? 'cliente'));
+                return null;
             case 'brand_goal_save':
                 Planner::saveGoal($ownClient((int) ($body['client_id'] ?? 0)), $body['month'] ?? null, $body['target_orders'] ?? '', $body['target_revenue'] ?? '');
                 return null;

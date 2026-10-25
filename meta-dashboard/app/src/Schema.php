@@ -39,6 +39,7 @@ final class Schema
                 dim_label VARCHAR(60) NOT NULL DEFAULT 'Sucursal',
                 target_orders DECIMAL(14,2) NULL,
                 target_revenue DECIMAL(16,2) NULL,
+                kind VARCHAR(10) NOT NULL DEFAULT 'cliente',
                 created_at DATETIME NOT NULL
             )$suffix",
 
@@ -260,6 +261,12 @@ final class Schema
     /** Actualizaciones de instalaciones existentes (idempotentes). */
     private static function migrate(): void
     {
+        // v5: clientes de la agencia vs. marcas (las marcas son las que entran al plan de presupuesto).
+        try {
+            Db::one('SELECT kind FROM clients LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec("ALTER TABLE clients ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'cliente'");
+        }
         // v4: ventas por campaña.
         try {
             Db::one('SELECT campaign FROM sales_daily LIMIT 1');

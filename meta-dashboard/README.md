@@ -65,7 +65,7 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 - **Mes siguiente**: compara con el ritmo actual (presupuestos diarios activos) y dice cuánto subir o bajar por día. Con **Usar** se guarda como presupuesto planificado de la marca.
 - **Mes en curso**: vendidas, % de avance contra el ritmo esperado, proyección al cierre, cuántas faltan, cuánto falta invertir y el **diario necesario** para llegar.
 - Las marcas que **superan el objetivo con menos presupuesto** (o que este mes venden más barato que la base) se destacan en verde.
-- **Separar por marca automáticamente**: si hay campañas que todavía no pertenecen a ninguna marca, el plan lo avisa y con un botón crea las marcas (o usa los clientes existentes) a partir del nombre de la campaña (lo que va antes de " - " o " | "). Las campañas nuevas con ese nombre se asignan solas.
+- **Clientes vs. marcas**: cada cliente tiene un *Tipo* (Cliente o Marca). Sólo las **marcas** (ej. Go Celular, GetNet, Osacra, Clover) entran al plan, a *Presupuestos → Por marca* y vienen tildadas en *Reportes*; los demás clientes de la agencia no. Con **Elegir marcas** (en el plan) tildás las marcas reales entre los nombres encontrados en las campañas (lo que va antes de " - " o " | "): usa el cliente existente o crea la marca y le asigna sus campañas en todas las cuentas, aunque la cuenta esté asignada entera a otro cliente (ej. PayLab Gestión). También se cambia en *Clientes → Editar → Tipo*.
 - Si una marca no tiene objetivo del mes, se usa el objetivo fijo de su ficha. El objetivo del mes siguiente también alimenta la diapositiva de objetivos de la *Proyección*.
 
 ### Creativos que más traccionan
