@@ -244,11 +244,24 @@ final class Clients
      * existente cuyo nombre aparece en la campaña o crea la marca a partir del
      * nombre (lo que va antes de " - " o " | "). Devuelve qué hizo.
      */
-    public static function autoAssign(): array
+    public static function autoAssign(bool $splitMixed = false): array
     {
         $palette = ['#0e7c66', '#d9822b', '#3a6fd8', '#b9468b', '#7c8a3a', '#6b5bd6', '#2c9db0', '#8a6d55'];
+        $out = ['created' => [], 'assigned' => [], 'skipped' => [], 'mixed' => [], 'unshared' => []];
+        if ($splitMixed) {
+            // Cuentas asignadas enteras a un cliente pero con campañas de varias marcas:
+            // se quita la asignación completa para repartir sus campañas por marca.
+            foreach (self::detectGroups() as $acc) {
+                $branded = array_filter($acc['groups'], fn ($g) => array_filter($g['campaigns'], fn ($n) => SalesImport::normName($n) !== SalesImport::normName($g['label'])));
+                if (count($branded) > 1) {
+                    foreach (Db::all("SELECT c.name FROM client_assets a JOIN clients c ON c.id = a.client_id WHERE a.asset_type = 'ad_account' AND a.external_id = ?", [$acc['account']]) as $o) {
+                        $out['unshared'][] = ['account' => $acc['name'], 'owner' => $o['name']];
+                    }
+                    Db::exec("DELETE FROM client_assets WHERE asset_type = 'ad_account' AND external_id = ?", [$acc['account']]);
+                }
+            }
+        }
         $clients = Db::all('SELECT id, name FROM clients ORDER BY LENGTH(name) DESC');
-        $out = ['created' => [], 'assigned' => [], 'skipped' => [], 'mixed' => []];
         foreach (self::detectGroups() as $acc) {
             $full = Db::all("SELECT c.name FROM client_assets a JOIN clients c ON c.id = a.client_id WHERE a.asset_type = 'ad_account' AND a.external_id = ?", [$acc['account']]);
             if ($full && count($acc['groups']) > 1) {
@@ -281,6 +294,29 @@ final class Clients
                 }
                 self::addRule((int) $target['id'], $acc['account'], $target['name']);
                 $out['assigned'][] = ['brand' => $target['name'], 'account' => $acc['name'], 'campaigns' => count($g['campaigns'])];
+            }
+        }
+        return $out;
+    }
+
+    /** Cuentas asignadas enteras a un cliente cuyas campañas son de varias marcas (según el nombre). */
+    public static function mixedAccounts(array $budgetAccounts): array
+    {
+        $out = [];
+        foreach ($budgetAccounts as $a) {
+            $owners = array_column(Db::all("SELECT c.name FROM client_assets x JOIN clients c ON c.id = x.client_id WHERE x.asset_type = 'ad_account' AND x.external_id = ?", [$a['id']]), 'name');
+            if (!$owners) {
+                continue;
+            }
+            $labels = [];
+            foreach ($a['campaigns'] as $c) {
+                $l = self::brandOf($c['name']);
+                if (($c['active'] || $c['spent_mtd'] > 0) && SalesImport::normName($l) !== SalesImport::normName($c['name'])) {
+                    $labels[SalesImport::normName($l)] = $l;
+                }
+            }
+            if (count($labels) > 1) {
+                $out[] = ['account' => $a['name'], 'owner' => implode(', ', $owners), 'brands' => array_values($labels)];
             }
         }
         return $out;

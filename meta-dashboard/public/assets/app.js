@@ -2592,15 +2592,18 @@ async function planSection(box) {
     if (s) { cfg[s.dataset.planCfg] = s.dataset.v; return load(); }
     const sp = e.target.closest('[data-plan-split]');
     if (sp) {
+      const splitMixed = sp.dataset.planSplit === 'mixed';
+      if (splitMixed && !confirm('La cuenta deja de estar asignada entera a ese cliente y sus campañas se reparten por marca según el nombre (se crean las marcas que falten). ¿Continuar?')) return;
       sp.disabled = true;
       sp.textContent = 'Separando…';
       try {
-        const r = await post('brands_autoassign', {});
+        const r = await post('brands_autoassign', { split_mixed: splitMixed });
         const lines = [
           r.created.length ? `<li>Marcas creadas: <b>${r.created.map(esc).join(', ')}</b></li>` : '',
           r.assigned.length ? `<li>${r.assigned.map((a) => `${esc(a.brand)} ← ${a.campaigns} campaña${a.campaigns > 1 ? 's' : ''} de ${esc(a.account)}`).join('<br>')}</li>` : '',
           r.skipped.length ? `<li class="t-warn">Sin marca clara en el nombre (asignalas a mano en Clientes): ${r.skipped.slice(0, 8).map(esc).join(' · ')}</li>` : '',
-          ...r.mixed.map((m) => `<li class="t-warn">La cuenta <b>${esc(m.account)}</b> está asignada entera a <b>${esc(m.owner)}</b> pero tiene campañas de ${m.brands.length} marcas (${m.brands.map(esc).join(', ')}). En Clientes → ${esc(m.owner)} cambiala a “Solo algunas campañas” para separarlas.</li>`),
+          ...r.unshared.map((u) => `<li>La cuenta <b>${esc(u.account)}</b> ya no está asignada entera a <b>${esc(u.owner)}</b>: sus campañas se repartieron por marca.</li>`),
+          ...(splitMixed ? [] : r.mixed).map((m) => `<li class="t-warn">La cuenta <b>${esc(m.account)}</b> está asignada entera a <b>${esc(m.owner)}</b> pero tiene campañas de ${m.brands.length} marcas (${m.brands.map(esc).join(', ')}). En Clientes → ${esc(m.owner)} cambiala a “Solo algunas campañas” para separarlas.</li>`),
         ].filter(Boolean);
         modal(`${modalHead('Marcas separadas')}<div class="p-5"><ul class="space-y-2 t2 text-[13px] list-disc pl-5">${lines.join('') || '<li>No había campañas para separar.</li>'}</ul>
           <p class="t3 text-xs mt-4">Las campañas nuevas que empiecen con el nombre de la marca se asignan solas. Podés ajustar las palabras clave en Clientes → {marca} → Activos asignados.</p>
@@ -2630,6 +2633,7 @@ async function planSection(box) {
 }
 
 function planHtml(d, cfg) {
+  d.brands = d.brands.filter((b) => b.has_ads || b.goal_orders !== null); // clientes sin campañas no tienen presupuesto que planificar
   const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
   const cur = d.which === 'current';
   const div = cfg.gran === 'day' ? d.month.days : cfg.gran === 'week' ? d.month.days / 7 : 1;
@@ -2716,14 +2720,22 @@ function planHtml(d, cfg) {
   const loose = d.unassigned || [];
   const byBrand = {};
   loose.forEach((c) => { const k = c.name.split(/\s+[-–—|·:]\s+|\s*\|\s*/)[0].trim(); byBrand[k] = (byBrand[k] || 0) + 1; });
-  const banner = loose.length || !d.brands.length ? `<div class="mx-5 mb-5 split-banner">
+  const mixed = d.mixed || [];
+  const mixedBanner = mixed.length ? `<div class="mx-5 mb-5 split-banner">
+      <div class="flex flex-wrap items-start gap-3">
+        <span class="t-warn mt-0.5">${icon('alert', 16)}</span>
+        <div class="flex-1 min-w-[220px]">${mixed.map((m) => `<div class="mb-1.5"><div class="font-semibold t1">La cuenta “${esc(m.account)}” está asignada entera a ${esc(m.owner)}</div>
+          <div class="t2 text-[13px]">pero tiene campañas de ${m.brands.length} marcas: ${m.brands.map((b) => `<span class="pill plain">${esc(b)}</span>`).join(' ')}. Así el gasto no se divide por marca.</div></div>`).join('')}</div>
+        ${d.can_split ? `<button class="btn btn-primary" data-plan-split="mixed">${icon('users', 14)}Dividir por marca</button>` : '<span class="t3 text-xs">Pedile al administrador que la divida por marca.</span>'}
+      </div></div>` : '';
+  const banner = mixedBanner + (loose.length || !d.brands.length ? `<div class="mx-5 mb-5 split-banner">
       <div class="flex flex-wrap items-start gap-3">
         <span class="t-warn mt-0.5">${icon('alert', 16)}</span>
         <div class="flex-1 min-w-[220px]"><div class="font-semibold t1">${loose.length ? `${loose.length} campañas todavía no están separadas por marca` : 'Todavía no hay marcas creadas'}</div>
           <div class="t2 text-[13px] mt-0.5">El plan y los presupuestos se arman por marca (Go Celular, Osacra, GetNet, Clover…). ${loose.length ? 'Estas campañas quedan sólo en “Por cuenta publicitaria”:' : 'Creálas desde los nombres de tus campañas con un clic.'}</div>
           ${loose.length ? `<div class="flex flex-wrap gap-1.5 mt-2">${Object.entries(byBrand).slice(0, 12).map(([k, n]) => `<span class="pill plain">${esc(k)} · ${n}</span>`).join('')}</div>` : ''}</div>
         ${d.can_split ? `<button class="btn btn-primary" data-plan-split>${icon('users', 14)}Separar por marca automáticamente</button>` : '<span class="t3 text-xs">Pedile al administrador que separe las marcas.</span>'}
-      </div></div>` : '';
+      </div></div>` : '');
 
   return `<div class="card mb-8 overflow-hidden" data-plan-body>
     <div class="p-5 flex flex-wrap items-end gap-4">

@@ -301,9 +301,12 @@ final class Api
                 $plan = Planner::plan($ids, (string) ($q['month'] ?? 'next'), (string) ($q['basis'] ?? 'avg3'));
                 // Campañas con gasto o activas que no pertenecen a ninguna marca (para ofrecer separarlas).
                 $loose = [];
+                $mixed = [];
                 if ($internal === null) {
                     try {
-                        foreach (Budgets::overview(null, false, null)['accounts'] as $a) {
+                        $ov = Budgets::overview(null, false, null);
+                        $mixed = Clients::mixedAccounts($ov['accounts']);
+                        foreach ($ov['accounts'] as $a) {
                             foreach ($a['campaigns'] as $c) {
                                 if (!$c['brands'] && ($c['active'] || $c['spent_mtd'] > 0)) {
                                     $loose[] = ['account' => $a['name'], 'name' => $c['name']];
@@ -313,9 +316,9 @@ final class Api
                     } catch (\Throwable) {
                     }
                 }
-                return $plan + ['unassigned' => $loose, 'can_split' => Auth::isAdmin()];
+                return $plan + ['unassigned' => $loose, 'mixed' => $mixed, 'can_split' => Auth::isAdmin()];
             case 'brands_autoassign':
-                return Clients::autoAssign();
+                return Clients::autoAssign(!empty($body['split_mixed']));
             case 'brand_goal_save':
                 Planner::saveGoal($ownClient((int) ($body['client_id'] ?? 0)), $body['month'] ?? null, $body['target_orders'] ?? '', $body['target_revenue'] ?? '');
                 return null;
