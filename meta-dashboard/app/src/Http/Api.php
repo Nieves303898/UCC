@@ -38,6 +38,7 @@ final class Api
     private const CLIENT_ACTIONS = [
         'bootstrap', 'assets', 'overview', 'account', 'adsets', 'ads', 'timeseries', 'breakdown',
         'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales', 'top_ads', 'org_overview', 'sheets',
+        'portal_users', 'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete', 'clients_delete',
     ];
 
     /** Usuarios internos de solo lectura (ej. gerencia): todo lo del cliente + vistas de agencia. */
@@ -58,6 +59,7 @@ final class Api
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
         'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
         'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brand_map_save', 'client_kind_save', 'sheet_add', 'sheet_delete', 'sheet_refresh', 'client_user_save',
+        'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete',
         'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
     ];
 
@@ -154,7 +156,8 @@ final class Api
             case 'bootstrap':
                 $user = Auth::user();
                 return [
-                    'user'        => ['id' => (int) $user['id'], 'name' => $user['name'], 'username' => $user['username'], 'role' => $user['role']],
+                    'user'        => ['id' => (int) $user['id'], 'name' => $user['name'], 'username' => $user['username'], 'role' => $user['role'],
+                        'client_role' => $user['client_role'] ?? null, 'can_manage_users' => !empty($user['can_manage_users'])],
                     'client'      => $client ? Clients::brand($client) : null,
                     'org'         => self::portalOrg($client),
                     'gestiones'   => Clients::GESTIONES,
@@ -224,8 +227,16 @@ final class Api
                 Sheets::sync((int) $body['id']);
                 return null;
             case 'client_user_save':
-                Clients::setClientUser((int) ($body['id'] ?? 0), $body['client_role'] ?? null, (array) ($body['brands'] ?? []));
+                Clients::setClientUser((int) ($body['id'] ?? 0), $body['client_role'] ?? null, (array) ($body['brands'] ?? []), isset($body['can_manage_users']) ? !empty($body['can_manage_users']) : null);
                 return null;
+            case 'users_all':
+                return self::allUsers();
+            case 'portal_users':
+            case 'portal_user_add':
+            case 'portal_user_save':
+            case 'portal_user_reset':
+            case 'portal_user_delete':
+                return self::portalUsers($action, $body);
             case 'top_ads':
                 $accs = !empty($q['account']) ? [$adAccount()] : array_map(fn ($a) => $a['external_id'], Assets::list('ad_account', false, $allowed['ad_account'] ?? null));
                 $filters = [];
@@ -417,6 +428,13 @@ final class Api
                 return Clients::detail($ownClient((int) ($q['id'] ?? 0)));
             case 'client_save':
                 return ['id' => Clients::save($body)];
+            case 'clients_delete':
+                $ids = array_values(array_unique(array_filter(array_map('intval', (array) ($body['ids'] ?? [])))));
+                foreach ($ids as $cid) {
+                    Clients::find($cid);
+                    Clients::delete($cid);
+                }
+                return ['deleted' => count($ids)];
             case 'client_delete':
                 Clients::delete((int) ($body['id'] ?? 0));
                 return null;
@@ -470,7 +488,7 @@ final class Api
                 $clientId = $role === 'client' ? Clients::find((int) ($body['client_id'] ?? 0))['id'] : null;
                 $newId = Auth::createUser((string) ($body['username'] ?? ''), (string) ($body['name'] ?? ''), (string) ($body['password'] ?? ''), $role, $clientId);
                 if ($role === 'client') {
-                    Clients::setClientUser($newId, $body['client_role'] ?? null, (array) ($body['brands'] ?? []));
+                    Clients::setClientUser($newId, $body['client_role'] ?? null, (array) ($body['brands'] ?? []), !empty($body['can_manage_users']));
                 }
                 return ['id' => $newId];
             case 'user_delete':
@@ -491,6 +509,80 @@ final class Api
     }
 
     /** Logo del reporte de agencia o de un cliente. Sólo PNG, JPG o WebP (máx. 2 MB). */
+    /** Todos los usuarios del sistema (sólo para la dueña del sistema). */
+    private static function allUsers(): array
+    {
+        $clients = [];
+        foreach (Db::all('SELECT id, name, color, kind, parent_id FROM clients ORDER BY name') as $c) {
+            $clients[(int) $c['id']] = ['id' => (int) $c['id'], 'name' => $c['name'], 'color' => $c['color'], 'kind' => $c['kind'], 'parent_id' => $c['parent_id'] ? (int) $c['parent_id'] : null];
+        }
+        $users = [];
+        foreach (Db::all('SELECT id, username, email, name, role, client_id, client_role, can_manage_users, last_login_at, created_at FROM users ORDER BY name') as $u) {
+            $u['id'] = (int) $u['id'];
+            $u['client_id'] = $u['client_id'] ? (int) $u['client_id'] : null;
+            $u['can_manage_users'] = (bool) $u['can_manage_users'];
+            $u['brands'] = array_map('intval', array_column(Db::all("SELECT ref FROM user_scopes WHERE user_id = ? AND kind = 'client'", [$u['id']]), 'ref'));
+            $u['scope'] = $u['role'] !== 'client' ? Db::all('SELECT kind, ref FROM user_scopes WHERE user_id = ?', [$u['id']]) : [];
+            $users[] = $u;
+        }
+        foreach ($clients as $id => &$c) {
+            $c['children'] = array_values(array_map(fn ($x) => ['id' => $x['id'], 'name' => $x['name']], array_filter($clients, fn ($x) => $x['parent_id'] === $id)));
+        }
+        unset($c);
+        return ['users' => $users, 'clients' => array_values($clients), 'roles' => Clients::CLIENT_ROLES, 'me' => (int) Auth::user()['id']];
+    }
+
+    /**
+     * Accesos gestionados por el propio cliente (ej. gerente de operaciones con permiso):
+     * sólo personas de SU empresa, sin poder dar el permiso de gestionar ni tocar a otros gestores.
+     * No ve a la agencia ni a otros clientes.
+     */
+    private static function portalUsers(string $action, array $body): mixed
+    {
+        $me = Auth::user();
+        if (($me['role'] ?? '') !== 'client' || empty($me['can_manage_users'])) {
+            throw new AccessDenied('No tenés permiso para gestionar accesos.');
+        }
+        $org = (int) $me['client_id'];
+        $brands = Clients::children($org);
+        if ($action === 'portal_users') {
+            return ['users' => array_map(fn ($u) => array_diff_key($u, ['created_at' => 1]), Clients::users($org)), 'brands' => $brands, 'roles' => Clients::CLIENT_ROLES, 'me' => (int) $me['id'], 'org' => Clients::find($org)['name']];
+        }
+        if ($action === 'portal_user_add') {
+            if (($body['client_role'] ?? '') === 'dueno') {
+                throw new AccessDenied('El rol Dueño lo asigna la agencia.');
+            }
+            $id = Auth::createUser((string) ($body['username'] ?? ''), (string) ($body['name'] ?? ''), (string) ($body['password'] ?? ''), 'client', $org);
+            Clients::setClientUser($id, $body['client_role'] ?? null, (array) ($body['brands'] ?? []), false);
+            return ['id' => $id];
+        }
+        if (($body['client_role'] ?? '') === 'dueno') {
+            throw new AccessDenied('El rol Dueño lo asigna la agencia.');
+        }
+        $target = Db::one("SELECT id, client_id, can_manage_users, client_role FROM users WHERE id = ? AND role = 'client'", [(int) ($body['id'] ?? 0)]);
+        if (!$target || (int) $target['client_id'] !== $org) {
+            throw new AccessDenied('Ese usuario no es de tu empresa.');
+        }
+        if ((int) $target['id'] === (int) $me['id'] || $target['can_manage_users'] || $target['client_role'] === 'dueno') {
+            throw new AccessDenied('Ese acceso lo administra la agencia. Pedí el cambio a la agencia.');
+        }
+        switch ($action) {
+            case 'portal_user_save':
+                Clients::setClientUser((int) $target['id'], $body['client_role'] ?? null, (array) ($body['brands'] ?? []));
+                return null;
+            case 'portal_user_reset':
+                if (strlen((string) ($body['password'] ?? '')) < 8) {
+                    throw new InvalidArgumentException('La contraseña debe tener al menos 8 caracteres.');
+                }
+                Db::exec('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash((string) $body['password'], PASSWORD_DEFAULT), (int) $target['id']]);
+                return null;
+            default: // portal_user_delete
+                Db::exec('DELETE FROM user_scopes WHERE user_id = ?', [(int) $target['id']]);
+                Db::exec('DELETE FROM users WHERE id = ?', [(int) $target['id']]);
+                return null;
+        }
+    }
+
     /**
      * Cliente "organización" que se está viendo en el portal y las marcas que el usuario puede abrir.
      * Si el cliente activo es una marca, la organización es su cliente dueño.

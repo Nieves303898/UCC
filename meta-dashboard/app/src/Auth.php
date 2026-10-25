@@ -30,9 +30,12 @@ final class Auth
                 : Db::one('SELECT id, username, email, name, role, client_id FROM users WHERE id = ?', [$_SESSION['user_id']]);
             if ($user && $user['role'] === 'client') {
                 try { // columna nueva: puede no existir hasta que corra la migración
-                    $user['client_role'] = Db::one('SELECT client_role FROM users WHERE id = ?', [$user['id']])['client_role'] ?? null;
+                    $extra = Db::one('SELECT client_role, can_manage_users FROM users WHERE id = ?', [$user['id']]);
+                    $user['client_role'] = $extra['client_role'] ?? null;
+                    $user['can_manage_users'] = (bool) ($extra['can_manage_users'] ?? false);
                 } catch (\Throwable) {
                     $user['client_role'] = null;
+                    $user['can_manage_users'] = false;
                 }
             }
         }

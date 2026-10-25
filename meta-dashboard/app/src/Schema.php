@@ -280,6 +280,12 @@ final class Schema
         } catch (\Throwable) {
             Db::pdo()->exec("ALTER TABLE clients ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'cliente'");
         }
+        // v8: usuarios del cliente que pueden gestionar los accesos de su empresa (ej. gerente de operaciones).
+        try {
+            Db::one('SELECT can_manage_users FROM users LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec('ALTER TABLE users ADD COLUMN can_manage_users TINYINT NOT NULL DEFAULT 0');
+        }
         // v7: rol de los usuarios del cliente (dueño, gerente, supervisor…) y tipo de gestión de cada marca.
         try {
             Db::one('SELECT client_role FROM users LIMIT 1');

@@ -1666,9 +1666,10 @@ async function viewClients() {
   // Sólo los clientes: sus marcas se ven y se abren desde adentro. Las marcas sueltas, al final.
   const ordered = [...list.filter((c) => c.kind !== 'marca'), ...list.filter((b) => b.kind === 'marca' && !parentName(b))];
   const html = `
-    ${pageHead('Clientes', isViewer() ? 'Abrí el portal de cada cliente para ver sus métricas, ventas, trabajo y reporte.' : 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', isAdmin() ? `<div class="flex gap-2"><button class="btn" id="detect-brands">${icon('sliders', 15)}Marcas y cuentas</button><button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button></div>` : '')}
+    ${pageHead('Clientes', isViewer() ? 'Abrí el portal de cada cliente para ver sus métricas, ventas, trabajo y reporte.' : 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', isAdmin() ? `<div class="flex gap-2"><button class="btn" id="bulk-toggle">${icon('check', 15)}Seleccionar</button><button class="btn" id="detect-brands">${icon('sliders', 15)}Marcas y cuentas</button><button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button></div>` : '')}
     ${list.length ? `<div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${ordered.map((c) => `
-      <a href="#/${isViewer() ? 'preview' : 'clients'}/${c.id}" class="card card-link p-5 block">
+      <a href="#/${isViewer() ? 'preview' : 'clients'}/${c.id}" class="card card-link p-5 block relative" data-cid="${c.id}">
+        <input type="checkbox" class="bulk-check hidden absolute top-4 right-4 w-5 h-5" data-bulk="${c.id}" aria-label="Seleccionar ${esc(c.name)}">
         <div class="flex items-center gap-3">
           <div class="mono-avatar w-11 h-11" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
           <div class="min-w-0 flex-1"><div class="h2 truncate flex items-center gap-2">${esc(c.name)}${c.kind === 'marca' ? '<span class="pill blue plain">Marca</span>' : ''}</div>
@@ -1687,6 +1688,35 @@ async function viewClients() {
     mount() {
       ['#new-client', '#new-client-2'].forEach((s) => $(s)?.addEventListener('click', () => clientForm()));
       $('#detect-brands')?.addEventListener('click', () => brandsModal(() => render({ silent: true })));
+      // Selección múltiple para limpiar clientes de prueba o creados por error.
+      let bulk = false;
+      const bar = document.createElement('div');
+      bar.className = 'bulk-bar hidden';
+      bar.innerHTML = `<span id="bulk-n">0 seleccionados</span><div class="flex-1"></div><button class="btn btn-sm" id="bulk-all">Todos menos los que tienen marcas</button><button class="btn btn-sm btn-danger" id="bulk-del">${icon('x', 13)}Eliminar</button><button class="btn btn-sm btn-ghost" id="bulk-cancel">Cancelar</button>`;
+      $('#view').append(bar);
+      const sel = () => $$('[data-bulk]:checked').map((x) => +x.dataset.bulk);
+      const sync = () => { $('#bulk-n').textContent = `${sel().length} seleccionado${sel().length === 1 ? '' : 's'}`; };
+      const toggle = (on) => { bulk = on; $$('.bulk-check').forEach((x) => { x.classList.toggle('hidden', !on); if (!on) x.checked = false; }); bar.classList.toggle('hidden', !on); sync(); };
+      $('#bulk-toggle')?.addEventListener('click', () => toggle(!bulk));
+      $('#bulk-cancel', bar).addEventListener('click', () => toggle(false));
+      $('#bulk-all', bar).addEventListener('click', () => { $$('[data-bulk]').forEach((x) => { const c = list.find((y) => y.id === +x.dataset.bulk); x.checked = !brandsOf(c).length; }); sync(); });
+      $('#view').addEventListener('click', (e) => {
+        if (!bulk) return;
+        const card = e.target.closest('[data-cid]');
+        if (!card) return;
+        e.preventDefault();
+        const cb = $('[data-bulk]', card);
+        if (e.target !== cb) cb.checked = !cb.checked;
+        sync();
+      });
+      $('#bulk-del', bar).addEventListener('click', async () => {
+        const ids = sel();
+        if (!ids.length) return toast('Elegí al menos un cliente.', 'error');
+        const names = ids.map((id) => list.find((c) => c.id === id)?.name).join(', ');
+        if (!confirm(`¿Eliminar ${ids.length} cliente${ids.length > 1 ? 's' : ''}?\n\n${names}\n\nSe borran sus accesos, ventas cargadas, planillas vinculadas y novedades. No afecta nada en Meta ni en Google.`)) return;
+        await post('clients_delete', { ids }, `${ids.length} eliminado${ids.length > 1 ? 's' : ''}`);
+        render();
+      });
     },
   };
 }
@@ -1750,11 +1780,11 @@ function roleFields(u, brands) {
     <div data-brand-pick><div class="t3 text-xs mb-1.5">Marcas que ve</div>
       <div class="flex flex-wrap gap-2">${brands.map((b) => `<label class="pill plain !h-8 !px-3 gap-2 cursor-pointer"><input type="checkbox" name="brands" value="${b.id}" ${u?.brands?.includes(b.id) ? 'checked' : ''}>${esc(b.name)}</label>`).join('')}</div>
       <p class="t3 text-xs mt-1.5">Sin tildar ninguna, ve todas.</p></div>
-    <p class="t3 text-xs" data-brand-all>Dueño y Gerente ven <b>todas</b> las marcas (también las nuevas).</p>`;
+    <p class="t3 text-xs" data-brand-all>Este rol ve <b>todas</b> las marcas (también las nuevas).</p>`;
 }
 function roleToggle(form) {
   if (!form) return;
-  const all = ['dueno', 'gerente'].includes($('[name=client_role]', form)?.value);
+  const all = ALL_BRANDS_ROLES.includes($('[name=client_role]', form)?.value);
   $('[data-brand-pick]', form)?.classList.toggle('hidden', all);
   $('[data-brand-all]', form)?.classList.toggle('hidden', !all);
 }
@@ -1845,7 +1875,7 @@ async function viewClient(id, tab = 'assets') {
         ${c.users.length ? `<table class="tbl"><thead><tr><th style="text-align:left">Usuario</th>${c.children.length ? '<th style="text-align:left">Rol y marcas</th>' : ''}<th>Último ingreso</th><th></th></tr></thead><tbody>${c.users.map((u) => `
           <tr><td style="text-align:left"><div class="font-medium">${esc(u.name)}</div><div class="sub mono">${esc(u.username)}</div></td>
             ${c.children.length ? `<td style="text-align:left"><div class="flex items-center gap-2"><span class="pill blue plain">${esc(R[u.client_role] || 'Usuario')}</span><button class="btn btn-sm btn-ghost !h-6 !px-1.5" data-edit-cuser="${u.id}">${icon('sliders', 12)}</button></div>
-              <div class="sub mt-1">${['dueno', 'gerente'].includes(u.client_role) || !u.brands.length ? 'Todas las marcas' : esc(u.brands.map((id) => c.children.find((b) => b.id === id)?.name).filter(Boolean).join(', '))}</div></td>` : ''}
+              <div class="sub mt-1">${ALL_BRANDS_ROLES.includes(u.client_role) || !u.brands.length ? 'Todas las marcas' : esc(u.brands.map((id) => c.children.find((b) => b.id === id)?.name).filter(Boolean).join(', '))}</div></td>` : ''}
             <td>${u.last_login_at ? fmt.ago(u.last_login_at) : '<span class="t3">Nunca</span>'}</td>
             <td><div class="flex justify-end gap-1"><button class="btn btn-sm btn-ghost" data-reset="${u.id}" data-user="${esc(u.username)}">${icon('key', 14)}Nueva clave</button><button class="btn btn-sm btn-ghost btn-danger" data-del-user="${u.id}">${icon('x', 14)}</button></div></td></tr>`).join('')}</tbody></table>`
           : '<div class="p-5 t3">Todavía no hay accesos. Creá uno con el formulario.</div>'}
@@ -3734,12 +3764,220 @@ function refModal(r, d, clients, after) {
 }
 
 // =========================================================================
+// Accesos: panel general (dueña del sistema) y del cliente (gestor de accesos)
+// =========================================================================
+const ALL_BRANDS_ROLES = ['dueno', 'gerente_ops', 'gerente'];
+const AGENCY_ROLES = { admin: 'Administrador', member: 'Equipo', viewer: 'Solo lectura' };
+const portalUrl = () => location.origin + location.pathname.replace(/index\.php$/, '');
+const brandsText = (u, brands) => (ALL_BRANDS_ROLES.includes(u.client_role) || !u.brands.length ? 'Todas las marcas' : u.brands.map((id) => brands.find((b) => b.id === id)?.name).filter(Boolean).join(', ') || '—');
+
+/** Formulario de persona del cliente: rol, marcas y (sólo la dueña del sistema) permiso de gestionar accesos. */
+function personFields(u, brands, { manage = false, orgName = '' } = {}) {
+  return `${brands.length ? roleFields(u, brands) : `<label class="field"><span>Rol</span><select class="input" name="client_role">${Object.entries(state.boot.client_roles || {}).map(([k, l]) => `<option value="${k}" ${k === (u?.client_role || 'usuario') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`}
+    ${manage ? `<label class="flex items-start gap-2.5 cursor-pointer sunk rounded-xl p-3"><input type="checkbox" name="can_manage_users" class="mt-0.5" ${u?.can_manage_users ? 'checked' : ''}>
+      <span><b class="t1">Puede gestionar los accesos${orgName ? ' de ' + esc(orgName) : ''}</b><br><span class="t3 text-xs">Crea, edita y da de baja usuarios de su empresa desde su portal. No ve tu panel, ni a tu equipo, ni a otros clientes, y no puede dar este permiso a nadie.</span></span></label>` : ''}`;
+}
+
+async function viewAccess() {
+  crumbs([{ label: 'Accesos' }]);
+  const d = await api('users_all');
+  const byId = Object.fromEntries(d.clients.map((c) => [c.id, c]));
+  const tops = d.clients.filter((c) => c.kind !== 'marca' || !c.parent_id);
+  const f = { q: '', type: '', client: '', ...store.get('accessF', {}) };
+  const rows = () => d.users.filter((u) => {
+    if (f.type === 'agency' && u.role === 'client') return false;
+    if (f.type === 'client' && u.role !== 'client') return false;
+    if (f.client && String(u.client_id) !== f.client) return false;
+    return !f.q || `${u.name} ${u.username} ${byId[u.client_id]?.name || ''}`.toLowerCase().includes(f.q);
+  });
+  const row = (u) => {
+    const c = byId[u.client_id];
+    return `<tr>
+      <td style="text-align:left"><div class="font-medium">${esc(u.name)}${u.id === d.me ? ' <span class="pill plain">Vos</span>' : ''}</div><div class="sub mono">${esc(u.username)}</div></td>
+      <td style="text-align:left">${u.role === 'client' ? `<span class="pill plain" style="background:color-mix(in srgb, ${esc(c?.color || '#888')} 14%, transparent);color:${esc(c?.color || 'var(--t2)')}">${esc(c?.name || 'Cliente borrado')}</span>` : '<span class="pill blue plain">Agencia</span>'}</td>
+      <td style="text-align:left"><div>${esc(u.role === 'client' ? d.roles[u.client_role] || 'Usuario' : AGENCY_ROLES[u.role] || u.role)}</div>
+        ${u.role === 'client' && c?.children?.length ? `<div class="sub">${esc(brandsText(u, c.children))}</div>` : ''}${u.role !== 'client' && u.scope.length ? `<div class="sub">${u.scope.length} asignaciones</div>` : ''}</td>
+      <td>${u.can_manage_users ? '<span class="pill green plain">Gestiona accesos</span>' : '<span class="t3">—</span>'}</td>
+      <td>${u.last_login_at ? fmt.ago(u.last_login_at) : '<span class="t3">Nunca</span>'}</td>
+      <td><div class="flex justify-end gap-1">
+        <button class="btn btn-sm btn-ghost" data-u-edit="${u.id}">${icon('sliders', 13)}Editar</button>
+        <button class="btn btn-sm btn-ghost" data-u-pass="${u.id}" title="Nueva clave">${icon('key', 13)}</button>
+        ${u.id === d.me ? '' : `<button class="btn btn-sm btn-ghost btn-danger" data-u-del="${u.id}" title="Eliminar">${icon('x', 13)}</button>`}</div></td>
+    </tr>`;
+  };
+  const table = () => { const list = rows(); return `<div class="card overflow-hidden"><div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Persona</th><th style="text-align:left">De</th><th style="text-align:left">Rol y alcance</th><th>Permiso</th><th>Último ingreso</th><th></th></tr></thead>
+    <tbody>${list.map(row).join('') || '<tr><td colspan="6" class="t3">No hay accesos con ese filtro.</td></tr>'}</tbody></table></div></div>`; };
+  const counts = { agency: d.users.filter((u) => u.role !== 'client').length, client: d.users.filter((u) => u.role === 'client').length };
+  const html = `
+    ${pageHead('Accesos', 'Todas las personas que entran al sistema: tu equipo y los usuarios de cada cliente. Esta pantalla es sólo tuya: los clientes no la ven ni saben quién más tiene acceso.', `<button class="btn btn-primary" id="u-new">${icon('plus', 15)}Nuevo acceso</button>`)}
+    <div class="kpi-row grid-cols-3 mb-5" style="display:grid">${kpi('Personas', fmt.int(d.users.length), { spark: '' })}${kpi('Equipo de la agencia', fmt.int(counts.agency), { spark: '' })}${kpi('De clientes', fmt.int(counts.client), { spark: '' })}</div>
+    <div class="flex flex-wrap gap-2 mb-4">
+      <input class="input w-64" id="u-q" placeholder="Buscar persona, usuario o cliente" value="${esc(f.q)}">
+      <select class="select !w-auto" id="u-type"><option value="">Todos</option><option value="agency" ${f.type === 'agency' ? 'selected' : ''}>Equipo de la agencia</option><option value="client" ${f.type === 'client' ? 'selected' : ''}>De clientes</option></select>
+      <select class="select !w-auto" id="u-client"><option value="">Todos los clientes</option>${tops.map((c) => `<option value="${c.id}" ${f.client === String(c.id) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+    </div>
+    <div id="u-table">${table()}</div>`;
+  return {
+    html,
+    mount() {
+      const repaint = () => { store.set('accessF', f); $('#u-table').innerHTML = table(); hydrateIcons($('#u-table')); };
+      $('#u-q').addEventListener('input', (e) => { f.q = e.target.value.toLowerCase(); repaint(); });
+      $('#u-type').addEventListener('change', (e) => { f.type = e.target.value; repaint(); });
+      $('#u-client').addEventListener('change', (e) => { f.client = e.target.value; repaint(); });
+      $('#u-new').addEventListener('click', () => newAccessModal(d, tops));
+      $('#u-table').addEventListener('click', async (e) => {
+        const ed = e.target.closest('[data-u-edit]');
+        if (ed) {
+          const u = d.users.find((x) => x.id === +ed.dataset.uEdit);
+          if (u.role !== 'client') { // equipo de la agencia: alcance en Configuración
+            const [s, assets] = await Promise.all([api('settings'), api('assets', { all: 1 })]);
+            return scopeModal(s.users.find((x) => x.id === u.id) || u, s, assets);
+          }
+          const c = byId[u.client_id];
+          const el = modal(`${modalHead('Acceso de ' + u.name, esc(c?.name || ''))}<form class="p-5 space-y-3" id="u-form">${personFields(u, c?.children || [], { manage: true, orgName: c?.name })}
+            <div class="flex gap-2"><button class="btn btn-primary">Guardar</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button></div></form>`, 'sm');
+          roleToggle($('#u-form', el));
+          $('#u-form', el).addEventListener('change', (ev) => { if (ev.target.name === 'client_role') roleToggle(ev.currentTarget); });
+          $('#u-form', el).addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const fd = new FormData(ev.target);
+            await post('client_user_save', { id: u.id, client_role: fd.get('client_role'), brands: fd.getAll('brands').map(Number), can_manage_users: fd.get('can_manage_users') ? 1 : 0 }, 'Acceso actualizado');
+            closeModal(); render({ silent: true });
+          });
+          return;
+        }
+        const pw = e.target.closest('[data-u-pass]');
+        if (pw) {
+          const u = d.users.find((x) => x.id === +pw.dataset.uPass);
+          if (!confirm(`¿Generar una contraseña nueva para ${u.name}? La anterior deja de funcionar.`)) return;
+          const pass = genPassword();
+          await post('user_reset_password', { id: u.id, password: pass });
+          return credentialsModal(u.username, pass, portalUrl());
+        }
+        const del = e.target.closest('[data-u-del]');
+        if (del) {
+          const u = d.users.find((x) => x.id === +del.dataset.uDel);
+          if (!confirm(`¿Eliminar el acceso de ${u.name}? No podrá volver a entrar.`)) return;
+          await post('user_delete', { id: u.id }, 'Acceso eliminado');
+          render({ silent: true });
+        }
+      });
+    },
+  };
+}
+
+function newAccessModal(d, tops) {
+  const el = modal(`${modalHead('Nuevo acceso')}
+    <form class="p-5 space-y-3" id="na-form">
+      <div class="seg" id="na-kind"><button type="button" class="on" data-k="client">Persona de un cliente</button><button type="button" data-k="agency">Equipo de la agencia</button></div>
+      <label class="field" data-for="client"><span>Cliente</span><select class="input" name="client_id">${tops.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
+      <label class="field hidden" data-for="agency"><span>Rol en la agencia</span><select class="input" name="role"><option value="member">Equipo (edita lo asignado)</option><option value="viewer">Solo lectura</option><option value="admin">Administrador (ve y edita todo)</option></select></label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="field"><span>Nombre</span><input class="input" name="name" required placeholder="Ej: David"></label>
+        <label class="field"><span>Usuario</span><input class="input mono" name="username" required autocapitalize="none" pattern="[a-zA-Z0-9._@+\\-]{3,}" placeholder="david.ops"></label>
+      </div>
+      <label class="field"><span>Contraseña</span><input class="input mono" name="password" minlength="8" required value="${genPassword()}"></label>
+      <div data-for="client" id="na-person"></div>
+      <div class="flex gap-2 pt-1"><button class="btn btn-primary">Crear acceso</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button></div>
+    </form>`, 'sm');
+  let kind = 'client';
+  const person = () => {
+    const c = tops.find((x) => String(x.id) === $('[name=client_id]', el).value);
+    $('#na-person', el).innerHTML = personFields({ client_role: 'gerente_ops' }, c?.children || [], { manage: true, orgName: c?.name });
+    roleToggle($('#na-form', el));
+  };
+  person();
+  $('[name=client_id]', el).addEventListener('change', person);
+  $('#na-form', el).addEventListener('change', (e) => { if (e.target.name === 'client_role') roleToggle(e.currentTarget); });
+  $('#na-kind', el).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-k]'); if (!b) return;
+    kind = b.dataset.k;
+    $$('#na-kind [data-k]', el).forEach((x) => x.classList.toggle('on', x === b));
+    $$('[data-for]', el).forEach((x) => x.classList.toggle('hidden', x.dataset.for !== kind));
+  });
+  $('#na-form', el).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = { name: fd.get('name'), username: fd.get('username'), password: fd.get('password') };
+    if (kind === 'client') Object.assign(body, { role: 'client', client_id: +fd.get('client_id'), client_role: fd.get('client_role'), brands: fd.getAll('brands').map(Number), can_manage_users: fd.get('can_manage_users') ? 1 : 0 });
+    else body.role = fd.get('role');
+    try { await post('user_add', body, 'Acceso creado'); credentialsModal(body.username, body.password, portalUrl()); render({ silent: true }); } catch { /* toast */ }
+  });
+}
+
+/** Portal del cliente: el gestor de accesos (ej. gerente de operaciones) administra a su gente. */
+async function viewPortalAccess() {
+  crumbs([{ label: 'Accesos' }]);
+  const d = await api('portal_users');
+  const locked = (u) => u.id === d.me || u.can_manage_users || u.client_role === 'dueno';
+  const html = `
+    ${pageHead('Accesos', `Personas de <b class="t1">${esc(d.org)}</b> que entran a este panel. Podés crear accesos, cambiar qué marcas ve cada uno y darlos de baja.`, `<button class="btn btn-primary" id="pa-new">${icon('plus', 15)}Nuevo acceso</button>`)}
+    <div class="card overflow-hidden"><div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Persona</th><th style="text-align:left">Rol</th><th style="text-align:left">Marcas</th><th>Último ingreso</th><th></th></tr></thead><tbody>
+      ${d.users.map((u) => `<tr>
+        <td style="text-align:left"><div class="font-medium">${esc(u.name)}${u.id === d.me ? ' <span class="pill plain">Vos</span>' : ''}</div><div class="sub mono">${esc(u.username)}</div></td>
+        <td style="text-align:left">${esc(d.roles[u.client_role] || 'Usuario')}</td>
+        <td style="text-align:left" class="t2">${esc(brandsText(u, d.brands))}</td>
+        <td>${u.last_login_at ? fmt.ago(u.last_login_at) : '<span class="t3">Nunca</span>'}</td>
+        <td><div class="flex justify-end gap-1">${locked(u) ? '<span class="t3 text-xs">Lo administra la agencia</span>' : `
+          <button class="btn btn-sm btn-ghost" data-pa-edit="${u.id}">${icon('sliders', 13)}Editar</button>
+          <button class="btn btn-sm btn-ghost" data-pa-pass="${u.id}" title="Nueva clave">${icon('key', 13)}</button>
+          <button class="btn btn-sm btn-ghost btn-danger" data-pa-del="${u.id}" title="Dar de baja">${icon('x', 13)}</button>`}</div></td>
+      </tr>`).join('')}</tbody></table></div></div>
+    <p class="t3 text-xs mt-3">Dueño, Gerente de operaciones y Gerente ven todas las marcas. Supervisor, Asesor y Usuario ven sólo las marcas tildadas.</p>`;
+  const form = (u) => `<form class="p-5 space-y-3" id="pa-form">
+      ${u ? '' : `<div class="grid grid-cols-2 gap-3"><label class="field"><span>Nombre</span><input class="input" name="name" required></label><label class="field"><span>Usuario</span><input class="input mono" name="username" required autocapitalize="none" pattern="[a-zA-Z0-9._@+\\-]{3,}"></label></div>
+      <label class="field"><span>Contraseña</span><input class="input mono" name="password" minlength="8" required value="${genPassword()}"></label>`}
+      ${personFields(u || { client_role: 'supervisor' }, d.brands).replace(/<option value="dueno"[^>]*>[^<]*<\/option>/, '')}
+      <div class="flex gap-2"><button class="btn btn-primary">${u ? 'Guardar' : 'Crear acceso'}</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button></div></form>`;
+  const open = (u) => {
+    const el = modal(`${modalHead(u ? 'Acceso de ' + u.name : 'Nuevo acceso', esc(d.org))}${form(u)}`, 'sm');
+    const fm = $('#pa-form', el);
+    roleToggle(fm);
+    fm.addEventListener('change', (e) => { if (e.target.name === 'client_role') roleToggle(fm); });
+    fm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(fm);
+      const body = { client_role: fd.get('client_role'), brands: fd.getAll('brands').map(Number) };
+      try {
+        if (u) { await post('portal_user_save', { id: u.id, ...body }, 'Acceso actualizado'); closeModal(); }
+        else { await post('portal_user_add', { ...body, name: fd.get('name'), username: fd.get('username'), password: fd.get('password') }, 'Acceso creado'); credentialsModal(fd.get('username'), fd.get('password'), portalUrl()); }
+        render({ silent: true });
+      } catch { /* toast */ }
+    });
+  };
+  return {
+    html,
+    mount() {
+      $('#pa-new').addEventListener('click', () => open(null));
+      $('#view').addEventListener('click', async (e) => {
+        const ed = e.target.closest('[data-pa-edit]'); if (ed) return open(d.users.find((x) => x.id === +ed.dataset.paEdit));
+        const pw = e.target.closest('[data-pa-pass]');
+        if (pw) {
+          const u = d.users.find((x) => x.id === +pw.dataset.paPass);
+          if (!confirm(`¿Generar una contraseña nueva para ${u.name}?`)) return;
+          const pass = genPassword();
+          await post('portal_user_reset', { id: u.id, password: pass });
+          return credentialsModal(u.username, pass, portalUrl());
+        }
+        const del = e.target.closest('[data-pa-del]');
+        if (del) {
+          const u = d.users.find((x) => x.id === +del.dataset.paDel);
+          if (!confirm(`¿Dar de baja a ${u.name}? No podrá volver a entrar.`)) return;
+          await post('portal_user_delete', { id: u.id }, 'Acceso dado de baja');
+          render({ silent: true });
+        }
+      });
+    },
+  };
+}
+
+// =========================================================================
 // Navegación
 // =========================================================================
 const ADMIN_NAV = [
   ['Rendimiento', [['overview', '#/', 'grid', 'Resumen'], ['budgets', '#/budgets', 'calendar', 'Presupuestos'], ['ads', '#/ads', 'target', 'Campañas', 'ad_account'], ['pages', '#/pages', 'page', 'Facebook', 'page'], ['ig', '#/ig', 'instagram', 'Instagram', 'ig_account'], ['reports', '#/reports', 'report', 'Reportes']]],
   ['Estrategia', [['library', '#/library', 'library', 'Biblioteca de anuncios']]],
-  ['Agencia', [['clients', '#/clients', 'users', 'Clientes'], ['activity', '#/activity', 'bell', 'Actividad'], ['settings', '#/settings', 'sliders', 'Configuración']]],
+  ['Agencia', [['clients', '#/clients', 'users', 'Clientes'], ['access', '#/access', 'key', 'Accesos'], ['activity', '#/activity', 'bell', 'Actividad'], ['settings', '#/settings', 'sliders', 'Configuración']]],
 ];
 const CLIENT_NAV = [['home', '#/', 'home', 'Inicio'], ['ads', '#/ads', 'target', 'Campañas'], ['social', '#/social', 'social', 'Redes'], ['work', '#/work', 'briefcase', 'Trabajo'], ['report', '#/report', 'report', 'Reporte']];
 
@@ -3750,6 +3988,7 @@ function renderNav() {
     const items = CLIENT_NAV.filter(([k]) => (k !== 'ads' || c0.has_ads) && (k !== 'social' || cn.page || cn.ig_account));
     if (c0.has_sales) items.splice(1, 0, ['sales', '#/sales', 'layers', c0.sales_label || 'Ventas']);
     if (c0.has_sheets) items.splice(items.length - 1, 0, ['sheets', '#/sheets', 'grid', 'Planillas']);
+    if (state.boot.user.can_manage_users) items.push(['access', '#/access', 'key', 'Accesos']);
     const html = items.map(([k, href, ic, l]) => `<a href="${href}" data-nav="${k}">${icon(ic)}${esc(l)}</a>`).join('');
     $('#nav').innerHTML = html;
     $('#nav-mobile').innerHTML = html;
@@ -3767,7 +4006,7 @@ function renderNav() {
     return;
   }
   const counts = state.boot.counts;
-  const nav = ADMIN_NAV.map(([sec, items]) => [sec, !isAdmin() ? items.filter(([k]) => k !== 'settings') : items]);
+  const nav = ADMIN_NAV.map(([sec, items]) => [sec, !isAdmin() ? items.filter(([k]) => !['settings', 'access'].includes(k)) : items]);
   $('#nav').innerHTML = nav.map(([sec, items]) => `<div class="nav-sec">${sec}</div>${items.map(([k, href, ic, l, cnt]) => `
     <a href="${href}" data-nav="${k}" class="nav-link">${icon(ic)}${l}${cnt && counts[cnt] ? `<span class="nav-count">${counts[cnt]}</span>` : ''}</a>`).join('')}`).join('');
 }
@@ -3847,6 +4086,7 @@ const ADMIN_ROUTES = [
   [/^\/preview\/(\d+)\/report$/, viewReport, 'clients', true],
   [/^\/preview\/(\d+)\/sheets$/, viewSheets, 'clients', true],
   [/^\/activity$/, viewActivity, 'activity'],
+  [/^\/access$/, viewAccess, 'access'],
   [/^\/settings$/, viewSettings, 'settings'],
 ];
 const CLIENT_ROUTES = [
@@ -3864,13 +4104,14 @@ const CLIENT_ROUTES = [
   [/^\/report$/, () => viewReport(), 'report'],
   [/^\/sheets$/, () => viewSheets(), 'sheets'],
   [/^\/org$/, () => viewOrgHome(portalClient(), state.boot.org), 'home'],
+  [/^\/access$/, viewPortalAccess, 'access'],
 ];
 const NO_LIVE = /^#\/(settings|clients)/;
 
 async function render({ silent = false } = {}) {
   const path = location.hash.replace(/^#/, '') || '/';
   const id = ++state.renderId;
-  if ((isViewer() && /^\/(settings|clients\/\d+)/.test(path)) || (isMember() && /^\/settings/.test(path))) {
+  if ((isViewer() && /^\/(settings|access|clients\/\d+)/.test(path)) || (isMember() && /^\/(settings|access)/.test(path))) {
     const m2 = path.match(/^\/clients\/(\d+)/);
     location.replace(m2 ? `#/preview/${m2[1]}` : '#/');
     return;

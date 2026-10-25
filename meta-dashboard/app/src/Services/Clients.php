@@ -15,7 +15,10 @@ final class Clients
     public const GESTIONES = ['ventas' => 'Ventas', 'cobranzas' => 'Cobranzas', 'recupero' => 'Recuperos', 'turnos' => 'Turnos', 'leads' => 'Consultas', 'otra' => 'Conversiones'];
 
     /** Roles de las personas del cliente. Dueño y gerencia ven todas las marcas; el resto, las asignadas. */
-    public const CLIENT_ROLES = ['dueno' => 'Dueño', 'gerente' => 'Gerente', 'supervisor' => 'Supervisor', 'asesor' => 'Asesor', 'usuario' => 'Usuario'];
+    public const CLIENT_ROLES = ['dueno' => 'Dueño', 'gerente_ops' => 'Gerente de operaciones', 'gerente' => 'Gerente', 'supervisor' => 'Supervisor', 'asesor' => 'Asesor', 'usuario' => 'Usuario'];
+
+    /** Roles que ven todas las marcas del cliente (incluidas las nuevas). */
+    public const ALL_BRANDS_ROLES = ['dueno', 'gerente_ops', 'gerente'];
 
     public const UPDATE_KINDS = [
         'campana' => 'Campaña', 'contenido' => 'Contenido', 'optimizacion' => 'Optimización',
@@ -51,8 +54,7 @@ final class Clients
         return self::find($id) + [
             'assets'  => Db::all('SELECT asset_type, external_id FROM client_assets WHERE client_id = ?', [$id]),
             'rules'   => self::rules($id),
-            'users'   => array_map(fn ($u) => $u + ['brands' => array_map('intval', array_column(Db::all("SELECT ref FROM user_scopes WHERE user_id = ? AND kind = 'client'", [$u['id']]), 'ref'))],
-                Db::all('SELECT id, username, name, client_role, last_login_at, created_at FROM users WHERE client_id = ? ORDER BY id', [$id])),
+            'users'   => self::users($id),
             'children' => self::children($id),
             'parent'   => ($p = self::find($id)['parent_id']) ? ['id' => (int) $p, 'name' => self::find((int) $p)['name']] : null,
             'updates' => self::updates($id),
@@ -310,7 +312,7 @@ final class Clients
         }
         $children = array_column(self::children($base), 'id');
         $assigned = array_map('intval', array_column(Db::all("SELECT ref FROM user_scopes WHERE user_id = ? AND kind = 'client'", [(int) $user['id']]), 'ref'));
-        $all = in_array($user['client_role'] ?? '', ['dueno', 'gerente'], true) || !$assigned;
+        $all = in_array($user['client_role'] ?? '', self::ALL_BRANDS_ROLES, true) || !$assigned;
         if ($all) {
             return array_values(array_unique([$base, ...$children]));
         }
@@ -319,16 +321,27 @@ final class Clients
         return $mine ?: [$base];
     }
 
+    /** Personas con acceso al portal de un cliente, con su rol y marcas. */
+    public static function users(int $clientId): array
+    {
+        return array_map(fn ($u) => ['id' => (int) $u['id'], 'can_manage_users' => (bool) $u['can_manage_users']] + $u
+            + ['brands' => array_map('intval', array_column(Db::all("SELECT ref FROM user_scopes WHERE user_id = ? AND kind = 'client'", [$u['id']]), 'ref'))],
+            Db::all("SELECT id, username, name, client_role, can_manage_users, last_login_at, created_at FROM users WHERE role = 'client' AND client_id = ? ORDER BY name", [$clientId]));
+    }
+
     /** Guarda rol y marcas visibles de una persona del cliente. */
-    public static function setClientUser(int $userId, ?string $role, array $brandIds): void
+    public static function setClientUser(int $userId, ?string $role, array $brandIds, ?bool $canManage = null): void
     {
         $u = Db::one("SELECT id, client_id FROM users WHERE id = ? AND role = 'client'", [$userId]);
         if (!$u) {
             throw new InvalidArgumentException('Usuario inexistente.');
         }
         Db::exec('UPDATE users SET client_role = ? WHERE id = ?', [isset(self::CLIENT_ROLES[$role]) ? $role : null, $userId]);
+        if ($canManage !== null) {
+            Db::exec('UPDATE users SET can_manage_users = ? WHERE id = ?', [$canManage ? 1 : 0, $userId]);
+        }
         Db::exec("DELETE FROM user_scopes WHERE user_id = ? AND kind = 'client'", [$userId]);
-        if (in_array($role, ['dueno', 'gerente'], true)) {
+        if (in_array($role, self::ALL_BRANDS_ROLES, true)) {
             return; // ven todas, incluidas las marcas nuevas
         }
         $valid = array_column(self::children((int) $u['client_id']), 'id');

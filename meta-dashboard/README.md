@@ -60,8 +60,14 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 
 - **Cliente** = la empresa que contrata (ej. *PayLab Gestión*). **Marcas** = sus unidades o gestiones (Go Celular, GetNet, Osacra, Clover, VTV Buenos Aires, ITV Córdoba…), cada una con su **tipo de gestión** (ventas, cobranzas, recupero, turnos, consultas) que define cómo se llama su resultado.
 - En *Clientes* se ven sólo los clientes; las marcas se crean y se abren desde **Cliente → Marcas**. Cada marca tiene sus cuentas, ventas, planillas, objetivos y portal.
-- **Accesos con rol** (Cliente → Accesos): *Dueño* y *Gerente* ven **todas** las marcas (también las nuevas) y un **resumen consolidado** (inversión +35%, conversaciones, ventas/gestiones, costo por venta, avance del objetivo de cada marca). *Supervisor*, *Asesor* y *Usuario* ven sólo las marcas tildadas; no ven las cuentas completas del cliente porque mezclan marcas. Arriba del portal hay un selector de marca.
+- **Accesos con rol** (Cliente → Accesos): *Dueño*, *Gerente de operaciones* y *Gerente* ven **todas** las marcas (también las nuevas) y un **resumen consolidado** (inversión +35%, conversaciones, ventas/gestiones, costo por venta, avance del objetivo de cada marca). *Supervisor*, *Asesor* y *Usuario* ven sólo las marcas tildadas; no ven las cuentas completas del cliente porque mezclan marcas. Arriba del portal hay un selector de marca.
 - **Planillas** (Cliente o Marca → Planillas): cualquier Google Sheets (cobranzas, turnos, leads, asesores…) se ve dentro del portal tal cual, con todas sus pestañas y un buscador, y se vuelve a leer cada 5 minutos. Las ventas cargadas en planillas también se releen cada 5 minutos.
+
+### Accesos (panel general y del cliente)
+
+- **Agencia → Accesos** (sólo administradores): todas las personas del sistema —tu equipo y los usuarios de cada cliente— con filtros por tipo y cliente. Desde ahí se crea cualquier acceso, se cambia rol y marcas, se genera una clave nueva o se da de baja. Los clientes no ven esta pantalla ni saben quién más tiene acceso.
+- **Permiso "Puede gestionar los accesos"** (ej. David, *Gerente de operaciones* de PayLab): en su portal aparece **Accesos**, donde crea, edita y da de baja personas **de su empresa** y elige qué marcas ve cada una. No ve tu panel, ni a tu equipo, ni a otros clientes; no puede dar este permiso a nadie, ni asignar el rol Dueño, ni tocar al Dueño, a otros gestores o a sí mismo. Todo su acceso al contenido es de lectura.
+- **Clientes → Seleccionar**: elegir varios clientes y eliminarlos juntos (útil para limpiar clientes de prueba). "Todos menos los que tienen marcas" deja a salvo a los clientes como PayLab.
 
 ### Plan de presupuesto por objetivos
 
