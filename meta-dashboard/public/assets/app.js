@@ -69,6 +69,7 @@ const ICONS = {
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   calendar: '<rect x="4" y="5.5" width="16" height="14.5" rx="2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+  library: '<path d="M5 4.5h3v15H5zM10 4.5h3v15h-3z"/><path d="m15.2 5.6 2.9-.8 3.6 13.6-2.9.8z"/>',
   layers: '<path d="m12 4 8.5 4.5L12 13 3.5 8.5z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5M3.5 16.5 12 21l8.5-4.5"/>',
 };
 const icon = (name, size = 16, extra = '') => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" ${extra}>${ICONS[name] || ''}</svg>`;
@@ -663,7 +664,7 @@ async function viewAdAccounts() {
   a.ad_accounts.forEach((acc) => { (groups[acc.data.business?.name || 'Sin portfolio comercial'] ||= []).push(acc); });
   const ok = (s) => [1, 201].includes(+s);
   const html = `
-    ${pageHead('Cuentas publicitarias', `${a.ad_accounts.length} cuentas${isClient() ? '' : ` en ${Object.keys(groups).length} portfolios`}`, `<input class="input w-64" placeholder="Buscar cuenta" id="acc-search">`)}
+    ${pageHead('Cuentas publicitarias', `${a.ad_accounts.length} cuentas${isClient() ? '' : ` en ${Object.keys(groups).length} portfolios`}`, `<div class="flex gap-2 flex-wrap"><a class="btn btn-primary" href="#/ads/top">${icon('up', 14)}Creativos que más traccionan</a><input class="input w-64" placeholder="Buscar cuenta" id="acc-search"></div>`)}
     ${Object.entries(groups).sort(([x], [y]) => x.localeCompare(y)).map(([biz, list]) => `
       <section class="mb-8" data-group>
         <div class="eyebrow mb-3 flex items-center gap-2">${icon('briefcase', 13)}${esc(biz)}<span class="opacity-60">· ${list.length}</span></div>
@@ -764,11 +765,12 @@ async function viewAccount(accountId) {
     ${capPct !== null && !isClient() ? `<div class="card p-4 mb-6"><div class="flex text-xs t2 mb-2"><span>Límite de gasto de la cuenta</span><span class="flex-1"></span><span class="num">${fmt.money(a.amount_spent, cur)} de ${fmt.money(a.spend_cap, cur)}</span></div><div class="bar"><i style="width:${capPct}%;${capPct > 90 ? 'background:var(--bad)' : ''}"></i></div></div>` : ''}
     ${adsKpis(d.metrics, d.previous, cur, d.daily, { client: isClient() })}
     ${adsChartBlock('acc-chart')}
+    <div id="acc-top"></div>
     ${isClient() ? '' : alertsBlock(d.alerts)}
     ${tableHtml('camps', cols, d.campaigns, { title: `Campañas <span class="t3 font-normal">${d.campaigns.length}</span>`, sort: 'spend', csvName: 'campanas', filters: liveFilters,
       onClick: (r) => (location.hash = `#/ads/${accountId}/c/${r.id}`) })}
     ${d.sliced ? '' : `<div class="mt-6">${breakdownBlock('acc-bd')}</div>`}`;
-  return { html, mount() { mountTable('camps'); mountAdsChart('acc-chart', d.daily, cur); if (!d.sliced) mountBreakdown('acc-bd', accountId, accountId, cur); } };
+  return { html, mount() { mountTable('camps'); mountAdsChart('acc-chart', d.daily, cur); topCreatives($('#acc-top'), { account: accountId, limit: 8 }); if (!d.sliced) mountBreakdown('acc-bd', accountId, accountId, cur); } };
 }
 
 function entityHeader(e, cur, sub) {
@@ -892,6 +894,117 @@ async function loadAds(containerId, parentId, accountId, cur) {
     $$('[data-mode]', box).forEach((b) => b.addEventListener('click', () => { viewMode = b.dataset.mode; store.set('adsView', viewMode); draw(); }));
   };
   draw();
+}
+
+// =========================================================================
+// Creativos activos que más traccionan
+// =========================================================================
+const TOP_METRICS = {
+  results: ['Resultados', fmt.int], cost_per_result: ['Menor costo por resultado', null], link_ctr: ['CTR de enlace', fmt.pct],
+  roas: ['ROAS', fmt.x], purchases: ['Compras', fmt.int], messages: ['Conversaciones', fmt.int], link_clicks: ['Clics en enlace', fmt.int],
+  spend: ['Inversión', null], cpm: ['Menor CPM', null],
+};
+const topFmt = (k, cur) => TOP_METRICS[k][1] || ((v) => fmt.money(v, cur));
+const topLabel = (k) => TOP_METRICS[k][0].replace(/^Menor /, '').replace(/^c/, 'C');
+
+/** Bloque reutilizable. opts: { account, limit, title, full } */
+async function topCreatives(box, opts = {}) {
+  if (!box) return;
+  let metric = store.get('topMetric', 'results');
+  const limit = opts.limit || 12;
+  const load = async () => {
+    box.innerHTML = `<div class="card p-5 mb-6"><div class="sk h-8 w-72 mb-4"></div><div class="sk h-56"></div></div>`;
+    let d;
+    try { d = await api('top_ads', rp({ account: opts.account, metric, limit })); } catch (e) { box.innerHTML = errorBox(e.message, false); return; }
+    paint(d);
+  };
+  const paint = (d) => {
+    const ads = d.ads;
+    const cur = d.currencies[0] || 'ARS';
+    const f = (a) => topFmt(metric, a.account.currency);
+    const sel = `<select class="select select-sm" data-top-metric>${Object.entries(TOP_METRICS).map(([k, [l]]) => `<option value="${k}" ${k === metric ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    const head = `<div class="card-h flex-wrap gap-2"><div class="min-w-0"><div class="h2">${esc(opts.title || 'Creativos activos que más traccionan')}</div>
+        <div class="t3 text-xs mt-0.5">${d.active_total} anuncios activos con inversión en el período · ranking por ${esc(lower(TOP_METRICS[metric][0]))}</div></div>
+        <div class="flex-1"></div><span class="t3 text-xs">Ordenar por</span>${sel}
+        ${opts.full ? '' : `<a class="btn btn-sm" href="#/ads/top">${icon('grid', 13)}Ver todos</a>`}</div>`;
+    if (!ads.length) {
+      box.innerHTML = `<div class="card mb-6">${head}<div class="p-8 text-center t3">No hay anuncios activos con inversión en este período${metric === 'cost_per_result' ? ' y con resultados' : ''}.</div></div>`;
+      hydrateIcons(box); bind(); return;
+    }
+    const best = ads[0];
+    const cards = ads.map((a, i) => {
+      const series = a.daily.map((x) => x[metric]);
+      const v = a.metrics[metric];
+      return `<button class="card card-link overflow-hidden flex flex-col text-left top-card" data-top="${i}">
+        <div class="relative w-full thumb-wrap">${a.creative.thumbnail ? `<img src="${esc(a.creative.thumbnail)}" class="thumb" loading="lazy" alt="">` : '<div class="thumb-ph">Sin vista previa</div>'}
+          <div class="absolute top-2.5 left-2.5 rank-badge ${i < 3 ? 'gold' : ''}">#${i + 1}</div>
+          ${a.creative.type ? `<div class="absolute top-2.5 right-2.5 pill plain" style="background:var(--panel);color:var(--t2)">${esc(lower(a.creative.type).replace(/_/g, ' '))}</div>` : ''}</div>
+        <div class="p-4 flex-1 flex flex-col w-full gap-1">
+          <div class="font-medium t1 line-clamp-2">${esc(a.name)}</div>
+          <div class="t3 text-[11.5px] truncate" title="${esc(a.campaign.name || '')}">${esc(a.campaign.name || '')}${opts.account ? '' : ` · ${esc(a.account.name)}`}</div>
+          <div class="flex items-end gap-2 mt-2"><div><div class="t3 text-[11px]">${esc(topLabel(metric))}</div><div class="num text-xl font-semibold t1">${f(a)(v)}</div></div><div class="flex-1 min-w-0 h-[34px] top-spark">${sparkline(series, { height: 34 })}</div></div>
+          <div class="grid grid-cols-3 gap-2 mt-2 pt-3 hair-t">
+            <div><div class="t3 text-[11px]">Inversión</div><div class="num font-medium t1">${fmt.moneyShort(a.metrics.spend, a.account.currency)}</div></div>
+            <div><div class="t3 text-[11px] truncate">${esc(a.metrics.result_label || 'Resultados')}</div><div class="num font-medium t1">${fmt.int(a.metrics.results)}</div></div>
+            <div><div class="t3 text-[11px]">Costo/res.</div><div class="num font-medium t1">${fmt.moneyShort(a.metrics.cost_per_result, a.account.currency)}</div></div>
+            <div><div class="t3 text-[11px]">CTR</div><div class="num t2">${fmt.pct(a.metrics.link_ctr)}</div></div>
+            <div><div class="t3 text-[11px]">CPM</div><div class="num t2">${fmt.moneyShort(a.metrics.cpm, a.account.currency)}</div></div>
+            <div><div class="t3 text-[11px]">ROAS</div><div class="num t2">${fmt.x(a.metrics.roas)}</div></div>
+          </div>
+        </div></button>`;
+    }).join('');
+    box.innerHTML = `<div class="card mb-6">${head}
+      <div class="grid lg:grid-cols-[1fr_300px] gap-0 hair-b">
+        <div class="p-4" style="height:${Math.max(220, Math.min(ads.length, 12) * 30 + 40)}px"><canvas data-top-chart></canvas></div>
+        <div class="p-5 lg:border-l bd flex flex-col gap-3">
+          <div class="eyebrow">El que más tracciona</div>
+          <div class="flex gap-3 items-center">${best.creative.thumbnail ? `<img src="${esc(best.creative.thumbnail)}" class="w-14 h-14 rounded-xl object-cover" alt="">` : ''}<div class="min-w-0"><div class="font-semibold t1 line-clamp-2">${esc(best.name)}</div><div class="t3 text-xs truncate">${esc(best.campaign.name || '')}</div></div></div>
+          <div class="num text-3xl font-semibold t1">${f(best)(best.metrics[metric])}</div>
+          <div class="t2 text-[13px]">${esc(topLabel(metric))} en el período${ads[1] && ads[1].metrics[metric] ? ` · ${(() => { if (d.asc) { const p = (1 - best.metrics[metric] / ads[1].metrics[metric]) * 100; return p > 0.5 ? fmt.dec(p, 0) + '% más barato que el #2' : 'parejo con el #2'; } const r = best.metrics[metric] / ads[1].metrics[metric]; return r > 1.005 ? fmt.dec((r - 1) * 100, 0) + '% más que el #2' : 'parejo con el #2'; })()}` : ''}.</div>
+          <div class="h-[60px] top-spark">${sparkline(best.daily.map((x) => x[metric]), { height: 60 })}</div>
+        </div>
+      </div>
+      <div class="p-4 grid sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">${cards}</div>
+      ${d.errors.length ? `<div class="px-5 pb-4 t-warn text-xs">${esc(d.errors.join(' · '))}</div>` : ''}
+    </div>`;
+    hydrateIcons(box);
+    const top = ads.slice(0, 12);
+    chart($('[data-top-chart]', box), top.map((a, i) => `#${i + 1} ${a.name.length > 34 ? a.name.slice(0, 33) + '…' : a.name}`),
+      [{ label: topLabel(metric), data: top.map((a) => a.metrics[metric]), type: 'bar', fmt: topFmt(metric, cur), color: cssVar('--accent'), alpha: 'cc' }],
+      { horizontal: true, fmtY: topFmt(metric, cur) });
+    $$('[data-top]', box).forEach((el) => el.addEventListener('click', () => topAdModal(ads[+el.dataset.top], metric)));
+    bind();
+  };
+  const bind = () => $('[data-top-metric]', box)?.addEventListener('change', (e) => { metric = e.target.value; store.set('topMetric', metric); load(); });
+  await load();
+}
+
+function topAdModal(a, metric) {
+  adModal(a, a.account.currency);
+  const card = $('#modal .modal-card');
+  $('.card-h', card).insertAdjacentHTML('afterend', `<div class="px-5 pt-5 hair-b pb-4"><div class="flex items-center gap-2 mb-2"><div class="h2">Día a día</div><div class="flex-1"></div>
+    <select class="select select-sm" id="top-modal-metric">${Object.entries(TOP_METRICS).filter(([k]) => k !== 'spend').map(([k, [l]]) => `<option value="${k}" ${k === metric ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    <div class="h-[240px]"><canvas id="top-modal-chart"></canvas></div></div>`);
+  let c;
+  const draw = (k) => {
+    dropChart(c);
+    const money = (v) => fmt.money(v, a.account.currency);
+    c = chart($('#top-modal-chart'), a.daily.map((x) => fmt.date(x.date)), [
+      { label: 'Inversión', data: a.daily.map((x) => x.spend), type: 'bar', fmt: money, color: cssVar('--t3') },
+      { label: topLabel(k), data: a.daily.map((x) => x[k]), axis: 'y1', fmt: topFmt(k, a.account.currency), color: cssVar('--accent') },
+    ], { fmtY: money, fmtY1: topFmt(k, a.account.currency) });
+  };
+  $('#top-modal-metric').addEventListener('change', (e) => draw(e.target.value));
+  draw(metric === 'spend' ? 'results' : metric);
+}
+
+async function viewTopAds() {
+  crumbs([{ label: 'Campañas', href: '#/ads' }, { label: 'Creativos que más traccionan' }]);
+  return {
+    html: `${pageHead('Creativos que más traccionan', 'Anuncios activos de todas tus cuentas, ordenados por la métrica que elijas. Tocá uno para ver su evolución día a día.', `<a class="btn" href="#/ads">${icon('target', 14)}Cuentas</a>`)}
+      <div id="top-all"></div>`,
+    mount() { topCreatives($('#top-all'), { limit: 24, full: true, title: 'Ranking de creativos activos' }); },
+  };
 }
 
 function adModal(ad, cur) {
@@ -2423,11 +2536,13 @@ async function viewBudgets() {
   return {
     html: `${pageHead(`Presupuestos · ${esc(monthName)}`, `Día ${d.day} de ${d.days_in_month} · todos los montos “+${tax}” incluyen impuestos sobre el gasto en Meta`, isAdmin() ? `<a class="btn" href="#/settings">${icon('sliders', 14)}Impuestos: ${tax}</a>` : `<span class="pill plain">Impuestos ${tax}</span>`)}
       ${totals}
+      <div id="plan-box"><div class="sk h-64 mb-8"></div></div>
       ${d.brands.length ? `<div class="flex items-center gap-2 mb-3"><div class="h2">Por marca / cliente</div><span class="t3 text-xs">suma sus campañas aunque compartan cuenta publicitaria</span></div>
         <div class="grid md:grid-cols-2 2xl:grid-cols-3 gap-4 mb-8" id="brand-list">${d.brands.map(brandCard).join('')}</div>` : ''}
       <div class="flex items-center gap-3 mb-3"><div class="h2">Por cuenta publicitaria</div><div class="flex-1"></div><input class="input select-sm w-56" placeholder="Buscar cuenta" id="bud-search"></div>
       <div id="bud-list">${d.accounts.map(accountCard).join('')}</div>`,
     mount() {
+      planSection($('#plan-box'));
       $('#bud-search').addEventListener('input', (e) => { const q = e.target.value.toLowerCase(); $$('#bud-list [data-acc]').forEach((el) => { el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none'; }); });
       $('#view').addEventListener('click', async (e) => {
         const g = e.target.closest('[data-bgoal]');
@@ -2451,6 +2566,148 @@ async function viewBudgets() {
       $('#view').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.plan) $(`[data-plan-save="${e.target.dataset.plan}"]`).click(); });
     },
   };
+}
+
+// =========================================================================
+// Plan de presupuesto por objetivos (dentro de Presupuestos)
+// =========================================================================
+const PLAN_STATUS = {
+  cumplido: ['Objetivo cumplido', 'green'], en_camino: ['En camino', 'green'], ajustar: ['Hay que ajustar', 'amber'], en_riesgo: ['En riesgo', 'red'],
+  sin_objetivo: ['Sin objetivo', 'gray'], sin_datos: ['Sin ventas para calcular', 'gray'], plan: ['Planificado', 'blue'],
+};
+const GRAN = { month: ['Mes', 'por mes'], week: ['Semana', 'por semana'], day: ['Día', 'por día'] };
+
+async function planSection(box) {
+  const cfg = { month: 'next', basis: 'avg3', gran: 'month', ...store.get('planCfg', {}) };
+  const load = async () => {
+    store.set('planCfg', cfg);
+    box.querySelector('[data-plan-body]')?.classList.add('opacity-50');
+    let d;
+    try { d = await api('budget_plan', { month: cfg.month, basis: cfg.basis }); } catch (e) { box.innerHTML = errorBox(e.message, false); return; }
+    box.innerHTML = planHtml(d, cfg);
+    hydrateIcons(box);
+  };
+  box.addEventListener('click', async (e) => {
+    const s = e.target.closest('[data-plan-cfg]');
+    if (s) { cfg[s.dataset.planCfg] = s.dataset.v; return load(); }
+    const u = e.target.closest('[data-plan-apply]');
+    if (u) {
+      const [cid, month, amount] = u.dataset.planApply.split('|');
+      await post('budget_save', { client_id: +cid, month, amount: Math.round(+amount) }, 'Presupuesto planificado actualizado');
+      return cfg.month === 'current' ? render({ silent: true }) : load();
+    }
+  });
+  box.addEventListener('change', async (e) => {
+    if (e.target.id === 'plan-basis') { cfg.basis = e.target.value; return load(); }
+    const g = e.target.closest('[data-plan-goal]');
+    if (g) {
+      const [cid, month] = g.dataset.planGoal.split('|');
+      await post('brand_goal_save', { client_id: +cid, month, target_orders: g.value }, 'Objetivo guardado');
+      load();
+    }
+  });
+  box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.planGoal) e.target.blur(); });
+  await load();
+}
+
+function planHtml(d, cfg) {
+  const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
+  const cur = d.which === 'current';
+  const div = cfg.gran === 'day' ? d.month.days : cfg.gran === 'week' ? d.month.days / 7 : 1;
+  const per = (v) => (v === null || v === undefined ? null : v / div);
+  const monthTitle = `${cap(d.month.name)} ${d.month.year}`;
+  const monthOf = (w) => { const t = new Date(); t.setDate(1); if (w === 'next') t.setMonth(t.getMonth() + 1); return t.toLocaleDateString(LOCALE, { month: 'long' }); };
+  const label = (b) => esc(lower(b.sales_label || 'Ventas'));
+
+  const goalInput = (b) => canEdit()
+    ? `<input class="input select-sm num !w-24 text-right" data-plan-goal="${b.id}|${d.month.key}" value="${b.target_orders !== null && b.goal_from === 'mes' ? +b.target_orders : ''}" placeholder="${b.goal_from === 'cliente' ? fmt.int(b.target_orders) : 'Cargar'}" inputmode="decimal" title="${b.goal_from === 'cliente' ? 'Toma el objetivo fijo de la ficha del cliente. Escribí uno para este mes.' : 'Objetivo de ' + esc(d.month.name)}">`
+    : `<span class="num font-semibold">${b.goal_orders !== null ? fmt.int(b.goal_orders) : '—'}</span>`;
+  const costCell = (b) => {
+    const m = (v) => fmt.money(v, b.currency);
+    if (b.cost === null) return '<span class="t3">—</span>';
+    const note = b.cost_from !== d.basis ? `<div class="sub">usa ${esc(lower(d.bases[b.cost_from]))}</div>` : '';
+    const cheaper = b.cheaper_pct !== null && Math.abs(b.cheaper_pct) >= 5 && d.basis !== 'current'
+      ? `<div class="sub ${b.cheaper_pct > 0 ? 't-pos' : 't-bad'}">este mes ${b.cheaper_pct > 0 ? '−' : '+'}${fmt.dec(Math.abs(b.cheaper_pct), 0)}%</div>` : '';
+    return `<span class="num">${m(b.cost)}</span>${note}${cheaper}`;
+  };
+  const brandCell = (b) => `<div class="flex items-center gap-2.5"><div class="mono-avatar w-7 h-7 text-[10px] shrink-0" style="background:${esc(b.color)};color:#fff">${b.logo_url ? `<img src="${esc(b.logo_url)}" class="w-full h-full object-contain rounded-[8px] bg-white" alt="">` : esc(initials(b.name))}</div>
+    <div class="min-w-0"><a class="font-medium hover:underline" href="#/preview/${b.id}">${esc(b.name)}</a>${b.goal_from === 'cliente' ? '<div class="sub">objetivo fijo de la ficha</div>' : ''}</div></div>`;
+  const st = (b) => { const [l, c] = PLAN_STATUS[b.status] || PLAN_STATUS.plan; return `<span class="pill ${c}">${l}</span>`; };
+  const apply = (b) => (canEdit() && b.required ? `<button class="btn btn-sm btn-ghost !h-7" data-plan-apply="${b.id}|${d.month.key}|${b.required}" title="Guardar ${fmt.money(b.required, b.currency)} como presupuesto planificado de ${esc(d.month.name)}">${icon('check', 13)}${b.planned && Math.abs(b.planned - b.required) < 1 ? 'Aplicado' : 'Usar'}</button>` : '');
+
+  const rows = d.brands.map((b) => {
+    const m = (v) => fmt.money(v, b.currency);
+    const req = `<div class="num font-semibold t1">${m(per(b.required))}</div><div class="sub">en Meta ${m(per(b.required) !== null ? per(b.required) / (1 + d.tax_rate) : null)}</div>`;
+    if (cur) {
+      const t = b.to_date || {};
+      const pct = b.progress ?? 0;
+      const bar = b.goal_orders ? `<div class="relative h-1.5 rounded-full sunk overflow-hidden mt-1.5 w-28 ml-auto"><div class="absolute inset-y-0 left-0 rounded-full" style="width:${Math.min(100, pct)}%;background:var(--${b.status === 'en_riesgo' ? 'bad' : b.status === 'ajustar' ? 'warn' : 'accent'})"></div><div class="absolute inset-y-0 w-px" style="left:${Math.min(100, b.expected_progress)}%;background:var(--t2)"></div></div>` : '';
+      const dailyGap = b.daily_needed !== null ? b.daily_needed - b.active_daily_tax : null;
+      return `<tr class="${b.efficient ? 'row-win' : ''}">
+        <td style="text-align:left">${brandCell(b)}<div class="flex items-center gap-1 mt-1.5 ml-[38px]">${st(b)}${apply(b)}</div></td>
+        <td>${goalInput(b)}</td>
+        <td><div class="num font-semibold">${fmt.int(t.orders)}${b.goal_orders ? ` <span class="t3 font-normal">· ${fmt.dec(pct, 0)}%</span>` : ''}</div>${bar}</td>
+        <td><div class="num font-semibold ${b.goal_orders && b.projected_orders !== null ? (b.projected_orders >= b.goal_orders ? 't-pos' : 't-bad') : ''}">${b.projected_orders !== null ? fmt.int(b.projected_orders) : '—'}</div><div class="sub">al ritmo actual</div></td>
+        <td>${costCell(b)}</td>
+        <td>${req}</td>
+        <td><div class="num font-semibold">${b.remaining_orders !== null ? fmt.int(b.remaining_orders) : '—'}</div><div class="sub">${b.needed_rest !== null ? m(b.needed_rest) + ' +' + tax : ''}</div></td>
+        <td><div class="num font-semibold t-accent">${b.daily_needed !== null ? m(b.daily_needed) : '—'}</div><div class="sub">${b.daily_needed !== null ? 'en Meta ' + m(b.daily_needed / (1 + d.tax_rate)) : ''}</div>
+          <div class="sub">activo ${m(b.active_daily_tax)}${dailyGap !== null && Math.abs(dailyGap) > 1 ? ` · <span class="${dailyGap > 0 ? 't-warn' : 't-pos'}">${dailyGap > 0 ? 'subir' : 'sobra'} ${m(Math.abs(dailyGap))}</span>` : ''}</div></td>
+      </tr>`;
+    }
+    return `<tr class="${b.efficient ? 'row-win' : ''}">
+      <td style="text-align:left">${brandCell(b)}</td>
+      <td>${goalInput(b)}</td>
+      <td>${costCell(b)}</td>
+      <td>${req}</td>
+      <td><div class="num">${m(per(b.pace_month))}</div><div class="sub">${b.pace_orders !== null ? '≈ ' + fmt.int(b.pace_orders) + ' ' + label(b) : ''}</div></td>
+      <td>${b.delta_daily !== null ? `<div class="num font-semibold ${b.delta_daily > 0 ? 't-warn' : 't-pos'}">${b.delta_daily > 0 ? '+' : '−'}${m(Math.abs(b.delta_daily))}<span class="t3 font-normal">/día</span></div><div class="sub">${b.delta_daily > 0 ? 'subir' : 'se puede bajar'} · en Meta ${m(Math.abs(b.delta_daily) / (1 + d.tax_rate))}</div>` : '<span class="t3">—</span>'}</td>
+      <td>${b.planned ? `<div class="num">${m(b.planned)}</div>` : '<span class="t3">—</span>'}</td>
+      <td><div class="flex items-center justify-end gap-1.5">${st(b)}${apply(b)}</div></td>
+    </tr>`;
+  }).join('');
+
+  // Totales (sólo si todas las marcas usan la misma moneda).
+  const curs = [...new Set(d.brands.map((b) => b.currency))];
+  const sum = (k) => d.brands.reduce((s, b) => s + (b[k] || 0), 0);
+  const totals = curs.length === 1 && d.brands.some((b) => b.required) ? (() => {
+    const m = (v) => fmt.money(v, curs[0]);
+    const req = sum('required');
+    return `<div class="kpi-row grid-cols-2 lg:grid-cols-4" style="display:grid">
+      ${kpi(`Inversión necesaria ${GRAN[cfg.gran][1]} (+${tax})`, m(req / div), { spark: '', d: `<span class="t3 text-xs">${m(req)} en ${esc(d.month.name)}</span>`, vs: '' })}
+      ${kpi(`En Meta ${GRAN[cfg.gran][1]} (sin imp.)`, m(req / div / (1 + d.tax_rate)), { spark: '', d: `<span class="t3 text-xs">${m(req / d.month.days / (1 + d.tax_rate))}/día a cargar</span>`, vs: '' })}
+      ${kpi(`Objetivo total`, fmt.int(sum('goal_orders')), { spark: '', d: `<span class="t3 text-xs">${d.brands.filter((b) => b.goal_orders).length} marcas con objetivo</span>`, vs: '' })}
+      ${kpi(`Ritmo actual ${GRAN[cfg.gran][1]}`, m(sum('active_daily_tax') * d.month.days / div), { spark: '', d: `<span class="t3 text-xs">${m(sum('active_daily_tax'))}/día activo +${tax}</span>`, vs: '' })}
+    </div>`;
+  })() : '';
+
+  const wins = d.brands.filter((b) => b.efficient);
+  const winHtml = wins.length ? `<div class="px-5 pb-4 grid sm:grid-cols-2 xl:grid-cols-3 gap-3">${wins.map((b) => {
+    const m = (v) => fmt.money(v, b.currency);
+    const txt = cur
+      ? `Va a cerrar en <b>${fmt.int(b.projected_orders)}</b> ${label(b)} (objetivo ${fmt.int(b.goal_orders)}) invirtiendo ${b.savings ? `<b>${m(b.savings)}</b> menos` : 'menos'} de lo estimado.`
+      : `Este mes su costo por venta está <b>${fmt.dec(b.cheaper_pct, 0)}% más bajo</b> que la base: con el mismo presupuesto vende más. Buena candidata para escalar.`;
+    return `<div class="win-card"><div class="flex items-center gap-2"><span class="win-ic">${icon('up', 14)}</span><b class="t1">${esc(b.name)}</b><span class="pill green plain">${cur ? 'Supera con menos presupuesto' : 'Eficiente'}</span></div><div class="t2 text-[13px] mt-1.5">${txt}</div></div>`;
+  }).join('')}</div>` : '';
+
+  const head = cur
+    ? `<th style="text-align:left">Marca</th><th>Objetivo</th><th>Vendidas</th><th>Proyección</th><th>Costo por venta</th><th>Inversión ${GRAN[cfg.gran][1]}</th><th>Faltan</th><th>Diario necesario</th>`
+    : `<th style="text-align:left">Marca</th><th>Objetivo</th><th>Costo por venta</th><th>Inversión ${GRAN[cfg.gran][1]} +${tax}</th><th>Al ritmo actual</th><th>Ajuste diario</th><th>Planificado</th><th></th>`;
+
+  return `<div class="card mb-8 overflow-hidden" data-plan-body>
+    <div class="p-5 flex flex-wrap items-end gap-4">
+      <div class="min-w-[240px] flex-1"><div class="h2">Plan por objetivos · ${esc(monthTitle)}</div>
+        <div class="t3 text-xs mt-0.5">Cargá cuántas ${esc('ventas')} querés por marca: calculamos cuánto invertir con su costo por venta real (Meta +${tax} ÷ ventas de la planilla).</div></div>
+      <div><div class="t3 text-xs mb-1.5">Mes</div><div class="seg">${[['current', 'En curso'], ['next', 'Siguiente']].map(([v, l]) => `<button data-plan-cfg="month" data-v="${v}" class="${cfg.month === v ? 'on' : ''}">${l} · ${esc(monthOf(v))}</button>`).join('')}</div></div>
+      <label class="field"><span>Costo por venta según</span><select class="input select-sm" id="plan-basis">${Object.entries(d.bases).map(([k, l]) => `<option value="${k}" ${d.basis === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <div><div class="t3 text-xs mb-1.5">Ver</div><div class="seg">${Object.entries(GRAN).map(([k, [l]]) => `<button data-plan-cfg="gran" data-v="${k}" class="${cfg.gran === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    </div>
+    ${totals ? `<div class="px-5 pb-5">${totals}</div>` : ''}
+    ${winHtml}
+    ${d.brands.length ? `<div class="scroll-x hair-t"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`
+      : '<div class="p-5 t3 hair-t">No hay marcas asignadas. Creá los clientes y asignales sus campañas.</div>'}
+    <div class="px-5 py-3 hair-t t3 text-xs">Inversión = objetivo × costo por venta (con ${tax} de impuestos). “En Meta” es lo que se carga como presupuesto en el Administrador de anuncios. ${cur ? `Quedan ${d.remaining_days} días: lo que falta se calcula con el costo del mes.` : ''} Las marcas en verde superan el objetivo con menos presupuesto.</div>
+  </div>`;
 }
 
 /** Estado de un objetivo mensual de campaña. */
@@ -2949,10 +3206,205 @@ async function viewReports() {
 const SalesNum = (s) => { const v = parseFloat(String(s).replace(/\./g, '').replace(',', '.')); return Number.isFinite(v) ? v : 0; };
 
 // =========================================================================
+// Biblioteca de anuncios (investigación por nicho + referencias guardadas)
+// =========================================================================
+const libUrl = (q, country = 'AR') => 'https://www.facebook.com/ads/library/?' + new URLSearchParams({ active_status: 'active', ad_type: 'all', country, is_targeted_country: 'false', media_type: 'all', q, search_type: 'keyword_unordered' });
+const NICHE_PRESETS = [
+  { name: 'Celulares y tecnología', keywords: 'celulares en cuotas\ncelular libre\niphone\nsamsung galaxy\nplan canje celular\nmotorola' },
+  { name: 'Cobros y terminales (posnet)', keywords: 'posnet\nterminal de cobro\ncobrar con tarjeta\nlector de tarjetas\ncobrar con QR\npunto de venta' },
+  { name: 'VTV / ITV', keywords: 'VTV\nverificación técnica vehicular\nturno VTV\nITV' },
+];
+
+async function viewLibrary() {
+  crumbs([{ label: 'Biblioteca de anuncios' }]);
+  const [d, clients] = await Promise.all([api('adlib'), api('clients').catch(() => [])]);
+  const f = { tab: 'niches', niche: '', client: '', format: '', ...store.get('libCfg', {}) };
+  const save = () => store.set('libCfg', { tab: f.tab, niche: f.niche, client: f.client, format: f.format });
+  const countryOpts = (sel) => Object.entries(d.countries).map(([k, l]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+
+  const nicheCard = (n) => `
+    <div class="card p-5 flex flex-col gap-4">
+      <div class="flex items-start gap-3">
+        <div class="min-w-0 flex-1"><div class="h2">${esc(n.name)}</div><div class="t3 text-xs mt-0.5">${esc(d.countries[n.country] || n.country)} · anuncios activos · ${n.saved} ${n.saved === 1 ? 'referencia' : 'referencias'}</div></div>
+        ${canEdit() ? `<button class="btn btn-sm btn-ghost btn-icon" data-niche-edit="${n.id}" title="Editar">${icon('sliders', 14)}</button>` : ''}
+      </div>
+      <div><div class="t3 text-xs mb-2">Palabras clave · abren la Biblioteca de Meta filtrada</div>
+        <div class="flex flex-wrap gap-2">${n.links.map((l) => `<a class="kw-chip" href="${esc(l.url)}" target="_blank" rel="noopener">${icon('search', 13)}${esc(l.q)}</a>`).join('') || '<span class="t3 text-xs">Sin palabras clave</span>'}</div></div>
+      <div><div class="t3 text-xs mb-2">Competidores</div>
+        ${n.competitors.length ? `<div class="divide-y bd border rounded-xl">${n.competitors.map((c) => `
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
+            <div class="mono-avatar w-7 h-7 text-[10px]">${esc(initials(c.name))}</div>
+            <div class="min-w-0 flex-1"><div class="font-medium truncate">${esc(c.name)}</div><div class="sub">${c.page_id ? 'ID de página ' + esc(c.page_id) : 'búsqueda por nombre'}</div></div>
+            ${c.url ? `<a class="btn btn-sm btn-ghost btn-icon" href="${esc(c.url)}" target="_blank" rel="noopener" title="Perfil">${icon('external', 13)}</a>` : ''}
+            <a class="btn btn-sm" href="${esc(c.library_url)}" target="_blank" rel="noopener">${icon('eye', 13)}Ver sus anuncios</a>
+            ${canEdit() ? `<button class="btn btn-sm btn-ghost btn-icon" data-comp-del="${c.id}" title="Quitar">${icon('x', 13)}</button>` : ''}
+          </div>`).join('')}</div>` : '<div class="t3 text-xs">Todavía no cargaste competidores.</div>'}
+        ${canEdit() ? `<form class="flex flex-wrap gap-2 mt-2" data-comp-form="${n.id}">
+          <input class="input select-sm flex-1 min-w-[120px]" name="name" placeholder="Nombre (ej: Personal)">
+          <input class="input select-sm flex-[2] min-w-[160px]" name="ref" placeholder="ID de página o link de la Biblioteca">
+          <button class="btn btn-sm">${icon('plus', 13)}Agregar</button></form>` : ''}
+      </div>
+      ${n.notes ? `<div class="t2 text-[13px] whitespace-pre-line hair-t pt-3">${esc(n.notes)}</div>` : ''}
+    </div>`;
+
+  const refCard = (r) => `
+    <div class="card ref-card">
+      <div class="ref-thumb">${r.image_url ? `<img src="${esc(r.image_url)}" alt="" loading="lazy">` : `<div class="t3">${icon('layers', 26)}</div>`}</div>
+      <div class="p-4 flex flex-col gap-2 flex-1">
+        <div class="flex flex-wrap gap-1.5">${r.format ? `<span class="pill plain">${esc(d.formats[r.format] || r.format)}</span>` : ''}${r.niche_name ? `<span class="pill blue plain">${esc(r.niche_name)}</span>` : ''}${r.client_name ? brandPill({ name: r.client_name, color: r.client_color }) : ''}</div>
+        <div class="font-semibold t1 leading-snug">${esc(r.title)}</div>
+        ${r.advertiser ? `<div class="t3 text-xs">${esc(r.advertiser)}</div>` : ''}
+        ${r.hook ? `<div class="ref-hook">“${esc(r.hook)}”</div>` : ''}
+        ${r.notes ? `<div class="t2 text-[13px] whitespace-pre-line">${esc(r.notes)}</div>` : ''}
+        <div class="flex-1"></div>
+        <div class="flex items-center gap-2 pt-2 hair-t">
+          <span class="t3 text-[11px]">${fmt.date(r.created_at)}</span><div class="flex-1"></div>
+          ${r.url ? `<a class="btn btn-sm" href="${esc(r.url)}" target="_blank" rel="noopener">${icon('external', 13)}Ver anuncio</a>` : ''}
+          ${canEdit() ? `<button class="btn btn-sm btn-ghost btn-icon" data-ref-edit="${r.id}" title="Editar">${icon('sliders', 13)}</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+
+  const refs = () => d.saved.filter((r) => (!f.niche || String(r.niche_id) === f.niche) && (!f.client || String(r.client_id) === f.client) && (!f.format || r.format === f.format));
+  const sel = (id, all, opts, v) => `<select class="input select-sm" id="${id}"><option value="">${all}</option>${opts.map(([k, l]) => `<option value="${esc(k)}" ${String(k) === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const body = () => f.tab === 'niches'
+    ? (d.niches.length ? `<div class="grid lg:grid-cols-2 gap-4 lib-grid">${d.niches.map(nicheCard).join('')}</div>`
+      : empty('Armá tu primer nicho', 'Un nicho agrupa las palabras clave y los competidores que querés seguir (ej: “Celulares en cuotas”, “Posnet y cobros”). Cada palabra abre la Biblioteca de Meta ya filtrada por Argentina y anuncios activos.',
+        canEdit() ? `<div class="flex flex-wrap gap-2 justify-center"><button class="btn btn-primary" data-niche-new>${icon('plus', 14)}Nuevo nicho</button><button class="btn" id="lib-presets">Cargar nichos sugeridos</button></div>` : '', 'search'))
+    : `<div class="flex flex-wrap gap-2 mb-4">${sel('lib-f-niche', 'Todos los nichos', d.niches.map((n) => [n.id, n.name]), f.niche)}${sel('lib-f-client', 'Todas las marcas', clients.map((c) => [c.id, c.name]), f.client)}${sel('lib-f-format', 'Todos los formatos', Object.entries(d.formats), f.format)}</div>
+      ${refs().length ? `<div class="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">${refs().map(refCard).join('')}</div>`
+        : empty('Sin referencias', 'Cuando veas un anuncio bueno en la Biblioteca, guardalo acá con su captura, el gancho y por qué funciona. Así el equipo arma las campañas sobre lo que ya probó el mercado.', canEdit() ? `<button class="btn btn-primary" data-ref-new>${icon('plus', 14)}Guardar referencia</button>` : '', 'layers')}`;
+
+  const html = `
+    ${pageHead('Biblioteca de anuncios', 'Qué está pautando cada nicho y la competencia, y las ideas que guarda el equipo para las campañas.',
+      canEdit() ? `<div class="flex gap-2"><button class="btn" data-niche-new>${icon('plus', 14)}Nuevo nicho</button><button class="btn btn-primary" data-ref-new>${icon('plus', 14)}Guardar referencia</button></div>` : '')}
+    <div class="card p-5 mb-6">
+      <form class="flex flex-wrap gap-3 items-end" id="lib-search">
+        <label class="field flex-1 min-w-[220px]"><span>Buscar en la Biblioteca de anuncios de Meta</span><input class="input" name="q" placeholder="Producto, marca o frase (ej: celulares en cuotas sin interés)" required></label>
+        <label class="field"><span>País</span><select class="input" name="country">${countryOpts('AR')}</select></label>
+        <button class="btn btn-accent">${icon('search', 14)}Buscar anuncios activos</button>
+      </form>
+      <div class="t3 text-xs mt-3 flex gap-2 items-start">${icon('alert', 14)}<span>Meta sólo entrega por API los anuncios comerciales de Europa; para Argentina la búsqueda se abre en la Biblioteca oficial (pestaña nueva), ya filtrada por país y anuncios activos. Los anuncios que más días llevan activos suelen ser los que mejor funcionan.</span></div>
+    </div>
+    <div class="seg mb-5" id="lib-tab"><button data-v="niches" class="${f.tab === 'niches' ? 'on' : ''}">Nichos y competidores (${d.niches.length})</button><button data-v="saved" class="${f.tab === 'saved' ? 'on' : ''}">Referencias guardadas (${d.saved.length})</button></div>
+    <div id="lib-body">${body()}</div>`;
+
+  return {
+    html,
+    mount() {
+      const view = $('#view');
+      const reload = () => render({ silent: true });
+      const paint = () => { save(); $('#lib-body').innerHTML = body(); hydrateIcons($('#lib-body')); $$('#lib-tab button').forEach((b) => b.classList.toggle('on', b.dataset.v === f.tab)); };
+      $('#lib-search').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        window.open(libUrl(fd.get('q'), fd.get('country')), '_blank', 'noopener');
+      });
+      view.addEventListener('change', (e) => {
+        const k = { 'lib-f-niche': 'niche', 'lib-f-client': 'client', 'lib-f-format': 'format' }[e.target.id];
+        if (k) { f[k] = e.target.value; paint(); }
+      });
+      view.addEventListener('submit', async (e) => {
+        const form = e.target.closest('[data-comp-form]');
+        if (!form) return;
+        e.preventDefault();
+        const fd = Object.fromEntries(new FormData(form));
+        try { await post('adlib_competitor_add', { niche_id: +form.dataset.compForm, ...fd }, 'Competidor agregado'); reload(); } catch { /* toast */ }
+      });
+      view.addEventListener('click', async (e) => {
+        const t = e.target.closest('#lib-tab button');
+        if (t) { f.tab = t.dataset.v; return paint(); }
+        if (e.target.closest('[data-niche-new]')) return nicheModal(null, d, reload);
+        const ne = e.target.closest('[data-niche-edit]');
+        if (ne) return nicheModal(d.niches.find((n) => n.id === +ne.dataset.nicheEdit), d, reload);
+        if (e.target.closest('[data-ref-new]')) return refModal(null, d, clients, reload);
+        const re = e.target.closest('[data-ref-edit]');
+        if (re) return refModal(d.saved.find((r) => +r.id === +re.dataset.refEdit), d, clients, reload);
+        const cd = e.target.closest('[data-comp-del]');
+        if (cd) { await post('adlib_competitor_delete', { id: +cd.dataset.compDel }, 'Competidor quitado'); return reload(); }
+        if (e.target.closest('#lib-presets')) {
+          for (const p of NICHE_PRESETS) await post('adlib_niche_save', { ...p, country: 'AR' });
+          toast('Nichos sugeridos cargados: editalos a gusto');
+          return reload();
+        }
+      });
+    },
+  };
+}
+
+function nicheModal(n, d, after) {
+  const el = modal(`${modalHead(n ? 'Editar nicho' : 'Nuevo nicho', 'Palabras clave y país para buscar en la Biblioteca de Meta')}
+    <form class="p-5 space-y-3" id="niche-form">
+      <div class="grid grid-cols-3 gap-3">
+        <label class="field col-span-2"><span>Nombre</span><input class="input" name="name" required value="${esc(n?.name || '')}" placeholder="Ej: Celulares en cuotas"></label>
+        <label class="field"><span>País</span><select class="input" name="country">${Object.entries(d.countries).map(([k, l]) => `<option value="${k}" ${k === (n?.country || 'AR') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      </div>
+      <label class="field"><span>Palabras clave (una por línea)</span><textarea class="input !h-32 py-2" name="keywords" placeholder="celulares en cuotas&#10;iphone 15&#10;plan canje">${esc((n?.keywords || []).join('\n'))}</textarea></label>
+      <label class="field"><span>Notas / aprendizajes del nicho</span><textarea class="input !h-24 py-2" name="notes" placeholder="Qué ganchos y ofertas se repiten, precios, formatos…">${esc(n?.notes || '')}</textarea></label>
+      <div class="flex gap-2 pt-1"><button class="btn btn-primary">Guardar</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button><div class="flex-1"></div>
+        ${n ? '<button type="button" class="btn btn-ghost btn-danger" id="niche-del">Eliminar</button>' : ''}</div>
+    </form>`);
+  $('#niche-form', el).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await post('adlib_niche_save', { id: n?.id, ...Object.fromEntries(new FormData(e.target)) }, 'Nicho guardado'); closeModal(); after(); } catch { /* toast */ }
+  });
+  $('#niche-del', el)?.addEventListener('click', async () => {
+    if (!confirm(`¿Eliminar el nicho “${n.name}”? Sus referencias guardadas se conservan.`)) return;
+    await post('adlib_niche_delete', { id: n.id }, 'Nicho eliminado'); closeModal(); after();
+  });
+}
+
+function refModal(r, d, clients, after) {
+  const opt = (list, v) => list.map(([k, l]) => `<option value="${esc(k)}" ${String(k) === String(v ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const el = modal(`${modalHead(r ? 'Editar referencia' : 'Guardar referencia', 'Un anuncio que te sirve de inspiración para las campañas')}
+    <form class="p-5 space-y-3" id="ref-form">
+      <div class="flex gap-4">
+        <div class="w-28 shrink-0"><div class="ref-thumb rounded-xl border bd" id="ref-prev">${r?.image_url ? `<img src="${esc(r.image_url)}" alt="">` : `<div class="t3">${icon('layers', 22)}</div>`}</div>
+          <label class="btn btn-sm w-full mt-2 cursor-pointer justify-center">${icon('plus', 13)}Captura<input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" id="ref-file"></label></div>
+        <div class="flex-1 space-y-3">
+          <label class="field"><span>Título</span><input class="input" name="title" required value="${esc(r?.title || '')}" placeholder="Ej: Carrusel con cuotas sin interés"></label>
+          <label class="field"><span>Anunciante</span><input class="input" name="advertiser" value="${esc(r?.advertiser || '')}" placeholder="Ej: Personal"></label>
+        </div>
+      </div>
+      <label class="field"><span>Link del anuncio (Biblioteca de anuncios)</span><input class="input" name="url" type="url" value="${esc(r?.url || '')}" placeholder="https://www.facebook.com/ads/library/?id=…"></label>
+      <input type="hidden" name="image_url" value="${esc(r?.image_url || '')}">
+      <div class="grid grid-cols-3 gap-3">
+        <label class="field"><span>Formato</span><select class="input" name="format"><option value="">—</option>${opt(Object.entries(d.formats), r?.format)}</select></label>
+        <label class="field"><span>Nicho</span><select class="input" name="niche_id"><option value="">—</option>${opt(d.niches.map((n) => [n.id, n.name]), r?.niche_id)}</select></label>
+        <label class="field"><span>Para la marca</span><select class="input" name="client_id"><option value="">—</option>${opt(clients.map((c) => [c.id, c.name]), r?.client_id)}</select></label>
+      </div>
+      <label class="field"><span>Gancho (hook) / texto principal</span><textarea class="input !h-20 py-2" name="hook" placeholder="La primera frase o el titular que engancha">${esc(r?.hook || '')}</textarea></label>
+      <label class="field"><span>Por qué funciona / cómo lo adaptamos</span><textarea class="input !h-20 py-2" name="notes">${esc(r?.notes || '')}</textarea></label>
+      <div class="flex gap-2 pt-1"><button class="btn btn-primary">Guardar</button><button type="button" class="btn btn-ghost" data-close>Cancelar</button><div class="flex-1"></div>
+        ${r ? '<button type="button" class="btn btn-ghost btn-danger" id="ref-del">Eliminar</button>' : ''}</div>
+    </form>`, 'lg');
+  $('#ref-file', el).addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await post('adlib_upload', fd, 'Captura subida');
+      $('[name=image_url]', el).value = res.url;
+      $('#ref-prev', el).innerHTML = `<img src="${esc(res.url)}" alt="">`;
+    } catch { /* toast */ }
+  });
+  $('#ref-form', el).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await post('adlib_save', { id: r?.id, ...Object.fromEntries(new FormData(e.target)) }, 'Referencia guardada'); closeModal(); after(); } catch { /* toast */ }
+  });
+  $('#ref-del', el)?.addEventListener('click', async () => {
+    if (!confirm('¿Eliminar esta referencia?')) return;
+    await post('adlib_delete', { id: r.id }, 'Referencia eliminada'); closeModal(); after();
+  });
+}
+
+// =========================================================================
 // Navegación
 // =========================================================================
 const ADMIN_NAV = [
   ['Rendimiento', [['overview', '#/', 'grid', 'Resumen'], ['budgets', '#/budgets', 'calendar', 'Presupuestos'], ['ads', '#/ads', 'target', 'Campañas', 'ad_account'], ['pages', '#/pages', 'page', 'Facebook', 'page'], ['ig', '#/ig', 'instagram', 'Instagram', 'ig_account'], ['reports', '#/reports', 'report', 'Reportes']]],
+  ['Estrategia', [['library', '#/library', 'library', 'Biblioteca de anuncios']]],
   ['Agencia', [['clients', '#/clients', 'users', 'Clientes'], ['activity', '#/activity', 'bell', 'Actividad'], ['settings', '#/settings', 'sliders', 'Configuración']]],
 ];
 const CLIENT_NAV = [['home', '#/', 'home', 'Inicio'], ['ads', '#/ads', 'target', 'Campañas'], ['social', '#/social', 'social', 'Redes'], ['work', '#/work', 'briefcase', 'Trabajo'], ['report', '#/report', 'report', 'Reporte']];
@@ -3034,7 +3486,9 @@ const ADMIN_ROUTES = [
   [/^\/?$/, viewOverview, 'overview'],
   [/^\/budgets$/, viewBudgets, 'budgets'],
   [/^\/reports$/, viewReports, 'reports'],
+  [/^\/library$/, viewLibrary, 'library'],
   [/^\/ads$/, viewAdAccounts, 'ads'],
+  [/^\/ads\/top$/, viewTopAds, 'ads'],
   [/^\/ads\/(act_\d+)$/, viewAccount, 'ads'],
   [/^\/ads\/(act_\d+)\/c\/(\d+)$/, viewCampaign, 'ads'],
   [/^\/ads\/(act_\d+)\/c\/(\d+)\/s\/(\d+)$/, viewAdset, 'ads'],
@@ -3055,6 +3509,7 @@ const ADMIN_ROUTES = [
 const CLIENT_ROUTES = [
   [/^\/?$/, () => viewClientHome(), 'home'],
   [/^\/ads$/, viewAdAccounts, 'ads'],
+  [/^\/ads\/top$/, viewTopAds, 'ads'],
   [/^\/ads\/(act_\d+)$/, viewAccount, 'ads'],
   [/^\/ads\/(act_\d+)\/c\/(\d+)$/, viewCampaign, 'ads'],
   [/^\/ads\/(act_\d+)\/c\/(\d+)\/s\/(\d+)$/, viewAdset, 'ads'],

@@ -75,6 +75,14 @@ final class Db
         return (int) self::pdo()->lastInsertId();
     }
 
+    /** UPDATE simple por igualdad: $where = ['id' => 5]. */
+    public static function update(string $table, array $data, array $where): int
+    {
+        $set = implode(',', array_map(fn ($c) => "$c = ?", array_keys($data)));
+        $cond = implode(' AND ', array_map(fn ($c) => "$c = ?", array_keys($where)));
+        return self::exec("UPDATE $table SET $set WHERE $cond", [...array_values($data), ...array_values($where)]);
+    }
+
     /** INSERT o UPDATE según la clave única $unique. */
     public static function upsert(string $table, array $data, array $unique): void
     {

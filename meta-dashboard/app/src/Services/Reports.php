@@ -146,7 +146,7 @@ final class Reports
                 'next_week_sales_avg' => $costAvg ? $daily * 7 / $costAvg : null,
                 'next_week_sales_month' => $costMonth ? $daily * 7 / $costMonth : null,
                 'next_month_base' => $daily * $daysNext,
-                'target_orders' => $client['target_orders'] !== null ? (float) $client['target_orders'] : null,
+                'target_orders' => Planner::goal($cid, $next->format('Y-m')) ?? ($client['target_orders'] !== null ? (float) $client['target_orders'] : null),
             ];
         }
 
@@ -170,7 +170,7 @@ final class Reports
     }
 
     /** Totales de Meta de una marca (sólo sus campañas si comparte cuenta). */
-    private static function adsTotals(int $clientId, array $accounts, DateRange $range): array
+    public static function adsTotals(int $clientId, array $accounts, DateRange $range): array
     {
         $empty = ['spend' => 0.0, 'spend_tax' => 0.0, 'messages' => 0, 'results' => 0, 'purchases' => 0, 'link_clicks' => 0, 'impressions' => 0, 'reach' => 0, 'active_campaigns' => 0];
         if (!$accounts) {

@@ -12,6 +12,7 @@ use App\Meta\GraphClient;
 use App\Meta\GraphException;
 use App\Meta\OAuth;
 use App\Services\AccessDenied;
+use App\Services\AdLibrary;
 use App\Services\Ads;
 use App\Services\Budgets;
 use App\Services\SalesImport;
@@ -21,6 +22,7 @@ use App\Services\Clients;
 use App\Services\Connections;
 use App\Services\Instagram;
 use App\Services\Pages;
+use App\Services\Planner;
 use App\Services\Reports;
 use App\Services\Sales;
 use App\Services\Scope;
@@ -33,16 +35,17 @@ final class Api
     /** Lo único que puede pedir un usuario cliente. Todo lo demás es sólo para admins. */
     private const CLIENT_ACTIONS = [
         'bootstrap', 'assets', 'overview', 'account', 'adsets', 'ads', 'timeseries', 'breakdown',
-        'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales',
+        'page', 'page_posts', 'ig', 'ig_media', 'ig_stories', 'ig_audience', 'activity', 'updates', 'password_change', 'sales', 'top_ads',
     ];
 
     /** Usuarios internos de solo lectura (ej. gerencia): todo lo del cliente + vistas de agencia. */
-    private const VIEWER_ACTIONS = ['clients', 'client_brand', 'budgets', 'report'];
+    private const VIEWER_ACTIONS = ['clients', 'client_brand', 'budgets', 'budget_plan', 'report', 'adlib'];
 
     /** Equipo: además edita lo operativo (presupuestos, objetivos, ventas, trabajo) de lo que tiene asignado. */
     private const MEMBER_ACTIONS = [
         'client', 'campaign_names', 'budget_save', 'campaign_target_save', 'update_save', 'update_delete', 'report_note_save',
-        'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
+        'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete', 'brand_goal_save',
+        'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
     ];
 
     private const POST_ACTIONS = [
@@ -51,7 +54,8 @@ final class Api
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete',
         'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
-        'report_note_save', 'logo_upload', 'report_brand_save',
+        'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save',
+        'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
     ];
 
     public static function handle(): void
@@ -192,6 +196,23 @@ final class Api
             case 'ads':
                 [$obj, $acc] = $inAccount();
                 return Ads::ads($obj, $acc, $range(), $force);
+            case 'top_ads':
+                $accs = !empty($q['account']) ? [$adAccount()] : array_map(fn ($a) => $a['external_id'], Assets::list('ad_account', false, $allowed['ad_account'] ?? null));
+                $filters = [];
+                foreach ($accs as $acc) {
+                    $filters[$acc] = Scope::campaignFilter($client, $acc);
+                }
+                $top = Ads::topAds($filters, $range(), (string) ($q['metric'] ?? 'results'), (int) ($q['limit'] ?? 12), $force);
+                if ($client !== null) { // en cuentas compartidas el cliente no ve el nombre de la cuenta de la empresa
+                    $brand = Clients::find($client)['name'];
+                    foreach ($top['ads'] as &$ad) {
+                        if ($filters[$ad['account']['id']] ?? null) {
+                            $ad['account']['name'] = $brand;
+                        }
+                    }
+                    unset($ad);
+                }
+                return $top + ['range' => $range()->toArray()];
             case 'timeseries':
                 [$obj, $acc, $filter] = $inAccount();
                 return Ads::timeseries($obj, $acc, $range(), $q['objective'] ?? null, $force, $filter);
@@ -275,6 +296,32 @@ final class Api
                 \App\Settings::set('tax_rate', (string) $rate);
                 Cache::flush(); // las métricas guardadas en caché llevan el impuesto anterior
                 return null;
+            case 'budget_plan':
+                $ids = $internal['clients'] ?? array_map('intval', array_column(Db::all('SELECT id FROM clients'), 'id'));
+                return Planner::plan($ids, (string) ($q['month'] ?? 'next'), (string) ($q['basis'] ?? 'avg3'));
+            case 'brand_goal_save':
+                Planner::saveGoal($ownClient((int) ($body['client_id'] ?? 0)), $body['month'] ?? null, $body['target_orders'] ?? '', $body['target_revenue'] ?? '');
+                return null;
+            case 'adlib':
+                return AdLibrary::all($internal['clients'] ?? null);
+            case 'adlib_niche_save':
+                return ['id' => AdLibrary::saveNiche($body)];
+            case 'adlib_niche_delete':
+                AdLibrary::deleteNiche((int) ($body['id'] ?? 0));
+                return null;
+            case 'adlib_competitor_add':
+                AdLibrary::addCompetitor((int) ($body['niche_id'] ?? 0), (string) ($body['name'] ?? ''), (string) ($body['ref'] ?? ''));
+                return null;
+            case 'adlib_competitor_delete':
+                AdLibrary::deleteCompetitor((int) ($body['id'] ?? 0));
+                return null;
+            case 'adlib_save':
+                return ['id' => AdLibrary::save($body, $internal['clients'] ?? null)];
+            case 'adlib_delete':
+                AdLibrary::delete((int) ($body['id'] ?? 0));
+                return null;
+            case 'adlib_upload':
+                return ['url' => self::storeImage($_FILES['file'] ?? null, 'ref', 4)];
             case 'campaign_target_save':
                 if ($internal !== null) {
                     $acc = $ownAccount(self::id((string) ($body['account'] ?? '')));
@@ -368,29 +415,37 @@ final class Api
     }
 
     /** Logo del reporte de agencia o de un cliente. Sólo PNG, JPG o WebP (máx. 2 MB). */
-    private static function uploadLogo(?array $file, string $target): string
+    /** Guarda una imagen subida (PNG/JPG/WebP) en public/uploads y devuelve su URL. */
+    private static function storeImage(?array $file, string $prefix, int $maxMb): string
     {
-        if (!$file || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || $file['size'] > 2 * 1024 * 1024) {
-            throw new InvalidArgumentException('Subí una imagen de hasta 2 MB.');
+        if (!$file || ($file['error'] ?? 1) !== UPLOAD_ERR_OK || $file['size'] > $maxMb * 1024 * 1024) {
+            throw new InvalidArgumentException("Subí una imagen de hasta $maxMb MB.");
         }
         $info = @getimagesize($file['tmp_name']);
         $ext = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp'][$info['mime'] ?? ''] ?? null;
         if (!$ext) {
-            throw new InvalidArgumentException('El logo tiene que ser PNG, JPG o WebP.');
+            throw new InvalidArgumentException('La imagen tiene que ser PNG, JPG o WebP.');
         }
         $dir = APP_ROOT . '/public/uploads';
         if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
             throw new InvalidArgumentException('No se pudo crear la carpeta public/uploads.');
         }
-        $name = 'logo-' . bin2hex(random_bytes(8)) . '.' . $ext;
+        $name = $prefix . '-' . bin2hex(random_bytes(8)) . '.' . $ext;
         if (!move_uploaded_file($file['tmp_name'], "$dir/$name")) {
             throw new InvalidArgumentException('No se pudo guardar el archivo.');
         }
-        $url = Config::url('uploads/' . $name);
+        return Config::url('uploads/' . $name);
+    }
+
+    private static function uploadLogo(?array $file, string $target): string
+    {
+        if ($target !== 'report') {
+            Clients::find((int) $target);
+        }
+        $url = self::storeImage($file, 'logo', 2);
         if ($target === 'report') {
             \App\Settings::set('report_logo', $url);
         } else {
-            Clients::find((int) $target);
             Db::exec('UPDATE clients SET logo_url = ? WHERE id = ?', [$url, (int) $target]);
         }
         return $url;

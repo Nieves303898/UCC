@@ -159,6 +159,48 @@ final class Schema
                 created_at DATETIME NOT NULL
             )$suffix",
 
+            // Objetivo mensual de cada marca (ventas / facturación) para planificar presupuesto.
+            "CREATE TABLE IF NOT EXISTS brand_goals (
+                client_id INT NOT NULL,
+                month CHAR(7) NOT NULL,
+                target_orders DECIMAL(14,2) NULL,
+                target_revenue DECIMAL(16,2) NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE (client_id, month)
+            )$suffix",
+
+            // Biblioteca de anuncios: nichos, competidores y anuncios guardados como inspiración.
+            "CREATE TABLE IF NOT EXISTS adlib_niches (
+                id $id,
+                name VARCHAR(120) NOT NULL,
+                keywords TEXT NULL,
+                country CHAR(2) NOT NULL DEFAULT 'AR',
+                notes TEXT NULL,
+                created_at DATETIME NOT NULL
+            )$suffix",
+            "CREATE TABLE IF NOT EXISTS adlib_competitors (
+                id $id,
+                niche_id INT NOT NULL,
+                name VARCHAR(190) NOT NULL,
+                page_id VARCHAR(64) NULL,
+                url VARCHAR(500) NULL,
+                created_at DATETIME NOT NULL
+            )$suffix",
+            "CREATE TABLE IF NOT EXISTS adlib_saved (
+                id $id,
+                niche_id INT NULL,
+                client_id INT NULL,
+                title VARCHAR(190) NOT NULL,
+                advertiser VARCHAR(190) NULL,
+                url VARCHAR(500) NULL,
+                image_url VARCHAR(500) NULL,
+                format VARCHAR(30) NULL,
+                hook TEXT NULL,
+                notes TEXT NULL,
+                created_by INT NULL,
+                created_at DATETIME NOT NULL
+            )$suffix",
+
             // Textos editables de los reportes (qué pasó, ajustes, objetivos, etc.).
             "CREATE TABLE IF NOT EXISTS report_notes (
                 k VARCHAR(190) NOT NULL PRIMARY KEY,

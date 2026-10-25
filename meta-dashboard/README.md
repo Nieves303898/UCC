@@ -56,6 +56,34 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 - **Objetivo mensual por campaña** (cantidad y/o facturación): avance del mes, línea de ritmo esperado, cierre estimado y estado (en camino, ajustado, atrasado, cumplido).
 - **Usuario de solo lectura** (gerencia): ve todo, incluidos presupuestos y el portal de cada cliente, pero no puede editar ni entrar a Configuración. Se crea en *Configuración → Equipo y gerencia*.
 
+### Plan de presupuesto por objetivos
+
+*Presupuestos → Plan por objetivos*: cargás cuántas ventas querés por marca en el mes (ej. Go Celular 300) y el panel calcula cuánto invertir.
+
+- **Costo por venta real** = gasto en Meta +35% ÷ ventas de la planilla. Se puede tomar del promedio de los últimos 3 meses, del mes anterior o del mes en curso.
+- **Inversión necesaria** = objetivo × costo por venta, vista **por mes, por semana o por día**, con impuestos y "en Meta" (sin el 35%, lo que se carga en el Administrador de anuncios).
+- **Mes siguiente**: compara con el ritmo actual (presupuestos diarios activos) y dice cuánto subir o bajar por día. Con **Usar** se guarda como presupuesto planificado de la marca.
+- **Mes en curso**: vendidas, % de avance contra el ritmo esperado, proyección al cierre, cuántas faltan, cuánto falta invertir y el **diario necesario** para llegar.
+- Las marcas que **superan el objetivo con menos presupuesto** (o que este mes venden más barato que la base) se destacan en verde.
+- Si una marca no tiene objetivo del mes, se usa el objetivo fijo de su ficha. El objetivo del mes siguiente también alimenta la diapositiva de objetivos de la *Proyección*.
+
+### Creativos que más traccionan
+
+*Campañas → Creativos que más traccionan* (y dentro de cada cuenta): ranking de los **anuncios activos** con inversión en el período, ordenados por resultados, menor costo por resultado, CTR, ROAS, compras, conversaciones, clics, inversión o menor CPM.
+
+- Gráfico comparativo del top, el creativo #1 destacado, y en cada tarjeta la métrica elegida con su **mini gráfico diario** más inversión, resultados, costo, CTR, CPM y ROAS.
+- Al tocar un creativo se abre el detalle con el gráfico **día a día** (inversión vs. la métrica que elijas), vista previa y links a Facebook / Instagram.
+- Los clientes ven sólo los creativos de sus campañas.
+
+### Biblioteca de anuncios por nicho
+
+Menú *Estrategia → Biblioteca de anuncios*. Meta sólo entrega por API los anuncios comerciales que se muestran en Europa (para Argentina, sólo los políticos), así que la biblioteca funciona así:
+
+- **Nichos** con palabras clave y país: cada palabra abre la Biblioteca oficial de Meta ya filtrada (país + anuncios activos) en una pestaña nueva. Hay nichos sugeridos para empezar.
+- **Competidores** por nicho: pegás el link de su Biblioteca (o el ID de la página) y "Ver sus anuncios" abre todos sus anuncios activos.
+- **Referencias guardadas** (swipe file): captura, link, anunciante, formato, gancho, por qué funciona, nicho y marca. Se filtran por nicho, marca y formato.
+- Equipo y administradores editan; solo lectura ve todo; los clientes no acceden.
+
 ### Varias marcas en una misma cuenta publicitaria
 
 Si una cuenta tiene campañas de distintas marcas (ej. PayLab Gestión con campañas de Go Celular, Osacra, Clover), cada cliente puede tomar **sólo sus campañas**:

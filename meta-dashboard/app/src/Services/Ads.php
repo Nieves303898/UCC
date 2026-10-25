@@ -268,7 +268,7 @@ final class Ads
     public static function ads(string $parentId, string $accountId, DateRange $range, bool $force = false): array
     {
         $client = Assets::client('ad_account', $accountId);
-        $fields = 'id,name,status,effective_status,ad_review_feedback,preview_shareable_link,campaign{objective},'
+        $fields = 'id,name,status,effective_status,ad_review_feedback,preview_shareable_link,campaign{id,name,objective},adset{name},'
             . 'creative{id,name,title,body,thumbnail_url,image_url,object_type,effective_object_story_id,instagram_permalink_url,call_to_action_type},'
             . self::insightsExpansion($range);
         $rows = Cache::remember("ads:$parentId:" . $range->key(), $range->ttl(), fn () => $client->paginate("$parentId/ads", [
@@ -291,10 +291,95 @@ final class Ads
                 'post_id'   => $cr['effective_object_story_id'] ?? null,
                 'ig_link'   => $cr['instagram_permalink_url'] ?? null,
             ];
+            $e['campaign'] = ['id' => $ad['campaign']['id'] ?? null, 'name' => $ad['campaign']['name'] ?? null];
+            $e['adset'] = $ad['adset']['name'] ?? null;
             $e['preview_link'] = $ad['preview_shareable_link'] ?? null;
             $e['review_feedback'] = $ad['ad_review_feedback']['global'] ?? null;
             return $e;
         }, $rows);
+    }
+
+    /** Métricas por las que se puede rankear a los creativos (true = menor es mejor). */
+    public const TOP_METRICS = [
+        'results' => false, 'cost_per_result' => true, 'link_ctr' => false, 'roas' => false, 'spend' => false,
+        'link_clicks' => false, 'messages' => false, 'purchases' => false, 'cpm' => true,
+    ];
+
+    /**
+     * Anuncios ACTIVOS de una o varias cuentas que más traccionan según $metric,
+     * con su serie diaria para graficar. $filters: [cuenta => filtro de campañas | null].
+     */
+    public static function topAds(array $filters, DateRange $range, string $metric = 'results', int $limit = 12, bool $force = false): array
+    {
+        $metric = array_key_exists($metric, self::TOP_METRICS) ? $metric : 'results';
+        $asc = self::TOP_METRICS[$metric];
+        $all = [];
+        $errors = [];
+        foreach ($filters as $acc => $filter) {
+            try {
+                $account = Assets::find('ad_account', (string) $acc);
+                foreach (self::ads((string) $acc, (string) $acc, $range, $force) as $ad) {
+                    if ($ad['effective_status'] !== 'ACTIVE' || ($ad['metrics']['spend'] ?? 0) <= 0) {
+                        continue;
+                    }
+                    if ($filter && !$filter(['id' => (string) ($ad['campaign']['id'] ?? ''), 'name' => (string) ($ad['campaign']['name'] ?? '')])) {
+                        continue;
+                    }
+                    $all[] = $ad + ['account' => ['id' => (string) $acc, 'name' => $account['name'], 'currency' => json_decode((string) $account['data_json'], true)['currency'] ?? 'USD']];
+                }
+            } catch (GraphException $e) {
+                $errors[] = $e->getMessage();
+            }
+        }
+        // El costo por resultado sólo compite entre anuncios que tienen resultados.
+        $ranked = array_values(array_filter($all, fn ($a) => ($a['metrics'][$metric] ?? null) !== null && (!$asc || ($a['metrics']['results'] ?? 0) > 0)));
+        usort($ranked, fn ($a, $b) => $asc ? $a['metrics'][$metric] <=> $b['metrics'][$metric] : $b['metrics'][$metric] <=> $a['metrics'][$metric]);
+        $top = array_slice($ranked, 0, max(1, min(30, $limit)));
+
+        // Serie diaria de los elegidos: una consulta por cuenta (nivel anuncio, filtrada por ID).
+        $byAcc = [];
+        foreach ($top as $a) {
+            $byAcc[$a['account']['id']][] = $a['id'];
+        }
+        $series = [];
+        foreach ($byAcc as $acc => $ids) {
+            try {
+                $client = Assets::client('ad_account', $acc);
+                sort($ids);
+                $rows = Cache::remember("adts:$acc:" . md5(implode(',', $ids)) . ':' . $range->key(), $range->ttl(), fn () => $client->paginate("$acc/insights", [
+                    'level' => 'ad',
+                    'fields' => 'ad_id,' . AdsInsights::FIELDS,
+                    'filtering' => json_encode([['field' => 'ad.id', 'operator' => 'IN', 'value' => $ids]]),
+                    'time_range' => $range->timeRange(),
+                    'time_increment' => 1,
+                ], 5000), $force);
+                foreach ($rows as $r) {
+                    $series[$r['ad_id']][$r['date_start']] = $r;
+                }
+            } catch (GraphException $e) {
+                $errors[] = $e->getMessage();
+            }
+        }
+        foreach ($top as &$a) {
+            $days = [];
+            for ($d = $range->since; $d <= $range->until; $d = $d->modify('+1 day')) {
+                $k = $d->format('Y-m-d');
+                $m = isset($series[$a['id']][$k]) ? AdsInsights::normalize($series[$a['id']][$k], $a['objective']) : [];
+                $day = ['date' => $k, 'impressions' => $m['impressions'] ?? 0];
+                foreach (array_keys(self::TOP_METRICS) as $key) {
+                    $day[$key] = $m[$key] ?? (self::TOP_METRICS[$key] ? null : 0);
+                }
+                $days[] = $day;
+            }
+            $a['daily'] = $days;
+        }
+        unset($a);
+
+        return [
+            'metric' => $metric, 'asc' => $asc, 'ads' => $top, 'active_total' => count($all), 'ranked_total' => count($ranked),
+            'currencies' => array_values(array_unique(array_map(fn ($a) => $a['account']['currency'], $top))),
+            'errors' => array_values(array_unique($errors)),
+        ];
     }
 
     /** Serie diaria de cualquier objeto (cuenta, campaña, conjunto o anuncio). */
