@@ -299,6 +299,15 @@ final class Api
             case 'budget_plan':
                 // Sólo las marcas (si todavía no se definieron, todos los clientes).
                 $ids = Clients::brandIds($internal['clients'] ?? null);
+                // Filtro por cliente (ej. sólo las marcas de PayLab Gestión).
+                $parents = [];
+                foreach (Db::all("SELECT DISTINCT p.id, p.name FROM clients m JOIN clients p ON p.id = m.parent_id WHERE m.kind = 'marca' ORDER BY p.name") as $p) {
+                    $parents[] = ['id' => (int) $p['id'], 'name' => $p['name']];
+                }
+                if (!empty($q['parent'])) {
+                    $children = array_map('intval', array_column(Db::all('SELECT id FROM clients WHERE parent_id = ?', [(int) $q['parent']]), 'id'));
+                    $ids = array_values(array_intersect($ids, $children));
+                }
                 $loose = [];
                 if (Clients::hasBrands() && $internal === null) {
                     // Cuentas compartidas entre marcas: campañas activas que todavía no tienen marca (ej. nuevas).
@@ -318,12 +327,15 @@ final class Api
                     }
                 }
                 return Planner::plan($ids, (string) ($q['month'] ?? 'next'), (string) ($q['basis'] ?? 'avg3'))
-                    + ['has_brands' => Clients::hasBrands(), 'can_split' => Auth::isAdmin(), 'unassigned' => $loose];
+                    + ['has_brands' => Clients::hasBrands(), 'can_split' => Auth::isAdmin(), 'unassigned' => $loose, 'parents' => $parents];
             case 'brand_map':
                 return Clients::brandMap();
             case 'brand_map_campaigns':
                 return Clients::brandMapCampaigns($id('account'));
             case 'brand_map_save':
+                foreach ((array) ($body['brands'] ?? []) as $b) {
+                    Clients::setParent((int) ($b['id'] ?? 0), $b['parent_id'] ?? null);
+                }
                 Clients::saveBrandMap((array) ($body['accounts'] ?? []));
                 return null;
             case 'client_kind_save':

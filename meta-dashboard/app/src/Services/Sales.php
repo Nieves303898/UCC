@@ -53,15 +53,16 @@ final class Sales
             $table = SalesImport::readFile($file['tmp_name'], (string) $file['name']);
             file_put_contents(self::UPLOAD_DIR . "/$token.json", json_encode($table));
         }
-        $suggest = SalesImport::suggest($table['headers']);
-        $agg = $suggest['date'] !== null ? SalesImport::aggregate($table['rows'], $suggest) : null;
+        $suggest = SalesImport::suggest($table['headers'], $table['rows']);
+        $agg = $suggest['date'] !== null ? SalesImport::aggregateTable($table, $suggest) : null;
         return [
             'token'    => $token,
             'headers'  => $table['headers'],
-            'sample'   => array_slice($table['rows'], 0, 8),
+            'sample'   => self::sample($table['rows'], $suggest),
             'total'    => count($table['rows']),
             'suggest'  => $suggest,
             'detected' => $agg ? ['days' => count(array_unique(array_column($agg['days'], 'day'))), 'min' => $agg['min'], 'max' => $agg['max']] : null,
+            'tabs'     => array_column($table['tabs'] ?? [], 'name'),
         ];
     }
 
@@ -76,7 +77,7 @@ final class Sales
         }
         $table = json_decode((string) file_get_contents($path), true);
         $map = self::cleanMap($d['mapping'] ?? []);
-        $agg = SalesImport::aggregate($table['rows'], $map);
+        $agg = SalesImport::aggregateTable($table, $map);
         if (!$agg['days']) {
             throw new InvalidArgumentException('No encontramos fechas válidas en la columna elegida.');
         }
@@ -111,7 +112,7 @@ final class Sales
         }
         try {
             $table = SalesImport::readGoogleSheet((string) $src['url']);
-            $agg = SalesImport::aggregate($table['rows'], json_decode((string) $src['mapping_json'], true) ?: []);
+            $agg = SalesImport::aggregateTable($table, json_decode((string) $src['mapping_json'], true) ?: []);
             self::replaceRows((int) $src['client_id'], $sourceId, $agg, true);
             return ['days' => count($agg['days']), 'max' => $agg['max']];
         } catch (\Throwable $e) {
@@ -546,6 +547,25 @@ final class Sales
     {
         $n = (int) Db::one('SELECT COUNT(*) AS n FROM sales_daily WHERE source_id = ?', [$sourceId])['n'];
         Db::exec('UPDATE sales_sources SET rows_count = ?, last_sync_at = ?, last_error = NULL WHERE id = ?', [$n, Db::now(), $sourceId]);
+    }
+
+    /** Filas de muestra: primero las que tienen datos, con la fecha legible (no el número de Excel). */
+    private static function sample(array $rows, array $map): array
+    {
+        $d = $map['date'];
+        $o = $map['orders'];
+        $with = $o !== null ? array_values(array_filter($rows, fn ($r) => trim((string) ($r[$o] ?? '')) !== '' && SalesImport::parseDate($r[$d] ?? null))) : [];
+        $out = array_slice($with ?: $rows, 0, 8);
+        if ($d !== null) {
+            foreach ($out as &$r) {
+                $day = SalesImport::parseDate($r[$d] ?? null);
+                if ($day) {
+                    $r[$d] = date('d/m/Y', strtotime($day));
+                }
+            }
+            unset($r);
+        }
+        return $out;
     }
 
     private static function cleanMap(array $m): array

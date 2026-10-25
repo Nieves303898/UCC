@@ -28,7 +28,7 @@ final class SalesImport
     {
         $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
         if ($ext === 'xlsx') {
-            return self::table(self::readXlsx($path));
+            return self::combine(self::readXlsxSheets($path));
         }
         if (in_array($ext, ['csv', 'txt', 'tsv'], true)) {
             return self::table(self::readCsv((string) file_get_contents($path)));
@@ -39,16 +39,43 @@ final class SalesImport
         throw new InvalidArgumentException('Subí un archivo .xlsx o .csv.');
     }
 
-    /** Descarga un Google Sheets como CSV. Acepta el link de edición o el de "Publicar en la web". */
+    /**
+     * Descarga un Google Sheets. Lee el libro COMPLETO (todas las pestañas, ej. una por mes)
+     * como Excel; si Google no lo permite, cae a la pestaña del link como CSV.
+     * Acepta el link de edición o el de "Publicar en la web".
+     */
     public static function readGoogleSheet(string $url): array
     {
         $csvUrl = self::googleCsvUrl($url);
-        $ch = curl_init($csvUrl);
+        $xlsxUrl = preg_replace(['#/export\?format=csv(&gid=\d+)?#', '#/pub\?output=csv(&gid=\d+)?#'], ['/export?format=xlsx', '/pub?output=xlsx'], $csvUrl);
+        [$body, $status, $type] = self::download($xlsxUrl);
+        if (is_string($body) && $status < 400 && str_starts_with($body, "PK")) {
+            $tmp = tempnam(sys_get_temp_dir(), 'gsx');
+            file_put_contents($tmp, $body);
+            try {
+                return self::combine(self::readXlsxSheets($tmp));
+            } catch (InvalidArgumentException) {
+                // se intenta como CSV
+            } finally {
+                @unlink($tmp);
+            }
+        }
+        [$body, $status, $type] = self::download($csvUrl);
+        if (!is_string($body) || $status >= 400 || str_contains($type, 'text/html')) {
+            throw new InvalidArgumentException('No pudimos leer la planilla. En Google Sheets: Compartir → Acceso general → "Cualquier persona con el enlace" → Lector.');
+        }
+        return self::table(self::readCsv($body));
+    }
+
+    /** @return array{0: string|false, 1: int, 2: string} */
+    private static function download(string $url): array
+    {
+        $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 4,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_TIMEOUT        => 45,
             CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS,
             CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
         ]);
@@ -56,10 +83,71 @@ final class SalesImport
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $type = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
         curl_close($ch);
-        if (!is_string($body) || $status >= 400 || str_contains($type, 'text/html')) {
-            throw new InvalidArgumentException('No pudimos leer la planilla. Compartila como "Cualquier persona con el enlace puede ver" o usá Archivo → Compartir → Publicar en la web → CSV.');
+        return [$body, $status, $type];
+    }
+
+    /**
+     * Une las pestañas de un libro: la primera con datos define las columnas y las demás
+     * se alinean por el nombre del encabezado (así una columna movida en otro mes no rompe nada).
+     * @param array<string, array> $sheets nombre => matriz
+     */
+    private static function combine(array $sheets): array
+    {
+        $tables = [];
+        foreach ($sheets as $name => $matrix) {
+            try {
+                $tables[$name] = self::table($matrix);
+            } catch (InvalidArgumentException) {
+                // pestaña vacía
+            }
         }
-        return self::table(self::readCsv($body));
+        if (!$tables) {
+            throw new InvalidArgumentException('La planilla está vacía.');
+        }
+        $template = reset($tables);
+        $headers = $template['headers'];
+        $generic = fn ($h) => (bool) preg_match('/^Columna \d+$/', $h);
+        $key = fn ($h) => self::normName($h);
+        $tabs = [];
+        $all = [];
+        foreach ($tables as $name => $t) {
+            $index = [];
+            foreach ($t['headers'] as $j => $h) {
+                if (!$generic($h)) {
+                    $index[$key($h)] ??= $j;
+                }
+            }
+            $pos = [];
+            foreach ($headers as $i => $h) {
+                $pos[$i] = $generic($h) ? $i : ($index[$key($h)] ?? (isset($t['headers'][$i]) && $generic($t['headers'][$i]) ? $i : null));
+            }
+            $rows = array_map(fn ($r) => array_map(fn ($j) => $j === null ? '' : ($r[$j] ?? ''), $pos), $t['rows']);
+            $tabs[] = ['name' => (string) $name, 'rows' => $rows];
+            array_push($all, ...$rows);
+        }
+        return ['headers' => $headers, 'rows' => $all, 'tabs' => $tabs];
+    }
+
+    /** Agrupa por día una tabla (con todas sus pestañas). Si un día aparece en dos pestañas, gana la que tiene datos. */
+    public static function aggregateTable(array $table, array $map): array
+    {
+        if (empty($table['tabs']) || count($table['tabs']) === 1) {
+            return self::aggregate($table['rows'], $map);
+        }
+        $days = [];
+        $skipped = 0;
+        foreach ($table['tabs'] as $tab) {
+            $agg = self::aggregate($tab['rows'], $map);
+            $skipped += $agg['skipped'];
+            foreach ($agg['days'] as $d) {
+                $k = $d['day'] . '|' . $d['dim'] . '|' . $d['campaign'];
+                if (!isset($days[$k]) || $d['orders'] + $d['revenue'] > $days[$k]['orders'] + $days[$k]['revenue']) {
+                    $days[$k] = $d;
+                }
+            }
+        }
+        $dates = array_column($days, 'day');
+        return ['days' => array_values($days), 'skipped' => $skipped, 'min' => $dates ? min($dates) : null, 'max' => $dates ? max($dates) : null];
     }
 
     public static function googleCsvUrl(string $url): string
@@ -89,25 +177,39 @@ final class SalesImport
         return trim(preg_replace('/[\s\-_|·]+/u', ' ', $s));
     }
 
-    /** Sugiere qué columna corresponde a cada campo según el encabezado. */
-    public static function suggest(array $headers): array
+    /**
+     * Sugiere qué columna corresponde a cada campo. Gana la palabra más específica
+     * (ej. "Ventas" antes que "Cant."), se ignoran columnas de costo, inversión,
+     * interacciones o impuestos, y si la fecha no tiene título se busca por el contenido.
+     */
+    public static function suggest(array $headers, array $rows = []): array
     {
         $norm = fn ($s) => trim(preg_replace('/\s+/', ' ', strtolower(strtr((string) $s, 'áéíóúÁÉÍÓÚñÑ', 'aeiouAEIOUnN'))));
+        $noise = ['costo', 'inversion', 'gasto', 'presupuesto', 'interacc', 'impuesto', 'cpl', 'cpa', 'ctr', 'cpm', '%', 'promedio', 'prom '];
         $out = [];
         $used = [];
         foreach (self::FIELDS as $field => $words) {
             $out[$field] = null;
-            foreach ($headers as $i => $h) {
-                if (in_array($i, $used, true)) {
-                    continue;
-                }
-                $hn = $norm($h);
-                foreach ($words as $w) {
-                    if ($hn === $norm($w) || str_contains($hn, $norm($w))) {
+            foreach ($words as $w) {
+                foreach ($headers as $i => $h) {
+                    $hn = $norm($h);
+                    if (in_array($i, $used, true) || ($field !== 'date' && array_filter($noise, fn ($x) => str_contains($hn, $x)))) {
+                        continue;
+                    }
+                    if ($hn === $norm($w) || preg_match('/(^|[^a-z])' . preg_quote($norm($w), '/') . '/', $hn)) {
                         $out[$field] = $i;
                         $used[] = $i;
                         continue 3;
                     }
+                }
+            }
+        }
+        if ($out['date'] === null && $rows) {
+            $best = 0;
+            foreach ($headers as $i => $h) {
+                $n = count(array_filter(array_slice($rows, 0, 60), fn ($r) => self::parseDate($r[$i] ?? null) !== null));
+                if ($n > $best && !in_array($i, $used, true)) {
+                    [$best, $out['date']] = [$n, $i];
                 }
             }
         }
@@ -134,6 +236,9 @@ final class SalesImport
             if (!$day) {
                 $skipped++;
                 continue;
+            }
+            if ($o !== null && trim((string) ($row[$o] ?? '')) === '' && ($r === null || trim((string) ($row[$r] ?? '')) === '')) {
+                continue; // día todavía sin cargar
             }
             $key = mb_substr(trim((string) ($dim !== null ? ($row[$dim] ?? '') : '')), 0, 120);
             $campaign = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) ($camp !== null ? ($row[$camp] ?? '') : ''))), 0, 190);
@@ -247,8 +352,11 @@ final class SalesImport
         return $out;
     }
 
-    /** Lector mínimo de XLSX (primera hoja) sin librerías externas. */
-    private static function readXlsx(string $path): array
+    /**
+     * Lector mínimo de XLSX sin librerías externas: devuelve todas las hojas en orden.
+     * @return array<string, array> nombre de la hoja => filas
+     */
+    private static function readXlsxSheets(string $path): array
     {
         if (!class_exists(ZipArchive::class)) {
             throw new InvalidArgumentException('Tu servidor no tiene la extensión ZIP de PHP. Guardá la planilla como .csv.');
@@ -268,30 +376,47 @@ final class SalesImport
                 $shared[] = $text;
             }
         }
-        // Primera hoja según el libro.
-        $sheetPath = 'xl/worksheets/sheet1.xml';
+        $paths = [];
         $wb = $zip->getFromName('xl/workbook.xml');
         $rels = $zip->getFromName('xl/_rels/workbook.xml.rels');
         if ($wb && $rels) {
+            $targets = [];
+            foreach (simplexml_load_string($rels)->Relationship as $rel) {
+                $t = ltrim((string) $rel['Target'], '/');
+                $targets[(string) $rel['Id']] = str_starts_with($t, 'xl/') ? $t : 'xl/' . $t;
+            }
             $wbx = simplexml_load_string($wb);
             $wbx->registerXPathNamespace('m', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main');
-            $first = $wbx->xpath('//m:sheets/m:sheet')[0] ?? null;
-            if ($first) {
-                $rid = (string) $first->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships')['id'];
-                foreach (simplexml_load_string($rels)->Relationship as $rel) {
-                    if ((string) $rel['Id'] === $rid) {
-                        $target = ltrim((string) $rel['Target'], '/');
-                        $sheetPath = str_starts_with($target, 'xl/') ? $target : 'xl/' . $target;
-                    }
+            foreach ($wbx->xpath('//m:sheets/m:sheet') ?: [] as $sh) {
+                if ((string) $sh['state'] === 'hidden') {
+                    continue;
+                }
+                $rid = (string) $sh->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships')['id'];
+                if (isset($targets[$rid])) {
+                    $paths[(string) $sh['name']] = $targets[$rid];
                 }
             }
         }
-        $xml = $zip->getFromName($sheetPath);
+        if (!$paths) {
+            $paths = ['Hoja 1' => 'xl/worksheets/sheet1.xml'];
+        }
+        $out = [];
+        foreach ($paths as $name => $sheetPath) {
+            $xml = $zip->getFromName($sheetPath);
+            if ($xml === false) {
+                continue;
+            }
+            $out[$name] = self::sheetRows(simplexml_load_string($xml), $shared);
+        }
         $zip->close();
-        if ($xml === false) {
+        if (!$out) {
             throw new InvalidArgumentException('No encontramos hojas en el Excel.');
         }
-        $sheet = simplexml_load_string($xml);
+        return $out;
+    }
+
+    private static function sheetRows(\SimpleXMLElement $sheet, array $shared): array
+    {
         $out = [];
         foreach ($sheet->sheetData->row as $row) {
             $cells = [];

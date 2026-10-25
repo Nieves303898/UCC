@@ -83,6 +83,9 @@ final class Clients
         if (isset($data['kind']) || empty($data['id'])) {
             $row['kind'] = ($data['kind'] ?? '') === 'marca' ? 'marca' : 'cliente';
         }
+        if (array_key_exists('parent_id', $data) || isset($row['kind'])) {
+            $row['parent_id'] = ($row['kind'] ?? 'marca') === 'marca' ? self::validParent($data['parent_id'] ?? null, (int) ($data['id'] ?? 0)) : null;
+        }
         if (!empty($data['id'])) {
             self::find((int) $data['id']);
             $sets = implode(',', array_map(fn ($c) => "$c = ?", array_keys($row)));
@@ -264,7 +267,33 @@ final class Clients
     public static function setKind(int $id, string $kind): void
     {
         self::find($id);
-        Db::exec('UPDATE clients SET kind = ? WHERE id = ?', [$kind === 'marca' ? 'marca' : 'cliente', $id]);
+        $kind = $kind === 'marca' ? 'marca' : 'cliente';
+        Db::exec('UPDATE clients SET kind = ?, parent_id = CASE WHEN ? = ? THEN parent_id ELSE NULL END WHERE id = ?', [$kind, $kind, 'marca', $id]);
+        if ($kind === 'marca') { // una marca no puede tener marcas
+            Db::exec('UPDATE clients SET parent_id = NULL WHERE parent_id = ?', [$id]);
+        }
+    }
+
+    /** Cliente dueño de una marca: debe existir, ser de tipo "cliente" y no ser la misma marca. */
+    public static function validParent(mixed $parentId, int $selfId = 0): ?int
+    {
+        $pid = (int) $parentId;
+        if ($pid <= 0 || $pid === $selfId) {
+            return null;
+        }
+        return Db::one("SELECT id FROM clients WHERE id = ? AND kind <> 'marca'", [$pid]) ? $pid : null;
+    }
+
+    public static function setParent(int $brandId, mixed $parentId): void
+    {
+        self::find($brandId);
+        Db::exec('UPDATE clients SET parent_id = ? WHERE id = ?', [self::validParent($parentId, $brandId), $brandId]);
+    }
+
+    /** Clientes de tipo "cliente" (para elegir a quién pertenece cada marca). */
+    public static function parents(): array
+    {
+        return array_map(fn ($c) => ['id' => (int) $c['id'], 'name' => $c['name']], Db::all("SELECT id, name FROM clients WHERE kind <> 'marca' ORDER BY name"));
     }
 
     /**
@@ -273,8 +302,8 @@ final class Clients
      */
     public static function brandMap(): array
     {
-        $brands = array_map(fn ($b) => ['id' => (int) $b['id'], 'name' => $b['name'], 'color' => $b['color']],
-            Db::all("SELECT id, name, color FROM clients WHERE kind = 'marca' ORDER BY name"));
+        $brands = array_map(fn ($b) => ['id' => (int) $b['id'], 'name' => $b['name'], 'color' => $b['color'], 'parent_id' => $b['parent_id'] !== null ? (int) $b['parent_id'] : null],
+            Db::all("SELECT id, name, color, parent_id FROM clients WHERE kind = 'marca' ORDER BY name"));
         $brandIds = array_column($brands, 'id');
         $accounts = [];
         foreach (Assets::list('ad_account') as $a) {
@@ -302,7 +331,7 @@ final class Clients
         // Primero las que ya tienen marca (o sugerencia), después el resto por nombre.
         usort($accounts, fn ($x, $y) => [($x['mode'] === 'none' && !$x['suggest']), $x['name']] <=> [($y['mode'] === 'none' && !$y['suggest']), $y['name']]);
         $others = array_column(Db::all("SELECT name FROM clients WHERE kind <> 'marca' ORDER BY name"), 'name');
-        return ['brands' => $brands, 'accounts' => $accounts, 'clients' => $others];
+        return ['brands' => $brands, 'accounts' => $accounts, 'clients' => $others, 'parents' => self::parents()];
     }
 
     /** Campañas con actividad (90 días) de una cuenta y la marca asignada a cada una. */

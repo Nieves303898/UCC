@@ -40,6 +40,7 @@ final class Schema
                 target_orders DECIMAL(14,2) NULL,
                 target_revenue DECIMAL(16,2) NULL,
                 kind VARCHAR(10) NOT NULL DEFAULT 'cliente',
+                parent_id INT NULL,
                 created_at DATETIME NOT NULL
             )$suffix",
 
@@ -266,6 +267,12 @@ final class Schema
             Db::one('SELECT kind FROM clients LIMIT 1');
         } catch (\Throwable) {
             Db::pdo()->exec("ALTER TABLE clients ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'cliente'");
+        }
+        // v6: cada marca pertenece a un cliente (ej. PayLab Gestión → Go Celular, GetNet, Osacra, Clover).
+        try {
+            Db::one('SELECT parent_id FROM clients LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec('ALTER TABLE clients ADD COLUMN parent_id INT NULL');
         }
         // v4: ventas por campaña.
         try {

@@ -65,7 +65,7 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 - **Mes siguiente**: compara con el ritmo actual (presupuestos diarios activos) y dice cuánto subir o bajar por día. Con **Usar** se guarda como presupuesto planificado de la marca.
 - **Mes en curso**: vendidas, % de avance contra el ritmo esperado, proyección al cierre, cuántas faltan, cuánto falta invertir y el **diario necesario** para llegar.
 - Las marcas que **superan el objetivo con menos presupuesto** (o que este mes venden más barato que la base) se destacan en verde.
-- **Marcas y cuentas** (botón en el plan): primero cargás tus **marcas** (lo que vendés y como se llama la planilla de ventas: Go Celular, GetNet, Osacra, Clover). Después indicás de qué marca es cada cuenta publicitaria: **toda la cuenta** de una marca (ej. ActivaPost → Clover; si la cuenta se llama como la marca, se sugiere sola), **ninguna**, o **varias marcas** — en ese caso elegís la marca campaña por campaña (ej. PayLab Gestión: las de Go Celular y la de Osacra). No depende de cómo se llamen las campañas. Las campañas nuevas de una cuenta compartida aparecen en el plan como "sin marca" para asignarlas. Sólo las marcas entran al plan, a *Presupuestos → Por marca* y vienen tildadas en *Reportes*; los demás clientes de la agencia (tipo *Cliente*) no, y sus asignaciones no se tocan.
+- **Clientes y marcas**: el *cliente* es la empresa (ej. PayLab Gestión) y sus *marcas* son lo que vende (Go Celular, GetNet, Osacra, Clover). En **Marcas y cuentas** (en el plan o en Clientes) cargás las marcas, elegís de qué cliente son ("Todas son de…") y de qué marca es cada cuenta publicitaria: **toda la cuenta** (ej. ActivaPost → Clover; si la cuenta se llama como la marca se sugiere sola), **ninguna**, o **varias marcas**, eligiendo la marca campaña por campaña (ej. PayLab Gestión). No depende de cómo se llamen las campañas. Las campañas nuevas de una cuenta compartida aparecen como "sin marca" para asignarlas. El plan se filtra por cliente; sólo las marcas entran al plan, a *Presupuestos → Por marca* y vienen tildadas en *Reportes*. En *Clientes* cada cliente aparece seguido de sus marcas.
 - Si una marca no tiene objetivo del mes, se usa el objetivo fijo de su ficha. El objetivo del mes siguiente también alimenta la diapositiva de objetivos de la *Proyección*.
 
 ### Creativos que más traccionan
@@ -84,6 +84,10 @@ Menú *Estrategia → Biblioteca de anuncios*. Meta sólo entrega por API los an
 - **Competidores** por nicho: pegás el link de su Biblioteca (o el ID de la página) y "Ver sus anuncios" abre todos sus anuncios activos.
 - **Referencias guardadas** (swipe file): captura, link, anunciante, formato, gancho, por qué funciona, nicho y marca. Se filtran por nicho, marca y formato.
 - Equipo y administradores editan; solo lectura ve todo; los clientes no acceden.
+
+### Planillas mensuales (una pestaña por mes)
+
+Las ventas se conectan **por marca** (Clientes → {marca} → Ventas → Google Sheets). Se lee el **archivo completo**: si llevás una pestaña por mes (Octubre, Noviembre…), al agregar la pestaña nueva entra sola, sin volver a pegar el link. Las pestañas se alinean por el título de cada columna. La fecha se detecta aunque la columna no tenga título; se prioriza la columna de **ventas** (ej. "Ventas Brutas WSP") y se ignoran costos, interacciones, impuestos y totales; los días todavía vacíos no cuentan. Los datos de Meta (conversaciones, gasto, costo por resultado) no hace falta cargarlos: se leen de Meta.
 
 ### Varias marcas en una misma cuenta publicitaria
 

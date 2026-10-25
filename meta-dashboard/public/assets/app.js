@@ -1545,13 +1545,18 @@ function accountMenu() {
 async function viewClients() {
   crumbs([{ label: 'Clientes' }]);
   const list = await api('clients');
+  const brandsOf = (c) => list.filter((b) => b.kind === 'marca' && +b.parent_id === c.id);
+  const parentName = (b) => list.find((x) => x.id === +b.parent_id)?.name;
+  // Cada cliente seguido de sus marcas; al final, las marcas sin cliente.
+  const ordered = [...list.filter((c) => c.kind !== 'marca').flatMap((c) => [c, ...brandsOf(c)]), ...list.filter((b) => b.kind === 'marca' && !parentName(b))];
   const html = `
-    ${pageHead('Clientes', isViewer() ? 'Abrí el portal de cada cliente para ver sus métricas, ventas, trabajo y reporte.' : 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', isAdmin() ? `<div class="flex gap-2"><button class="btn" id="detect-brands">${icon('search', 15)}Detectar marcas en campañas</button><button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button></div>` : '')}
-    ${list.length ? `<div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${list.map((c) => `
+    ${pageHead('Clientes', isViewer() ? 'Abrí el portal de cada cliente para ver sus métricas, ventas, trabajo y reporte.' : 'Cada cliente entra con su usuario y ve sólo sus cuentas, redes y el trabajo en curso.', isAdmin() ? `<div class="flex gap-2"><button class="btn" id="detect-brands">${icon('sliders', 15)}Marcas y cuentas</button><button class="btn btn-primary" id="new-client">${icon('plus', 15)}Nuevo cliente</button></div>` : '')}
+    ${list.length ? `<div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${ordered.map((c) => `
       <a href="#/${isViewer() ? 'preview' : 'clients'}/${c.id}" class="card card-link p-5 block">
         <div class="flex items-center gap-3">
           <div class="mono-avatar w-11 h-11" style="background:${esc(c.color)};color:#fff">${esc(initials(c.name))}</div>
-          <div class="min-w-0 flex-1"><div class="h2 truncate flex items-center gap-2">${esc(c.name)}${c.kind === 'marca' ? '<span class="pill blue plain">Marca</span>' : ''}</div><div class="t3 text-xs mt-0.5">Creado ${fmt.date(c.created_at)}</div></div>
+          <div class="min-w-0 flex-1"><div class="h2 truncate flex items-center gap-2">${esc(c.name)}${c.kind === 'marca' ? '<span class="pill blue plain">Marca</span>' : ''}</div>
+            <div class="t3 text-xs mt-0.5 truncate">${c.kind === 'marca' ? (parentName(c) ? `Marca de ${esc(parentName(c))}` : 'Marca sin cliente') : brandsOf(c).length ? `Cliente · marcas: ${esc(brandsOf(c).map((b) => b.name).join(', '))}` : `Creado ${fmt.date(c.created_at)}`}</div></div>
         </div>
         <div class="grid grid-cols-3 mt-5 pt-4 hair-t text-center">
           <div><div class="num font-semibold t1 text-lg">${c.assets}</div><div class="t3 text-xs">activos</div></div>
@@ -1564,49 +1569,9 @@ async function viewClients() {
     html,
     mount() {
       ['#new-client', '#new-client-2'].forEach((s) => $(s)?.addEventListener('click', () => clientForm()));
-      $('#detect-brands')?.addEventListener('click', () => detectBrands(list));
+      $('#detect-brands')?.addEventListener('click', () => brandsModal(() => render({ silent: true })));
     },
   };
-}
-
-/** Propone marcas a partir de los nombres de campaña y las asigna con un clic. */
-async function detectBrands(clients) {
-  const el = modal(`${modalHead('Marcas detectadas en tus campañas', 'Agrupado por el nombre (lo que va antes de “ - ” o “ | ”). Campañas activas o con gasto en los últimos 90 días.')}<div class="p-5" id="dg"><div class="sk h-48"></div></div>`);
-  let data;
-  try { data = await api('campaign_groups'); } catch (e) { $('#dg', el).innerHTML = errorBox(e.message, false); return; }
-  const opts = `<option value="">Asignar a…</option>${clients.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}<option value="new">+ Crear cliente nuevo</option>`;
-  $('#dg', el).innerHTML = data.length ? data.map((acc) => `
-    <div class="mb-6"><div class="eyebrow mb-2">${esc(acc.name)} · ${esc(acc.account)}</div>
-      <div class="card divide">${acc.groups.map((g, i) => `
-        <div class="px-4 py-3 flex flex-wrap items-center gap-3" data-g="${esc(acc.account)}|${i}">
-          <div class="min-w-0 flex-1"><div class="t1 font-medium">${esc(g.label)} <span class="t3 font-normal text-xs">· ${g.campaigns.length} campaña${g.campaigns.length > 1 ? 's' : ''} · ${fmt.moneyShort(g.spend, acc.currency)}</span></div>
-            <div class="t3 text-xs truncate mt-0.5" title="${esc(g.campaigns.join('\n'))}">${esc(g.campaigns.slice(0, 3).join(' · '))}${g.campaigns.length > 3 ? ' …' : ''}</div>
-            ${g.assigned_to.length ? `<div class="mt-1 flex gap-1 flex-wrap">${g.assigned_to.map((n) => `<span class="pill green plain">${esc(n)}</span>`).join('')}</div>` : ''}</div>
-          <input class="input select-sm w-40" value="${esc(g.pattern)}" data-pattern title="Palabra clave que se va a usar">
-          <select class="select select-sm w-48" data-target>${opts}</select>
-          <button class="btn btn-sm btn-primary" data-assign>Asignar</button>
-        </div>`).join('')}</div></div>`).join('') : empty('No encontramos campañas', 'Sincronizá Meta o revisá que haya campañas activas.');
-  $('#dg', el).addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-assign]');
-    if (!b) return;
-    const row = b.closest('[data-g]');
-    const [account, idx] = row.dataset.g.split('|');
-    const pattern = $('[data-pattern]', row).value.trim();
-    let target = $('[data-target]', row).value;
-    if (!target || !pattern) { toast('Elegí el cliente y la palabra clave.', 'error'); return; }
-    b.disabled = true;
-    try {
-      if (target === 'new') {
-        const g = data.find((x) => x.account === account).groups[+idx];
-        target = (await post('client_save', { name: g.label, kind: 'marca' })).id;
-        clients.push({ id: target, name: g.label });
-      }
-      await post('client_rule_add', { client_id: +target, account, pattern }, 'Campañas asignadas');
-      b.textContent = 'Listo';
-      row.style.opacity = '.55';
-    } catch { b.disabled = false; }
-  });
-  el.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) render({ silent: true }); });
 }
 
 function clientForm(c = null) {
@@ -1614,8 +1579,9 @@ function clientForm(c = null) {
     <form class="p-5 space-y-4" id="client-form">
       <div class="grid grid-cols-3 gap-3">
         <label class="field col-span-2"><span>Nombre</span><input class="input" name="name" value="${esc(c?.name || '')}" required></label>
-        <label class="field"><span>Tipo</span><select class="input" name="kind"><option value="cliente" ${c?.kind !== 'marca' ? 'selected' : ''}>Cliente</option><option value="marca" ${c?.kind === 'marca' ? 'selected' : ''}>Marca</option></select></label>
+        <label class="field"><span>Tipo</span><select class="input" name="kind" id="cf-kind"><option value="cliente" ${c?.kind !== 'marca' ? 'selected' : ''}>Cliente</option><option value="marca" ${c?.kind === 'marca' ? 'selected' : ''}>Marca</option></select></label>
       </div>
+      <label class="field ${c?.kind === 'marca' ? '' : 'hidden'}" id="cf-parent-wrap"><span>Marca de (cliente)</span><select class="input" name="parent_id" id="cf-parent"><option value="">— Sin cliente —</option></select></label>
       <p class="t3 text-xs -mt-2">Las <b>marcas</b> (ej. Go Celular, GetNet, Osacra, Clover) entran al plan por objetivos y a Presupuestos → Por marca.</p>
       <div class="flex gap-3 items-end">
         <label class="field"><span>Color de marca</span><input type="color" name="color" value="${esc(c?.color || '#0e7c66')}"></label>
@@ -1639,6 +1605,12 @@ function clientForm(c = null) {
     const fd = new FormData(); fd.append('file', f); fd.append('target', String(c.id));
     try { const r = await post('logo_upload', fd, 'Logo cargado'); $('[name=logo_url]', el).value = r.url; } catch { /* toast */ }
   });
+  api('clients').then((all) => {
+    const sel = $('#cf-parent', el);
+    if (!sel) return;
+    all.filter((x) => x.kind !== 'marca' && x.id !== c?.id).forEach((x) => sel.insertAdjacentHTML('beforeend', `<option value="${x.id}" ${+c?.parent_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`));
+  }).catch(() => {});
+  $('#cf-kind', el)?.addEventListener('change', (e) => $('#cf-parent-wrap', el).classList.toggle('hidden', e.target.value !== 'marca'));
   $('#client-form', el).addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -2317,7 +2289,7 @@ function salesPane(c) {
             <div class="seg" id="imp-kind"><button class="on" data-k="gsheet">Google Sheets (automático)</button><button data-k="upload">Excel / CSV</button></div>
             <div data-k-pane="gsheet" class="space-y-2">
               <input class="input" id="imp-url" placeholder="https://docs.google.com/spreadsheets/d/…">
-              <p class="t3 text-xs">Compartí la planilla como <b>“Cualquier persona con el enlace puede ver”</b>. Se vuelve a leer sola cada 20 minutos cuando alguien abre el tablero, y en cada cron.</p>
+              <p class="t3 text-xs">Compartí la planilla como <b>“Cualquier persona con el enlace puede ver”</b>. Se leen <b>todas las pestañas</b> del archivo: si llevás una por mes, agregás la de noviembre y entra sola. Se vuelve a leer cada 20 minutos cuando alguien abre el tablero, y en cada cron.</p>
             </div>
             <div data-k-pane="upload" class="hidden space-y-2">
               <input type="file" class="input !h-auto py-2" id="imp-file" accept=".xlsx,.csv,.txt">
@@ -2393,7 +2365,7 @@ function mountSalesPane(c) {
     const opt = (field) => `<option value="">— ninguna —</option>${p.headers.map((h, i) => `<option value="${i}" ${p.suggest[field] === i ? 'selected' : ''}>${esc(h)}</option>`).join('')}`;
     const fields = [['date', 'Fecha', true], ['orders', `${c.sales_label} (cantidad)`], ['revenue', 'Facturación / monto'], ['campaign', 'Campaña de Meta'], ['leads', `${c.leads_label}`], ['dim', `${c.dim_label} / canal`]];
     step2.innerHTML = `
-      <div class="flex items-center gap-2"><div class="h2">Revisá las columnas</div><span class="t3 text-xs">${fmt.int(p.total)} filas leídas${p.detected ? ` · ${p.detected.days} días (${fmt.date(p.detected.min)} → ${fmt.date(p.detected.max)})` : ''}</span></div>
+      <div class="flex items-center gap-2"><div class="h2">Revisá las columnas</div><span class="t3 text-xs">${fmt.int(p.total)} filas leídas${p.tabs && p.tabs.length > 1 ? ` en ${p.tabs.length} pestañas (${esc(p.tabs.join(', '))})` : ''}${p.detected ? ` · ${p.detected.days} días con datos (${fmt.date(p.detected.min)} → ${fmt.date(p.detected.max)})` : ''}</span></div>
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${fields.map(([f, l, req]) => `<label class="field"><span>${esc(l)}${req ? ' *' : ''}</span><select class="select" data-map="${f}">${opt(f)}</select></label>`).join('')}</div>
       <p class="t3 text-xs">Si no elegís la columna de cantidad, <b>cada fila cuenta como 1</b> (sirve si la planilla tiene una fila por venta o por turno).</p>
       <div class="scroll-x rounded-xl" style="border:1px solid var(--line)"><table class="tbl"><thead><tr>${p.headers.map((h) => `<th style="text-align:left">${esc(h)}</th>`).join('')}</tr></thead><tbody>${p.sample.map((r) => `<tr>${p.headers.map((_, i) => `<td style="text-align:left">${esc(r[i] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
@@ -2587,7 +2559,7 @@ async function planSection(box) {
     store.set('planCfg', cfg);
     box.querySelector('[data-plan-body]')?.classList.add('opacity-50');
     let d;
-    try { d = await api('budget_plan', { month: cfg.month, basis: cfg.basis }); } catch (e) { box.innerHTML = errorBox(e.message, false); return; }
+    try { d = await api('budget_plan', { month: cfg.month, basis: cfg.basis, parent: cfg.parent || '' }); } catch (e) { box.innerHTML = errorBox(e.message, false); return; }
     box.innerHTML = planHtml(d, cfg);
     hydrateIcons(box);
   };
@@ -2604,6 +2576,7 @@ async function planSection(box) {
   });
   box.addEventListener('change', async (e) => {
     if (e.target.id === 'plan-basis') { cfg.basis = e.target.value; return load(); }
+    if (e.target.id === 'plan-parent') { cfg.parent = e.target.value; return load(); }
     const g = e.target.closest('[data-plan-goal]');
     if (g) {
       const [cid, month] = g.dataset.planGoal.split('|');
@@ -2657,10 +2630,18 @@ async function brandsModal(after) {
   };
   const paint = () => {
     $('#bm', el).innerHTML = `
-      <div class="mb-5"><div class="eyebrow mb-2">1 · Tus marcas</div>
-        <div class="flex flex-wrap items-center gap-2">${d.brands.map((b) => `<span class="pill plain !h-8 !pl-3 !pr-1.5 gap-2" style="background:color-mix(in srgb, ${esc(b.color)} 14%, transparent);color:${esc(b.color)}">${esc(b.name)}<button class="btn btn-ghost btn-icon !w-6 !h-6" data-unbrand="${b.id}" title="No es marca">${icon('x', 12)}</button></span>`).join('')}
-          <form class="flex gap-2" id="bm-add"><input class="input select-sm w-44" name="name" placeholder="Agregar marca (ej. Clover)" list="bm-clients" required><datalist id="bm-clients">${d.clients.map((n) => `<option value="${esc(n)}">`).join('')}</datalist><button class="btn btn-sm">${icon('plus', 13)}Agregar</button></form></div>
-        <p class="t3 text-xs mt-2">La marca es lo que vendés y con lo que se nombra la planilla de ventas (ej. Clover, aunque la cuenta se llame ActivaPost).</p></div>
+      <div class="mb-5"><div class="flex flex-wrap items-center gap-2 mb-2"><div class="eyebrow">1 · Tus marcas y de qué cliente son</div><div class="flex-1"></div>
+          ${d.parents.length && d.brands.length ? `<span class="t3 text-xs">Todas son de</span><select class="select select-sm w-48" id="bm-parent-all"><option value="">Elegí el cliente…</option>${d.parents.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}</div>
+        ${d.brands.length ? `<div class="card divide mb-3">${d.brands.map((b) => `
+          <div class="px-4 py-2 flex flex-wrap items-center gap-3">
+            <span class="mono-avatar w-7 h-7 text-[10px]" style="background:${esc(b.color)};color:#fff">${esc(initials(b.name))}</span>
+            <div class="font-medium t1 flex-1 min-w-[120px]">${esc(b.name)}</div>
+            <span class="t3 text-xs">Cliente</span>
+            <select class="select select-sm w-48" data-parent="${b.id}"><option value="">— Sin cliente —</option>${d.parents.map((p) => `<option value="${p.id}" ${b.parent_id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+            <button class="btn btn-ghost btn-icon btn-sm" data-unbrand="${b.id}" title="No es marca">${icon('x', 13)}</button>
+          </div>`).join('')}</div>` : ''}
+        <form class="flex flex-wrap gap-2" id="bm-add"><input class="input select-sm w-52" name="name" placeholder="Agregar marca (ej. Clover)" list="bm-clients" required><datalist id="bm-clients">${d.clients.map((n) => `<option value="${esc(n)}">`).join('')}</datalist><button class="btn btn-sm">${icon('plus', 13)}Agregar</button></form>
+        <p class="t3 text-xs mt-2">El <b>cliente</b> es la empresa (ej. PayLab Gestión). Las <b>marcas</b> son lo que vende y con lo que se nombra cada planilla de ventas (ej. Clover, aunque la cuenta se llame ActivaPost).${d.parents.length ? '' : ' Para asignarles un cliente, creálo primero en Clientes.'}</p></div>
       <div class="flex flex-wrap items-center gap-2 mb-2"><div class="eyebrow">2 · De qué marca es cada cuenta publicitaria</div><div class="flex-1"></div><input class="input select-sm w-56" id="bm-q" placeholder="Buscar cuenta" value="${esc(q)}"></div>
       ${d.brands.length ? d.accounts.map(accRow).join('') : '<div class="t3 text-sm mb-3">Agregá primero tus marcas.</div>'}
       <div class="flex gap-2 mt-4 sticky bottom-0 py-3" style="background:var(--panel)"><button class="btn btn-primary" id="bm-save" ${d.brands.length ? '' : 'disabled'}>Guardar</button><button class="btn btn-ghost" data-close>Cancelar</button></div>`;
@@ -2682,7 +2663,10 @@ async function brandsModal(after) {
       return;
     }
     const c = e.target.closest('[data-camp]');
-    if (c) { const [i, id] = c.dataset.camp.split('|'); d.accounts[+i].campaign_brand[id] = c.value ? +c.value : null; }
+    if (c) { const [i, id] = c.dataset.camp.split('|'); d.accounts[+i].campaign_brand[id] = c.value ? +c.value : null; return; }
+    const pa = e.target.closest('[data-parent]');
+    if (pa) { d.brands.find((b) => b.id === +pa.dataset.parent).parent_id = pa.value ? +pa.value : null; return; }
+    if (e.target.id === 'bm-parent-all' && e.target.value) { d.brands.forEach((b) => { b.parent_id = +e.target.value; }); paint(); }
   });
   $('#bm', el).addEventListener('submit', async (e) => {
     if (e.target.id !== 'bm-add') return;
@@ -2693,9 +2677,11 @@ async function brandsModal(after) {
       if (ex) await post('client_kind_save', { id: ex.id, kind: 'marca' }, `${ex.name} ahora es marca`);
       else await post('client_save', { name, kind: 'marca', color: ['#0e7c66', '#d9822b', '#3a6fd8', '#b9468b', '#6b5bd6', '#2c9db0'][d.brands.length % 6] }, 'Marca creada');
       const keep = d.accounts;
+      const keepBrands = d.brands;
       d = await api('brand_map');
       // conservar lo que ya se eligió en pantalla
       d.accounts = d.accounts.map((a) => ({ ...a, ...(keep.find((k) => k.id === a.id) || {}) }));
+      d.brands.forEach((b) => { const k = keepBrands.find((x) => x.id === b.id); if (k) b.parent_id = k.parent_id; else if (keepBrands.length && keepBrands.every((x) => x.parent_id === keepBrands[0].parent_id)) b.parent_id = keepBrands[0].parent_id; });
       paint();
     } catch { /* toast */ }
   });
@@ -2708,7 +2694,8 @@ async function brandsModal(after) {
       campaigns: Object.fromEntries(Object.entries(a.campaign_brand || {}).filter(([, b]) => b)) }))
       // una cuenta compartida cuyas campañas no se llegaron a cargar no se toca
       .filter((x, i) => !(x.mode === 'multi' && !d.accounts[i].campaigns));
-    try { await post('brand_map_save', { accounts }, 'Marcas y cuentas guardadas'); closeModal(); after(); } catch { e.target.disabled = false; }
+    const brands = d.brands.map((b) => ({ id: b.id, parent_id: b.parent_id }));
+    try { await post('brand_map_save', { accounts, brands }, 'Marcas y cuentas guardadas'); closeModal(); after(); } catch { e.target.disabled = false; }
   });
   await load();
 }
@@ -2808,9 +2795,10 @@ function planHtml(d, cfg) {
 
   return `<div class="card mb-8 overflow-hidden" data-plan-body>
     <div class="p-5 flex flex-wrap items-end gap-4">
-      <div class="min-w-[240px] flex-1"><div class="h2 flex items-center gap-2">Plan por objetivos · ${esc(monthTitle)}${d.has_brands && d.can_split ? `<button class="btn btn-sm btn-ghost !h-7" data-brands-edit>${icon('sliders', 13)}Marcas y cuentas</button>` : ''}</div>
+      <div class="w-full"><div class="h2 flex items-center gap-2">Plan por objetivos · ${esc(monthTitle)}${d.has_brands && d.can_split ? `<button class="btn btn-sm btn-ghost !h-7" data-brands-edit>${icon('sliders', 13)}Marcas y cuentas</button>` : ''}</div>
         <div class="t3 text-xs mt-0.5">Cargá cuántas ${esc('ventas')} querés por marca: calculamos cuánto invertir con su costo por venta real (Meta +${tax} ÷ ventas de la planilla).</div></div>
       <div><div class="t3 text-xs mb-1.5">Mes</div><div class="seg">${[['current', 'En curso'], ['next', 'Siguiente']].map(([v, l]) => `<button data-plan-cfg="month" data-v="${v}" class="${cfg.month === v ? 'on' : ''}">${l} · ${esc(monthOf(v))}</button>`).join('')}</div></div>
+      ${(d.parents || []).length ? `<label class="field"><span>Cliente</span><select class="input select-sm" id="plan-parent">${d.parents.length > 1 ? '<option value="">Todos</option>' : ''}${d.parents.map((p) => `<option value="${p.id}" ${String(cfg.parent || '') === String(p.id) || d.parents.length === 1 ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>` : ''}
       <label class="field"><span>Costo por venta según</span><select class="input select-sm" id="plan-basis">${Object.entries(d.bases).map(([k, l]) => `<option value="${k}" ${d.basis === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
       <div><div class="t3 text-xs mb-1.5">Ver</div><div class="seg">${Object.entries(GRAN).map(([k, [l]]) => `<button data-plan-cfg="gran" data-v="${k}" class="${cfg.gran === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     </div>
