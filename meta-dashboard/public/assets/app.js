@@ -1360,13 +1360,44 @@ function updateCard(u, compact = false) {
 }
 
 /** Usuario del cliente: cambia la marca que está mirando. */
-async function switchBrand(id) {
+async function switchBrand(id, to = '#/') {
   state.brand = id || null;
   store.set('brand', state.brand);
   state.boot = await api('bootstrap');
   setAccent(state.boot.client?.color);
   renderNav();
-  if (location.hash === '#/' || location.hash === '') render(); else location.hash = '#/';
+  if (location.hash === to || (to === '#/' && location.hash === '')) render(); else location.hash = to;
+}
+
+/** Barra de marcas arriba de Inicio y Ventas: "Todas" + cada marca, siempre a mano. */
+function brandBar(org, currentId, page = '') {
+  if (!org || !org.brands?.length) return '';
+  const item = (id, name, color, on) => (isClient()
+    ? `<button class="brand-chip ${on ? 'on' : ''}" data-brand-go="${id}" style="--bc:${esc(color || 'var(--accent)')}">${esc(name)}</button>`
+    : `<a class="brand-chip ${on ? 'on' : ''}" href="#/preview/${id}${page ? '/' + page : ''}" style="--bc:${esc(color || 'var(--accent)')}">${esc(name)}</a>`);
+  return `<div class="brand-bar no-print">
+    <span class="t3 text-xs mr-1">${esc(org.name)}</span>
+    ${item(org.id, 'Todas las marcas', org.color, currentId === org.id)}
+    ${org.brands.map((b) => item(b.id, b.name, b.color, currentId === b.id)).join('')}
+  </div>`;
+}
+function mountBrandBar(org, page = '') {
+  $$('[data-brand-go]').forEach((b) => b.addEventListener('click', () => {
+    const id = +b.dataset.brandGo;
+    if (id === org.id && !org.can_open && isClient()) { location.hash = '#/org'; return; }
+    switchBrand(id, page ? `#/${page}` : '#/');
+  }));
+}
+/** Organización (cliente con marcas) del portal que se está viendo. */
+async function portalOrg(cid) {
+  if (isClient()) return state.boot.org;
+  try {
+    const b = await api('client_brand', { id: cid });
+    const orgId = b.kind === 'marca' ? b.parent_id : (b.has_brands ? b.id : null);
+    if (!orgId) return null;
+    const o = await api('client', { id: orgId });
+    return { id: o.id, name: o.name, color: o.color, can_open: true, brands: o.children };
+  } catch { return null; }
 }
 
 /** Cliente con varias marcas (ej. PayLab Gestión): todas las marcas en una pantalla. */
@@ -1398,8 +1429,10 @@ async function viewOrgHome(cid, org) {
         <div class="relative h-1.5 rounded-full sunk overflow-hidden mt-1.5"><div class="absolute inset-y-0 left-0 rounded-full" style="width:${Math.min(100, gp)}%;background:${gp >= b.expected_pct ? 'var(--pos)' : gp >= b.expected_pct * 0.8 ? 'var(--warn)' : 'var(--bad)'}"></div><div class="absolute inset-y-0 w-px" style="left:${Math.min(100, b.expected_pct)}%;background:var(--t2)"></div></div></div>` : ''}
     </${isClient() ? 'button' : 'a'}>`;
   };
+  const orgInfo = isClient() ? state.boot.org : { id: d.org.id, name: d.org.name, color: d.org.color, can_open: true, brands: d.brands };
   const html = `
     ${previewBanner(cid, org.name)}
+    ${brandBar(orgInfo, d.org.id)}
     <div class="flex flex-wrap items-end gap-4 mb-6">
       <div><div class="eyebrow">${esc(todayLabel())}</div>
         <h1 class="text-[28px] font-semibold tracking-tight t1 mt-1">${isClient() ? `Hola${first ? ', ' + esc(first) : ''}.` : esc(org.name)}</h1>
@@ -1418,6 +1451,7 @@ async function viewOrgHome(cid, org) {
   return {
     html,
     mount() {
+      mountBrandBar(orgInfo);
       $$('[data-open-brand]').forEach((b) => b.addEventListener('click', () => { switchBrand(+b.dataset.openBrand); const sel = $('#brand-switch'); if (sel) sel.value = b.dataset.openBrand; }));
       if (d.brands.length > 1) {
         chart($('#org-chart'), d.brands.map((b) => b.name), [
@@ -1475,6 +1509,7 @@ async function viewClientHome(cid) {
   cid = +cid || portalClient();
   const brand = await clientBrand(cid);
   if (brand.has_brands && brand.kind !== 'marca') return viewOrgHome(cid, brand);
+  const orgB = brand.kind === 'marca' ? await portalOrg(cid) : null;
   setAccent(brand.color);
   const [ov, assets, updates] = await Promise.all([
     api('overview', rp({ client: cid })), api('assets', { client: cid }), api('updates', { client: cid }),
@@ -1489,6 +1524,7 @@ async function viewClientHome(cid) {
 
   const html = `
     ${previewBanner(cid, brand.name)}
+    ${brandBar(orgB, cid)}
     <div class="flex flex-wrap items-end gap-4 mb-6">
       <div><div class="eyebrow">${esc(todayLabel())}</div>
         <h1 class="text-[28px] font-semibold tracking-tight t1 mt-1">${isClient() ? `Hola${first ? ', ' + esc(first) : ''}.` : esc(brand.name)}</h1>
@@ -1632,6 +1668,7 @@ async function viewReport(cid) {
   return {
     html,
     mount() {
+      if (orgB) mountBrandBar(orgB);
       if (sales?.has_data && $('#rep-sales')) chart($('#rep-sales'), sales.daily.map((x) => fmt.date(x.date)), [{ label: sales.labels.sales, data: sales.daily.map((x) => x.orders), type: 'bar', color: cssVar('--accent') }]);
       if (t) chart($('#rep-chart'), daily.map((x) => fmt.date(x.date)), [
         { label: 'Inversión', data: daily.map((x) => x.spend), type: 'bar', fmt: (v) => fmt.money(v, cur), color: cssVar('--t3') },
@@ -2497,10 +2534,75 @@ async function monthDays(box, cid, month, title) {
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+/** Ventas generales de un cliente con varias marcas + presupuesto promedio y asignado. */
+async function viewOrgSales(cid, org) {
+  const d = await api('org_sales', rp({ client: cid }));
+  const cur = d.org.currency || 'ARS';
+  const m = (v) => (v === null || v === undefined ? '—' : fmt.money(v, cur));
+  const ms = (v) => (v === null || v === undefined ? '—' : fmt.moneyShort(v, cur));
+  const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
+  const t = d.totals, B = d.budget;
+  const nextName = cap(new Date(d.next_month + '-15').toLocaleDateString(LOCALE, { month: 'long' }));
+  const thisName = cap(new Date().toLocaleDateString(LOCALE, { month: 'long' }));
+  const orgInfo = isClient() ? state.boot.org : { id: d.org.id, name: d.org.name, color: d.org.color, can_open: true, brands: d.brands };
+  const open = (b) => (isClient() ? `data-brand-go="${b.id}"` : `data-go="#/preview/${b.id}/sales"`);
+  const rows = d.brands.map((b) => `<tr class="clickable" ${open(b)}>
+    <td style="text-align:left"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full" style="background:${esc(b.color)}"></span><span class="font-medium">${esc(b.name)}</span></div><div class="sub">${[b.gestion_label, b.last_day ? `última carga ${fmt.date(b.last_day)}` : ''].filter(Boolean).map(esc).join(' · ')}</div></td>
+    <td class="font-semibold">${fmt.int(b.sales.orders)}</td>
+    <td>${b.has_ads ? m(b.ads.spend_tax) : '—'}</td>
+    <td class="font-semibold">${m(b.cost_per_sale)}</td>
+    <td>${fmt.pct(b.conversion)}</td>
+    <td>${m(b.budget.avg_daily_tax)}<div class="sub">≈ ${ms(b.budget.avg_month_tax)}/mes</div></td>
+    <td>${m(b.budget.planned_month)}</td>
+    <td class="font-semibold">${m(b.budget.planned_next)}${b.budget.suggested_next ? `<div class="sub">sugerido ${ms(b.budget.suggested_next)}${b.budget.goal_next ? ` · obj. ${fmt.int(b.budget.goal_next)}` : ''}</div>` : ''}</td>
+  </tr>`).join('');
+  const html = `
+    ${previewBanner(cid, org.name)}
+    ${brandBar(orgInfo, d.org.id, 'sales')}
+    ${pageHead('Ventas · todas las marcas', `${esc(d.org.name)} · ${fmt.dateLong(d.range.since)} – ${fmt.dateLong(d.range.until)}`)}
+    <div class="kpi-row grid-cols-2 lg:grid-cols-5 mb-6" style="display:grid">
+      ${kpi('Ventas / gestiones', fmt.int(t.orders), { spark: '' })}
+      ${kpi('Facturación', t.revenue ? ms(t.revenue) : '—', { spark: '' })}
+      ${kpi(`Inversión +${tax}`, ms(t.spend_tax), { spark: '' })}
+      ${kpi('Costo por venta', m(t.cost_per_sale), { spark: '' })}
+      ${kpi('Conversaciones', fmt.int(t.messages), { spark: '' })}
+    </div>
+    <div class="flex items-center gap-2 mb-3"><div class="h2">Presupuesto</div><span class="t3 text-xs">con ${tax} de impuestos</span></div>
+    <div class="kpi-row grid-cols-2 lg:grid-cols-5 mb-6" style="display:grid">
+      ${kpi('Promedio diario real', m(B.avg_daily_tax), { spark: '', d: `<span class="t3 text-xs">${esc(thisName)}, a la fecha</span>`, vs: '' })}
+      ${kpi(`Cierre de ${thisName} al ritmo`, ms(B.avg_month_tax), { spark: '', d: `<span class="t3 text-xs">${ms(B.mtd_spend_tax)} invertido</span>`, vs: '' })}
+      ${kpi(`Asignado ${thisName}`, B.planned_month ? ms(B.planned_month) : '—', { spark: '' })}
+      ${kpi(`Asignado ${nextName}`, B.planned_next ? ms(B.planned_next) : '—', { spark: '', d: B.planned_next ? '' : '<span class="t3 text-xs">sin cargar</span>', vs: '' })}
+      ${kpi(`Sugerido ${nextName}`, B.suggested_next ? ms(B.suggested_next) : '—', { spark: '', d: '<span class="t3 text-xs">según objetivos</span>', vs: '' })}
+    </div>
+    <div class="card overflow-hidden mb-6">
+      <div class="card-h"><div class="h2">Por marca</div><span class="t3 text-xs">tocá una marca para ver sus ventas día por día</span></div>
+      <div class="scroll-x"><table class="tbl"><thead><tr><th style="text-align:left">Marca</th><th>Ventas</th><th>Inversión +${tax}</th><th>Costo por venta</th><th>Conversión</th><th>Promedio diario</th><th>Asignado ${esc(thisName)}</th><th>Asignado ${esc(nextName)}</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    </div>
+    ${d.months.length ? `<div class="card mb-6"><div class="card-h"><div class="h2">Mes a mes</div><span class="t3 text-xs">ventas por marca y costo por venta de todo el cliente</span></div><div class="p-4 h-[300px]"><canvas id="org-months"></canvas></div></div>` : ''}`;
+  return {
+    html,
+    mount() {
+      mountBrandBar(orgInfo, 'sales');
+      $$('[data-go]').forEach((r) => r.addEventListener('click', () => { location.hash = r.dataset.go; }));
+      if (d.months.length) {
+        const labels = d.months.map((x) => cap(new Date(x.month + '-15').toLocaleDateString(LOCALE, { month: 'short' })));
+        chart($('#org-months'), labels, [
+          ...d.brands.map((b) => ({ label: b.name, data: d.months.map((x) => b.months.find((y) => y.month === x.month)?.orders || 0), type: 'bar', fmt: fmt.int, color: b.color, alpha: 'cc' })),
+          { label: 'Costo por venta', data: d.months.map((x) => x.cost_per_sale), axis: 'y1', fmt: m, color: cssVar('--t2') },
+        ], { stacked: true, fmtY: fmt.int, fmtY1: ms });
+      }
+    },
+  };
+}
+
 async function viewSales(cid) {
   cid = +cid || portalClient();
   const brand = await clientBrand(cid);
   setAccent(brand.color);
+  if (brand.has_brands && brand.kind !== 'marca') return viewOrgSales(cid, brand);
+  const orgB = brand.kind === 'marca' ? await portalOrg(cid) : null;
   const d = await api('sales', rp({ client: cid }));
   const L = d.labels, cur = d.currency;
   const { money, moneyFull } = salesFmt(cur);
@@ -2523,7 +2625,7 @@ async function viewSales(cid) {
 
   const html = `
     ${previewBanner(cid, brand.name)}
-    ${isClient() ? backLink('#/', 'Inicio') : ''}
+    ${orgB ? brandBar(orgB, cid, 'sales') : (isClient() ? backLink('#/', 'Inicio') : '')}
     ${pageHead(esc(L.sales), `${esc(brand.name)} · ${fmt.dateLong(d.range.since)} – ${fmt.dateLong(d.range.until)}`, `<div class="flex items-center gap-2">${freshness(d)}<a class="btn" href="${state.preview ? `#/preview/${cid}/report` : '#/report'}">${icon('report', 15)}Reporte</a></div>`)}
     ${salesKpis(d)}
     <div id="sales-monthly" class="mb-6"><div class="sk h-64"></div></div>
@@ -2554,6 +2656,7 @@ async function viewSales(cid) {
   return {
     html,
     mount() {
+      if (orgB) mountBrandBar(orgB, 'sales');
       monthlyBlock($('#sales-monthly'), cid);
       mountTable('sales-days');
       $('#view').addEventListener('click', (e) => {
@@ -4108,7 +4211,7 @@ function renderNav() {
     const c0 = state.boot.client || {};
     const cn = state.boot.counts || {};
     const items = CLIENT_NAV.filter(([k]) => (k !== 'ads' || c0.has_ads) && (k !== 'social' || cn.page || cn.ig_account));
-    if (c0.has_sales) items.splice(1, 0, ['sales', '#/sales', 'layers', c0.sales_label || 'Ventas']);
+    if (c0.has_sales || (c0.has_brands && c0.kind !== 'marca') || state.boot.org) items.splice(1, 0, ['sales', '#/sales', 'layers', c0.has_brands ? 'Ventas' : (c0.sales_label || 'Ventas')]);
     if (c0.has_sheets) items.splice(items.length - 1, 0, ['sheets', '#/sheets', 'grid', 'Planillas']);
     if (state.boot.user.can_manage_users) items.push(['access', '#/access', 'key', 'Accesos']);
     const html = items.map(([k, href, ic, l]) => `<a href="${href}" data-nav="${k}">${icon(ic)}${esc(l)}</a>`).join('');

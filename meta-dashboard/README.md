@@ -76,6 +76,12 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 
 Cada marca tiene **palabras para reconocer sus campañas** (en *Marcas y cuentas*; siempre incluye su nombre — ej. Clover: "activa pos"). En las cuentas compartidas entre marcas (ej. PayLab Gestión), una campaña nueva cuyo nombre contenga esas palabras se suma sola a la marca (y por lo tanto a su cliente). Las campañas asignadas a mano siempre mandan sobre las palabras. Las que no coincidan con ninguna aparecen en el plan como "sin marca".
 
+### Portal de un cliente con varias marcas
+
+- Arriba de **Inicio** y **Ventas** hay una **barra de marcas** siempre visible ("Todas las marcas", Go Celular, GetPos, Osacra, Clover…): un clic y se cambia de marca en la misma pantalla.
+- **Ventas → Todas las marcas**: totales del cliente (ventas, facturación, inversión +35%, costo por venta, conversaciones), tabla por marca y mes a mes por marca con el costo por venta de todo el cliente.
+- **Presupuesto**: promedio diario real del mes (con impuestos), cierre del mes a ese ritmo, asignado este mes, **asignado para el mes siguiente** (lo que se carga en Presupuestos) y el **sugerido** según los objetivos de cada marca.
+
 ### Accesos (panel general y del cliente)
 
 - **Agencia → Accesos** (sólo administradores): todas las personas del sistema —tu equipo y los usuarios de cada cliente— con filtros por tipo y cliente. Desde ahí se crea cualquier acceso, se cambia rol y marcas, se genera una clave nueva o se da de baja. Los clientes no ven esta pantalla ni saben quién más tiene acceso.

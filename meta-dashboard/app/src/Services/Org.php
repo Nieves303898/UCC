@@ -14,6 +14,69 @@ use App\Settings;
  */
 final class Org
 {
+    /**
+     * Ventas generales del cliente: totales, por marca (ventas, inversión, costo por venta,
+     * conversión, mes a mes) y presupuesto (promedio real, asignado este mes y el próximo).
+     */
+    public static function sales(int $orgId, array $brandIds, DateRange $range): array
+    {
+        $base = self::overview($orgId, $brandIds, $range);
+        $ids = array_column($base['brands'], 'id');
+        $today = new \DateTimeImmutable('today');
+        $monthStart = $today->modify('first day of this month');
+        $elapsed = max(1, (int) $today->format('j'));
+        $nextKey = $monthStart->modify('+1 month')->format('Y-m');
+        $planned = [];
+        foreach (Db::all("SELECT account_id, month, amount FROM ad_budgets WHERE account_id LIKE 'client:%' AND month IN (?, ?)", [$monthStart->format('Y-m'), $nextKey]) as $p) {
+            $planned[(int) substr($p['account_id'], 7)][$p['month']] = (float) $p['amount'];
+        }
+        $next = [];
+        try {
+            foreach (Planner::plan($ids, 'next')['brands'] as $b) {
+                $next[$b['id']] = $b;
+            }
+        } catch (\Throwable) {
+        }
+        foreach ($base['brands'] as &$b) {
+            $bid = $b['id'];
+            $accounts = Clients::allowed($bid)['ad_account'];
+            $mtd = $accounts ? Reports::adsTotals($bid, $accounts, new DateRange($monthStart, $today, 'custom')) : ['spend_tax' => 0.0];
+            $months = Sales::monthly($bid, 4)['months'];
+            $n = $next[$bid] ?? [];
+            $b['budget'] = [
+                'mtd_spend_tax' => $mtd['spend_tax'],
+                'avg_daily_tax' => $mtd['spend_tax'] / $elapsed,
+                'avg_month_tax' => $mtd['spend_tax'] / $elapsed * (int) $today->format('t'),
+                'active_daily_tax' => $n['active_daily_tax'] ?? null,
+                'planned_month' => $planned[$bid][$monthStart->format('Y-m')] ?? null,
+                'planned_next' => $planned[$bid][$nextKey] ?? null,
+                'suggested_next' => $n['required'] ?? null,
+                'goal_next' => $n['goal_orders'] ?? null,
+                'pace_next' => $n['pace_month'] ?? null,
+            ];
+            $b['months'] = array_map(fn ($m) => ['month' => $m['month'], 'orders' => $m['orders'], 'spend_tax' => $m['meta_spend_tax'], 'cost_per_sale' => $m['cost_per_sale']], $months);
+        }
+        unset($b);
+        // Mes a mes de todo el cliente (suma de marcas).
+        $byMonth = [];
+        foreach ($base['brands'] as $b) {
+            foreach ($b['months'] as $m) {
+                $x = &$byMonth[$m['month']];
+                $x ??= ['month' => $m['month'], 'orders' => 0.0, 'spend_tax' => 0.0];
+                $x['orders'] += $m['orders'];
+                $x['spend_tax'] += $m['spend_tax'] ?? 0;
+                unset($x);
+            }
+        }
+        ksort($byMonth);
+        $sum = fn ($k) => array_sum(array_map(fn ($b) => $b['budget'][$k] ?? 0, $base['brands']));
+        return $base + [
+            'months' => array_values(array_map(fn ($m) => $m + ['cost_per_sale' => $m['orders'] > 0 && $m['spend_tax'] > 0 ? $m['spend_tax'] / $m['orders'] : null], $byMonth)),
+            'budget' => ['avg_daily_tax' => $sum('avg_daily_tax'), 'avg_month_tax' => $sum('avg_month_tax'), 'planned_month' => $sum('planned_month'), 'planned_next' => $sum('planned_next'), 'suggested_next' => $sum('suggested_next'), 'mtd_spend_tax' => $sum('mtd_spend_tax')],
+            'next_month' => $nextKey,
+        ];
+    }
+
     public static function overview(int $orgId, array $brandIds, DateRange $range): array
     {
         $org = Clients::find($orgId);

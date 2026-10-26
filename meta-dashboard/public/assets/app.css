@@ -339,3 +339,10 @@ kbd { font-family: "Geist Mono", monospace; font-size: 11px; padding: 1px 5px; b
 .sheet-tbl td { white-space: nowrap; }
 .bulk-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 8px; width: min(640px, calc(100vw - 32px)); padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); font-size: 13px; color: var(--t1); }
 .bulk-bar.hidden { display: none; }
+/* Barra de marcas (portal de clientes con varias marcas) */
+.brand-bar { position: sticky; top: 64px; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; margin: 0 0 20px; border-radius: 14px; background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.brand-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--t2); background: var(--sunk); border: 1px solid transparent; transition: all .15s; }
+.brand-chip::before { content: ''; width: 8px; height: 8px; border-radius: 999px; background: var(--bc); }
+.brand-chip:hover { color: var(--t1); border-color: var(--line-2); }
+.brand-chip.on { background: var(--bc); color: #fff; }
+.brand-chip.on::before { background: #fff; }
