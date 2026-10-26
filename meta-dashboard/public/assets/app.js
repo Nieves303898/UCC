@@ -1880,15 +1880,16 @@ async function viewClient(id, tab = 'assets') {
   const adAccountList = (list) => `
     <div class="card overflow-hidden mb-4">
       <div class="card-h"><div class="h2">Cuentas publicitarias</div><span class="t3 text-xs" data-count="ad_account"></span><div class="flex-1"></div>
-        <span class="t3 text-xs">¿Una cuenta con varias marcas? Elegí “Solo algunas campañas” y escribí cómo se llaman.</span></div>
+        <span class="t3 text-xs">¿Una cuenta con varias marcas? Elegí “Solo algunas campañas” y tildá las de esta marca.</span></div>
       <div class="divide max-h-[560px] overflow-y-auto">${list.map((a) => { const mode = accMode(a.external_id); return `
         <div class="px-4 py-3" data-name="${esc(a.name.toLowerCase())} ${esc(a.external_id)}">
           <div class="flex flex-wrap items-center gap-3">
             <div class="min-w-0 flex-1"><div class="t1 truncate">${esc(a.name)}</div><div class="t3 text-xs truncate">${esc((a.data.business?.name || 'Sin portfolio') + ' · ' + (a.data.currency || '') + ' · ' + a.external_id)}</div></div>
             <div class="seg" data-acc-mode="${esc(a.external_id)}">${[['none', 'No'], ['full', 'Toda la cuenta'], ['rules', 'Solo algunas campañas']].map(([m, l]) => `<button type="button" data-m="${m}" class="${mode === m ? 'on' : ''}">${l}</button>`).join('')}</div>
           </div>
-          <div class="mt-3 ${mode === 'rules' ? '' : 'hidden'}" data-rules-box="${esc(a.external_id)}">
-            <input class="input" data-rules="${esc(a.external_id)}" value="${esc((c.rules?.[a.external_id] || []).join(', '))}" placeholder="Palabras clave separadas por coma. Ej: go celular, gocel">
+          <div class="mt-3 ${mode === 'rules' ? '' : 'hidden'}" data-rules-box="${esc(a.external_id)}" data-cur="${esc(a.data.currency || 'ARS')}" data-ids="${esc((c.rules?.[a.external_id] || []).filter((p) => /^\d+$/.test(p)).join(','))}">
+            <div class="camp-pick" data-camp-list="${esc(a.external_id)}"><div class="p-3 t3 text-xs">Cargando campañas…</div></div>
+            <input class="input mt-2" data-rules="${esc(a.external_id)}" value="${esc((c.rules?.[a.external_id] || []).filter((p) => !/^\d+$/.test(p)).join(', '))}" placeholder="Opcional: palabras para sumar solas las campañas NUEVAS (ej. go celular, gocel)">
             <div class="t3 text-xs mt-1.5" data-rules-preview="${esc(a.external_id)}"></div>
           </div>
         </div>`; }).join('') || '<div class="p-4 t3">No hay cuentas sincronizadas.</div>'}</div>
@@ -1975,22 +1976,65 @@ async function viewClient(id, tab = 'assets') {
       };
       counts();
       // Vista previa de qué campañas toma cada palabra clave.
+      // Cuenta compartida: lista de TODAS sus campañas para tildar + palabras opcionales para las nuevas.
       const campCache = {};
-      const preview = async (accId) => {
-        const box = $(`[data-rules-preview="${accId}"]`);
-        const patterns = $(`[data-rules="${accId}"]`).value.split(',').map((x) => x.trim()).filter(Boolean);
-        if (!patterns.length) { box.textContent = 'Escribí al menos una palabra clave.'; return; }
-        box.textContent = 'Buscando campañas…';
-        try {
-          campCache[accId] ??= (await api('account', { id: accId, preset: 'last_90d' })).campaigns;
-          const hit = campCache[accId].filter((x) => campaignMatches(patterns, x.id, x.name));
-          box.innerHTML = hit.length
-            ? `<span class="t-pos">Toma ${hit.length} campaña${hit.length > 1 ? 's' : ''}:</span> ${hit.slice(0, 6).map((x) => esc(x.name)).join(' · ')}${hit.length > 6 ? ' …' : ''}`
-            : '<span class="t-warn">Ninguna campaña coincide (últimos 90 días). Revisá cómo se llaman.</span>';
-        } catch (err) { box.textContent = err.message; }
+      const picked = {};
+      const words = (accId) => $(`[data-rules="${accId}"]`).value.split(',').map((x) => x.trim()).filter(Boolean);
+      const paintCamps = (accId) => {
+        const list = campCache[accId] || [];
+        const box = $(`[data-camp-list="${accId}"]`);
+        const q = ($(`[data-camp-q="${accId}"]`)?.value || '').toLowerCase();
+        const w = words(accId);
+        const byWord = (x) => w.length && campaignMatches(w, x.id, x.name);
+        const shown = list.filter((x) => !q || x.name.toLowerCase().includes(q));
+        const total = list.filter((x) => picked[accId].has(x.id) || byWord(x)).length;
+        box.innerHTML = list.length ? `
+          <div class="flex flex-wrap items-center gap-2 p-2 hair-b">
+            <input class="input select-sm flex-1 min-w-[160px]" data-camp-q="${accId}" placeholder="Buscar campaña" value="${esc(q)}">
+            <button type="button" class="btn btn-sm" data-camp-all="${accId}">Tildar las visibles</button>
+            <button type="button" class="btn btn-sm btn-ghost" data-camp-none="${accId}">Destildar</button>
+            <span class="t3 text-xs">${total} de ${list.length} campañas</span>
+          </div>
+          <div class="max-h-[300px] overflow-y-auto divide">${shown.map((x) => {
+            const w1 = byWord(x) && !picked[accId].has(x.id);
+            return `<label class="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-[var(--hover)]">
+              <input type="checkbox" class="check" data-camp-check="${accId}" value="${esc(x.id)}" ${picked[accId].has(x.id) || w1 ? 'checked' : ''} ${w1 ? 'disabled' : ''}>
+              <div class="min-w-0 flex-1"><div class="t1 truncate text-[13px]">${esc(x.name)}</div><div class="sub">${statusPill(x.effective_status)} <span class="ml-1">${fmt.moneyShort(x.metrics?.spend || 0, $(`[data-rules-box="${accId}"]`).dataset.cur)} en 90 días</span>${w1 ? ' · <span class="t-accent">por palabra clave</span>' : ''}</div></div>
+            </label>`;
+          }).join('') || '<div class="p-3 t3 text-xs">Ninguna campaña coincide con la búsqueda.</div>'}</div>`
+          : '<div class="p-3 t3 text-xs">Esta cuenta no tiene campañas (ni activas ni pausadas).</div>';
+        const i = $(`[data-camp-q="${accId}"]`);
+        if (i && q) { i.focus(); i.setSelectionRange(q.length, q.length); }
+        const pv = $(`[data-rules-preview="${accId}"]`);
+        if (pv) pv.innerHTML = total ? `<span class="t-pos">Esta marca toma ${total} campaña${total > 1 ? 's' : ''} de la cuenta.</span>${w.length ? ' Las campañas nuevas que contengan esas palabras se suman solas.' : ''}` : '<span class="t-warn">Tildá al menos una campaña.</span>';
       };
+      const preview = async (accId) => {
+        const boxEl = $(`[data-rules-box="${accId}"]`);
+        picked[accId] ??= new Set((boxEl.dataset.ids || '').split(',').filter(Boolean));
+        if (!campCache[accId]) {
+          try { campCache[accId] = (await api('account', { id: accId, preset: 'last_90d' })).campaigns; } catch (err) { $(`[data-camp-list="${accId}"]`).innerHTML = `<div class="p-3 t-bad text-xs">${esc(err.message)}</div>`; return; }
+        }
+        paintCamps(accId);
+      };
+      view.addEventListener('change', (e) => {
+        const cb = e.target.closest('[data-camp-check]');
+        if (!cb) return;
+        const acc = cb.dataset.campCheck;
+        cb.checked ? picked[acc].add(cb.value) : picked[acc].delete(cb.value);
+        paintCamps(acc);
+      });
+      view.addEventListener('click', (e) => {
+        const all = e.target.closest('[data-camp-all]'); const none = e.target.closest('[data-camp-none]');
+        const acc = all?.dataset.campAll || none?.dataset.campNone;
+        if (!acc) return;
+        $$(`[data-camp-check="${acc}"]:not(:disabled)`).forEach((x) => (all ? picked[acc].add(x.value) : picked[acc].delete(x.value)));
+        paintCamps(acc);
+      });
       let tmr;
-      view.addEventListener('input', (e) => { if (e.target.dataset.rules) { clearTimeout(tmr); tmr = setTimeout(() => preview(e.target.dataset.rules), 400); } });
+      view.addEventListener('input', (e) => {
+        if (e.target.dataset.rules) { clearTimeout(tmr); tmr = setTimeout(() => paintCamps(e.target.dataset.rules), 300); }
+        if (e.target.dataset.campQ) { clearTimeout(tmr); tmr = setTimeout(() => paintCamps(e.target.dataset.campQ), 200); }
+      });
       $$('[data-rules-box]:not(.hidden)').forEach((b) => preview(b.dataset.rulesBox));
       view.addEventListener('click', (e) => {
         const b = e.target.closest('[data-acc-mode] [data-m]');
@@ -1999,7 +2043,7 @@ async function viewClient(id, tab = 'assets') {
         $$('[data-m]', seg).forEach((x) => x.classList.toggle('on', x === b));
         const box = $(`[data-rules-box="${seg.dataset.accMode}"]`);
         box.classList.toggle('hidden', b.dataset.m !== 'rules');
-        if (b.dataset.m === 'rules') { $('input', box).focus(); preview(seg.dataset.accMode); }
+        if (b.dataset.m === 'rules') preview(seg.dataset.accMode);
         counts();
       });
       $('#ctabs').addEventListener('click', (e) => {
@@ -2024,11 +2068,12 @@ async function viewClient(id, tab = 'assets') {
         $$('[data-acc-mode]').forEach((x) => {
           const id = x.dataset.accMode, m = modeOf(id);
           if (m === 'full') list.push({ type: 'ad_account', id });
-          if (m === 'rules') rules.push({ account: id, patterns: $(`[data-rules="${id}"]`).value.split(',').map((p) => p.trim()).filter(Boolean) });
+          if (m === 'rules') rules.push({ account: id, patterns: [...(picked[id] || new Set((($(`[data-rules-box="${id}"]`).dataset.ids) || '').split(',').filter(Boolean))), ...words(id)] });
         });
-        if (rules.some((r) => !r.patterns.length)) { toast('Completá las palabras clave de las cuentas compartidas.', 'error'); return; }
-        await post('client_assets', { id: c.id, assets: list, rules }, 'Asignación guardada');
+        if (rules.some((r) => !r.patterns.length)) { toast('En las cuentas con “Solo algunas campañas”, tildá al menos una campaña.', 'error'); return; }
+        try { await post('client_assets', { id: c.id, assets: list, rules }, 'Asignación guardada'); } catch { return; }
         state.boot = await api('bootstrap'); renderNav();
+        render({ silent: true });
       });
       $('#open-brand-map')?.addEventListener('click', (e) => { e.preventDefault(); brandsModal(() => render({ silent: true })); });
       $('#brand-form')?.addEventListener('submit', async (e) => {

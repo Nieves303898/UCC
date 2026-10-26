@@ -127,7 +127,7 @@ Las ventas se conectan **por marca** (Clientes → {marca} → Ventas → Google
 
 Si una cuenta tiene campañas de distintas marcas (ej. PayLab Gestión con campañas de Go Celular, Osacra, Clover), cada cliente puede tomar **sólo sus campañas**:
 
-- *Clientes → {cliente} → Activos asignados → Cuentas publicitarias*: elegí **"Solo algunas campañas"** y escribí palabras clave separadas por coma (ej. `go celular, gocel`). Se muestra al instante qué campañas toma. Mayúsculas, tildes y signos no importan; un número se toma como ID exacto de campaña. Las campañas nuevas que respeten el nombre entran solas.
+- *Clientes → {marca} → Activos asignados → Cuentas publicitarias*: elegí **"Solo algunas campañas"** y aparece la **lista de todas las campañas de la cuenta** (activas y pausadas, con su gasto de los últimos 90 días) para buscar y **tildar** las de la marca. Opcionalmente, palabras clave (ej. `go celular, gocel`) para que las campañas **nuevas** se sumen solas; en las marcas, esas palabras quedan también como sus palabras de reconocimiento.
 - *Clientes → Detectar marcas en campañas*: agrupa las campañas por el nombre (lo que va antes de " - " o " | ") y las asigna a un cliente existente o nuevo con un clic.
 - El portal, las métricas, la serie diaria, las ventas por campaña, el ROAS real y los objetivos del cliente usan sólo sus campañas. El acceso se valida en el servidor (también para conjuntos y anuncios), y el cliente ve el nombre de su marca en lugar del de la cuenta compartida.
 - *Presupuestos → Por marca / cliente*: presupuesto mensual propio de cada marca, gasto +35%, gasto de hoy, cierre estimado y diario sugerido; cada campaña muestra la etiqueta de su marca.

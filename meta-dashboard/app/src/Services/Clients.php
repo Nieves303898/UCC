@@ -161,6 +161,31 @@ final class Clients
                 Db::insert('client_campaign_rules', ['client_id' => $id, 'account_id' => $acc, 'pattern' => $p, 'created_at' => Db::now()]);
             }
         }
+        // En una marca, las palabras escritas acá pasan a ser sus palabras de reconocimiento
+        // (así no se pierden cuando se guardan "Marcas y cuentas").
+        $c = self::find($id);
+        if (($c['kind'] ?? '') === 'marca') {
+            $words = [];
+            foreach ($rules as $r) {
+                foreach ((array) ($r['patterns'] ?? []) as $p) {
+                    $p = trim((string) $p);
+                    if ($p !== '' && !ctype_digit($p)) {
+                        $words[] = $p;
+                    }
+                }
+            }
+            if ($words) {
+                $all = array_merge(preg_split('/[,;\n]+/', (string) ($c['aliases'] ?? '')) ?: [], $words);
+                $uniq = [];
+                foreach ($all as $w) {
+                    $w = trim($w);
+                    if ($w !== '' && SalesImport::normName($w) !== SalesImport::normName($c['name'])) {
+                        $uniq[SalesImport::normName($w)] = $w;
+                    }
+                }
+                Db::exec('UPDATE clients SET aliases = ? WHERE id = ?', [mb_substr(implode(', ', $uniq), 0, 500) ?: null, $id]);
+            }
+        }
     }
 
     /** Agrega palabras clave para un cliente en una cuenta (usado por la detección automática). */
