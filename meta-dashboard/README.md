@@ -82,6 +82,10 @@ Cada marca tiene **palabras para reconocer sus campañas** (en *Marcas y cuentas
 - **Ventas → Todas las marcas**: totales del cliente (ventas, facturación, inversión +35%, costo por venta, conversaciones), tabla por marca y mes a mes por marca con el costo por venta de todo el cliente.
 - **Presupuesto**: promedio diario real del mes (con impuestos), cierre del mes a ese ritmo, asignado este mes, **asignado para el mes siguiente** (lo que se carga en Presupuestos) y el **sugerido** según los objetivos de cada marca.
 
+### Presupuesto en el portal del cliente
+
+Menú **Presupuesto** del portal (y en la vista previa): la proyección de inversión según el objetivo de cada marca —mes en curso o siguiente, por mes, semana o día— con el costo por venta real, la inversión necesaria (+35% y "en Meta"), el ritmo actual, cuánto subir o bajar por día y lo asignado. Es de sólo lectura (los objetivos se cargan desde Presupuestos en tu panel) y respeta lo que ve cada persona: un supervisor ve sólo sus marcas. Arriba está la barra de marcas.
+
 ### Accesos (panel general y del cliente)
 
 - **Agencia → Accesos** (sólo administradores): todas las personas del sistema —tu equipo y los usuarios de cada cliente— con filtros por tipo y cliente. Desde ahí se crea cualquier acceso, se cambia rol y marcas, se genera una clave nueva o se da de baja. Los clientes no ven esta pantalla ni saben quién más tiene acceso.

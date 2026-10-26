@@ -1333,7 +1333,7 @@ function todayLabel() {
 const previewBanner = (cid, name) => (state.preview ? (crumbs([{ label: 'Clientes', href: '#/clients' }, { label: name, href: isAdmin() ? `#/clients/${cid}` : `#/preview/${cid}` }, { label: 'Vista del cliente' }]), `
   <div class="card mb-5 px-4 py-3 flex flex-wrap items-center gap-3 no-print" style="border-color:var(--accent-line);background:var(--accent-soft)">
     <span class="t-accent">${icon('eye', 16)}</span><div class="flex-1 t1 text-[13px]">Vista previa del portal de <b>${esc(name)}</b>: así lo ve el cliente.</div>
-    <a class="btn btn-sm" href="#/preview/${cid}">Inicio</a><a class="btn btn-sm" href="#/preview/${cid}/sales">Ventas</a><a class="btn btn-sm" href="#/preview/${cid}/work">Trabajo</a><a class="btn btn-sm" href="#/preview/${cid}/report">Reporte</a><a class="btn btn-sm" href="#/preview/${cid}/sheets">Planillas</a>
+    <a class="btn btn-sm" href="#/preview/${cid}">Inicio</a><a class="btn btn-sm" href="#/preview/${cid}/sales">Ventas</a><a class="btn btn-sm" href="#/preview/${cid}/work">Trabajo</a><a class="btn btn-sm" href="#/preview/${cid}/report">Reporte</a><a class="btn btn-sm" href="#/preview/${cid}/plan">Presupuesto</a><a class="btn btn-sm" href="#/preview/${cid}/sheets">Planillas</a>
     <a class="btn btn-sm btn-primary" href="${isAdmin() ? `#/clients/${cid}` : '#/clients'}">Salir de la vista previa</a>
   </div>`) : '');
 
@@ -2642,6 +2642,19 @@ async function viewOrgSales(cid, org) {
   };
 }
 
+/** Portal: proyección de presupuesto según los objetivos de cada marca (sólo lectura). */
+async function viewPortalPlan(cid) {
+  cid = +cid || portalClient();
+  const brand = await clientBrand(cid);
+  setAccent(brand.color);
+  crumbs([{ label: 'Presupuesto' }]);
+  const orgB = await portalOrg(cid);
+  const html = `${previewBanner(cid, brand.name)}${brandBar(orgB, cid, 'plan')}
+    ${pageHead('Presupuesto', `Proyección de inversión para llegar a los objetivos de ${esc(brand.kind === 'marca' ? brand.name : 'cada marca')}. Elegí mes en curso o siguiente, y verlo por mes, semana o día.`)}
+    <div id="portal-plan"><div class="sk h-72"></div></div>`;
+  return { html, mount() { if (orgB) mountBrandBar(orgB, 'plan'); planSection($('#portal-plan'), cid); } };
+}
+
 async function viewSales(cid) {
   cid = +cid || portalClient();
   const brand = await clientBrand(cid);
@@ -3082,13 +3095,17 @@ const PLAN_STATUS = {
 };
 const GRAN = { month: ['Mes', 'por mes'], week: ['Semana', 'por semana'], day: ['Día', 'por día'] };
 
-async function planSection(box) {
+async function planSection(box, portalClientId = null) {
   const cfg = { month: 'next', basis: 'avg3', gran: 'month', ...store.get('planCfg', {}) };
   const load = async () => {
     store.set('planCfg', cfg);
     box.querySelector('[data-plan-body]')?.classList.add('opacity-50');
     let d;
-    try { d = await api('budget_plan', { month: cfg.month, basis: cfg.basis, parent: cfg.parent || '' }); } catch (e) { box.innerHTML = errorBox(e.message, false); return; }
+    try {
+      d = portalClientId
+        ? await api('portal_plan', { client: portalClientId, month: cfg.month, basis: cfg.basis })
+        : await api('budget_plan', { month: cfg.month, basis: cfg.basis, parent: cfg.parent || '' });
+    } catch (e) { box.innerHTML = errorBox(e.message, false); return; }
     box.innerHTML = planHtml(d, cfg);
     hydrateIcons(box);
   };
@@ -3233,6 +3250,7 @@ async function brandsModal(after) {
 }
 
 function planHtml(d, cfg) {
+  const canEdit = () => !d.portal && (isAdmin() || isMember()); // en el portal del cliente es de sólo lectura
   if (!d.has_brands) d.brands = d.brands.filter((b) => b.has_ads || b.goal_orders !== null); // sin marcas definidas: ocultar clientes sin campañas
   const tax = fmt.dec(d.tax_rate * 100, 0) + '%';
   const cur = d.which === 'current';
@@ -3328,7 +3346,7 @@ function planHtml(d, cfg) {
   return `<div class="card mb-8 overflow-hidden" data-plan-body>
     <div class="p-5 flex flex-wrap items-end gap-4">
       <div class="w-full"><div class="h2 flex items-center gap-2">Plan por objetivos · ${esc(monthTitle)}${d.has_brands && d.can_split ? `<button class="btn btn-sm btn-ghost !h-7" data-brands-edit>${icon('sliders', 13)}Marcas y cuentas</button>` : ''}</div>
-        <div class="t3 text-xs mt-0.5">Cargá cuántas ${esc('ventas')} querés por marca: calculamos cuánto invertir con su costo por venta real (Meta +${tax} ÷ ventas de la planilla).</div></div>
+        <div class="t3 text-xs mt-0.5">${d.portal ? `Cuánto hay que invertir para llegar al objetivo de ventas de cada marca, según su costo por venta real (Meta +${tax} ÷ ventas de la planilla).` : `Cargá cuántas ${esc('ventas')} querés por marca: calculamos cuánto invertir con su costo por venta real (Meta +${tax} ÷ ventas de la planilla).`}</div></div>
       <div><div class="t3 text-xs mb-1.5">Mes</div><div class="seg">${[['current', 'En curso'], ['next', 'Siguiente']].map(([v, l]) => `<button data-plan-cfg="month" data-v="${v}" class="${cfg.month === v ? 'on' : ''}">${l} · ${esc(monthOf(v))}</button>`).join('')}</div></div>
       ${(d.parents || []).length ? `<label class="field"><span>Cliente</span><select class="input select-sm" id="plan-parent">${d.parents.length > 1 ? '<option value="">Todos</option>' : ''}${d.parents.map((p) => `<option value="${p.id}" ${String(cfg.parent || '') === String(p.id) || d.parents.length === 1 ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>` : ''}
       <label class="field"><span>Costo por venta según</span><select class="input select-sm" id="plan-basis">${Object.entries(d.bases).map(([k, l]) => `<option value="${k}" ${d.basis === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
@@ -4258,6 +4276,7 @@ function renderNav() {
     const items = CLIENT_NAV.filter(([k]) => (k !== 'ads' || c0.has_ads) && (k !== 'social' || cn.page || cn.ig_account));
     if (c0.has_sales || (c0.has_brands && c0.kind !== 'marca') || state.boot.org) items.splice(1, 0, ['sales', '#/sales', 'layers', c0.has_brands ? 'Ventas' : (c0.sales_label || 'Ventas')]);
     if (c0.has_sheets) items.splice(items.length - 1, 0, ['sheets', '#/sheets', 'grid', 'Planillas']);
+    if (state.boot.org || c0.has_ads) items.splice(items.findIndex(([k]) => k === 'sales') + 1 || 1, 0, ['plan', '#/plan', 'calendar', 'Presupuesto']);
     if (state.boot.user.can_manage_users) items.push(['access', '#/access', 'key', 'Accesos']);
     const html = items.map(([k, href, ic, l]) => `<a href="${href}" data-nav="${k}">${icon(ic)}${esc(l)}</a>`).join('');
     $('#nav').innerHTML = html;
@@ -4355,6 +4374,7 @@ const ADMIN_ROUTES = [
   [/^\/preview\/(\d+)\/sales$/, viewSales, 'clients', true],
   [/^\/preview\/(\d+)\/report$/, viewReport, 'clients', true],
   [/^\/preview\/(\d+)\/sheets$/, viewSheets, 'clients', true],
+  [/^\/preview\/(\d+)\/plan$/, viewPortalPlan, 'clients', true],
   [/^\/activity$/, viewActivity, 'activity'],
   [/^\/access$/, viewAccess, 'access'],
   [/^\/settings$/, viewSettings, 'settings'],
@@ -4374,6 +4394,7 @@ const CLIENT_ROUTES = [
   [/^\/report$/, () => viewReport(), 'report'],
   [/^\/sheets$/, () => viewSheets(), 'sheets'],
   [/^\/org$/, () => viewOrgHome(portalClient(), state.boot.org), 'home'],
+  [/^\/plan$/, () => viewPortalPlan(), 'plan'],
   [/^\/access$/, viewPortalAccess, 'access'],
 ];
 const NO_LIVE = /^#\/(settings|clients)/;
