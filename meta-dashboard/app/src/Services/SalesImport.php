@@ -41,76 +41,49 @@ final class SalesImport
     }
 
     /**
-     * Descarga un Google Sheets. Lee el libro COMPLETO (todas las pestañas, ej. una por mes)
-     * como Excel; si Google no lo permite, cae a la pestaña del link como CSV.
-     * Acepta el link de edición o el de "Publicar en la web".
+     * Descarga un Google Sheets. Primero intenta el libro COMPLETO (todas las pestañas, ej. una
+     * por mes) como Excel; si Google o el servidor no lo permiten, lee pestaña por pestaña los
+     * links conocidos ($urls: uno por pestaña, de la misma planilla).
      */
-    public static function readGoogleSheet(string $url): array
+    public static function readGoogleSheet(string $url, array $moreUrls = []): array
     {
         $csvUrl = self::googleCsvUrl($url);
         $xlsxUrl = preg_replace(['#/export\?format=csv(&gid=\d+)?#', '#/pub\?output=csv(&gid=\d+)?#'], ['/export?format=xlsx', '/pub?output=xlsx'], $csvUrl);
-        [$body, $status, $type] = self::download($xlsxUrl);
-        if (is_string($body) && $status < 400 && str_starts_with($body, "PK")) {
-            $tmp = tempnam(sys_get_temp_dir(), 'gsx');
-            file_put_contents($tmp, $body);
-            try {
-                return self::combine(self::readXlsxSheets($tmp));
-            } catch (InvalidArgumentException) {
-                // se intenta como CSV
-            } finally {
-                @unlink($tmp);
+        $why = null;
+        if (!class_exists(ZipArchive::class)) {
+            $why = 'el servidor no tiene la extensión ZIP de PHP (activala en Hostinger → PHP → Extensiones: zip)';
+        } else {
+            [$body, $status, $type] = self::download($xlsxUrl);
+            if (is_string($body) && $status < 400 && str_starts_with($body, "PK")) {
+                $tmp = tempnam(sys_get_temp_dir(), 'gsx');
+                file_put_contents($tmp, $body);
+                try {
+                    return self::combine(self::readXlsxSheets($tmp)) + ['via' => 'xlsx'];
+                } catch (\Throwable $e) {
+                    $why = 'no se pudo abrir el archivo completo (' . $e->getMessage() . ')';
+                } finally {
+                    @unlink($tmp);
+                }
+            } else {
+                $why = $status ? "Google no entregó el archivo completo (HTTP $status)" : 'Google no respondió a tiempo con el archivo completo';
             }
         }
-        [$body, $status, $type] = self::download($csvUrl);
-        if (!is_string($body) || $status >= 400 || str_contains($type, 'text/html')) {
+        // Respaldo: cada pestaña por su link (CSV).
+        $sheets = [];
+        $errors = [];
+        foreach (array_values(array_unique([$csvUrl, ...array_map([self::class, 'googleCsvUrl'], $moreUrls)])) as $i => $u) {
+            [$body, $status, $type] = self::download($u);
+            if (!is_string($body) || $status >= 400 || str_contains($type, 'text/html')) {
+                $errors[] = $u;
+                continue;
+            }
+            $gid = preg_match('/gid=(\d+)/', $u, $g) ? $g[1] : (string) $i;
+            $sheets['Pestaña ' . ($i + 1) . ' (gid ' . $gid . ')'] = self::readCsv($body);
+        }
+        if (!$sheets) {
             throw new InvalidArgumentException('No pudimos leer la planilla. En Google Sheets: Compartir → Acceso general → "Cualquier persona con el enlace" → Lector.');
         }
-        return self::table(self::readCsv($body));
-    }
-
-    /**
-     * Libro de Google tal cual, para mostrarlo (no para importar): [['name' => pestaña, 'rows' => matriz], …].
-     * Recorta filas y columnas vacías.
-     */
-    public static function readGoogleRaw(string $url, int $maxRows = 3000, int $maxCols = 60): array
-    {
-        $csvUrl = self::googleCsvUrl($url);
-        $xlsxUrl = preg_replace(['#/export\?format=csv(&gid=\d+)?#', '#/pub\?output=csv(&gid=\d+)?#'], ['/export?format=xlsx', '/pub?output=xlsx'], $csvUrl);
-        $sheets = null;
-        [$body, $status] = self::download($xlsxUrl);
-        if (is_string($body) && $status < 400 && str_starts_with($body, "PK")) {
-            $tmp = tempnam(sys_get_temp_dir(), 'gsx');
-            file_put_contents($tmp, $body);
-            try {
-                $sheets = self::readXlsxSheets($tmp);
-            } catch (InvalidArgumentException) {
-            } finally {
-                @unlink($tmp);
-            }
-        }
-        if ($sheets === null) {
-            [$body, $status, $type] = self::download($csvUrl);
-            if (!is_string($body) || $status >= 400 || str_contains($type, 'text/html')) {
-                throw new InvalidArgumentException('No pudimos leer la planilla. En Google Sheets: Compartir → Acceso general → "Cualquier persona con el enlace" → Lector.');
-            }
-            $sheets = ['Hoja 1' => self::readCsv($body)];
-        }
-        $out = [];
-        foreach ($sheets as $name => $m) {
-            $m = array_values(array_filter($m, fn ($r) => count(array_filter($r, fn ($c) => trim((string) $c) !== '')) > 0));
-            $m = array_slice($m, 0, $maxRows);
-            $width = 0;
-            foreach ($m as $r) {
-                foreach ($r as $i => $c) {
-                    if (trim((string) $c) !== '') {
-                        $width = max($width, $i + 1);
-                    }
-                }
-            }
-            $width = min($width, $maxCols);
-            $out[] = ['name' => (string) $name, 'rows' => array_map(fn ($r) => array_map(fn ($i) => (string) ($r[$i] ?? ''), $width ? range(0, $width - 1) : []), $m)];
-        }
-        return $out;
+        return self::combine($sheets) + ['via' => 'csv', 'via_reason' => $why, 'tab_count' => count($sheets)];
     }
 
     /** @return array{0: string|false, 1: int, 2: string} */
@@ -121,7 +94,7 @@ final class SalesImport
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 4,
-            CURLOPT_TIMEOUT        => 45,
+            CURLOPT_TIMEOUT        => 90,
             CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS,
             CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
         ]);
@@ -185,26 +158,53 @@ final class SalesImport
         return ['headers' => $headers, 'rows' => $all, 'tabs' => $tabs];
     }
 
-    /** Agrupa por día una tabla (con todas sus pestañas). Si un día aparece en dos pestañas, gana la que tiene datos. */
+    /**
+     * Agrupa por día una tabla (con todas sus pestañas). Si un día aparece en dos pestañas,
+     * gana la que tiene datos. Devuelve además un informe pestaña por pestaña ('report').
+     */
     public static function aggregateTable(array $table, array $map): array
     {
         if (empty($table['tabs']) || count($table['tabs']) === 1) {
-            return self::aggregate($table['rows'], $map);
+            $agg = self::aggregate($table['rows'], $map);
+            $name = $table['tabs'][0]['name'] ?? 'Planilla';
+            $agg['report'] = [self::tabReport($name, $agg, 'ok', null)];
+            if (($table['via'] ?? '') === 'csv') {
+                $agg['report'][0]['note'] = 'Se leyó sólo la pestaña del link porque ' . ($table['via_reason'] ?? 'Google no entregó el archivo completo') . '. Pegá también el link de cada mes (pestaña) para que entren todos.';
+            }
+            return $agg;
         }
         $days = [];
         $skipped = 0;
+        $report = [];
         foreach ($table['tabs'] as $tab) {
+            $agg = null;
+            $reason = null;
             if (!empty($map['_auto']) && isset($tab['own_headers'])) {
                 // Cada mes tiene sus propias campañas (y columnas): se detecta pestaña por pestaña.
                 $own = self::suggest($tab['own_headers'], $tab['own_rows']);
-                if ($own['date'] === null || $own['orders'] === null) {
-                    continue; // pestaña de resumen / histórico sin carga diaria
+                if ($own['date'] !== null && $own['orders'] !== null) {
+                    $agg = self::aggregate($tab['own_rows'], $own);
+                } else {
+                    $reason = $own['date'] === null ? 'no encontramos la columna de fechas' : 'no encontramos la columna de ventas';
                 }
-                $agg = self::aggregate($tab['own_rows'], $own);
-            } else {
-                $agg = self::aggregate($tab['rows'], $map);
+            }
+            if (!$agg || !$agg['days']) {
+                // Respaldo: alinear con las columnas de la pestaña modelo (mismos títulos).
+                try {
+                    $alt = self::aggregate($tab['rows'], $map);
+                    if ($alt['days']) {
+                        $agg = $alt;
+                        $reason = null;
+                    }
+                } catch (\Throwable) {
+                }
+            }
+            if (!$agg || !$agg['days']) {
+                $report[] = self::tabReport($tab['name'], null, 'skipped', $reason ?? 'no tiene días con fecha y ventas');
+                continue;
             }
             $skipped += $agg['skipped'];
+            $report[] = self::tabReport($tab['name'], $agg, 'ok', null);
             foreach ($agg['days'] as $d) {
                 $k = $d['day'] . '|' . $d['dim'] . '|' . $d['campaign'];
                 if (!isset($days[$k]) || $d['orders'] + $d['revenue'] > $days[$k]['orders'] + $days[$k]['revenue']) {
@@ -212,8 +212,19 @@ final class SalesImport
                 }
             }
         }
+        if (($table['via'] ?? '') === 'csv' && $report) {
+            $report[0]['note'] = 'Se leyó pestaña por pestaña (' . count($report) . ' links) porque ' . ($table['via_reason'] ?? 'Google no entregó el archivo completo') . '. Si agregás un mes nuevo, pegá también su link.';
+        }
         $dates = array_column($days, 'day');
-        return ['days' => array_values($days), 'skipped' => $skipped, 'min' => $dates ? min($dates) : null, 'max' => $dates ? max($dates) : null];
+        return ['days' => array_values($days), 'skipped' => $skipped, 'min' => $dates ? min($dates) : null, 'max' => $dates ? max($dates) : null, 'report' => $report];
+    }
+
+    private static function tabReport(string $name, ?array $agg, string $status, ?string $reason): array
+    {
+        $dates = $agg ? array_column($agg['days'], 'day') : [];
+        return ['tab' => $name, 'status' => $status, 'reason' => $reason, 'days' => count(array_unique($dates)),
+            'orders' => $agg ? array_sum(array_column($agg['days'], 'orders')) : 0,
+            'min' => $dates ? min($dates) : null, 'max' => $dates ? max($dates) : null];
     }
 
     /** ID del archivo de Google (el mismo para todas sus pestañas). */
@@ -291,6 +302,13 @@ final class SalesImport
             }
             if (in_array($field, $multi, true)) {
                 $out[$field] = $out[$field] ?: null;
+            }
+        }
+        // Si la columna elegida como fecha casi no tiene fechas, se busca la que sí (por contenido).
+        if ($out['date'] !== null && $rows) {
+            $hits = count(array_filter(array_slice($rows, 0, 60), fn ($r) => self::parseDate($r[$out['date']] ?? null) !== null));
+            if ($hits < 3) {
+                $out['date'] = null;
             }
         }
         if ($out['date'] === null && $rows) {

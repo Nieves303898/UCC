@@ -281,6 +281,18 @@ final class Schema
         } catch (\Throwable) {
             Db::pdo()->exec("ALTER TABLE clients ADD COLUMN kind VARCHAR(10) NOT NULL DEFAULT 'cliente'");
         }
+        // v11: informe de la última lectura de cada planilla (qué se leyó de cada pestaña).
+        try {
+            Db::one('SELECT report_json FROM sales_sources LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec('ALTER TABLE sales_sources ADD COLUMN report_json TEXT NULL');
+        }
+        // v12: links de cada pestaña de la misma planilla (respaldo cuando Google no entrega el archivo completo).
+        try {
+            Db::one('SELECT tab_urls FROM sales_sources LIMIT 1');
+        } catch (\Throwable) {
+            Db::pdo()->exec('ALTER TABLE sales_sources ADD COLUMN tab_urls TEXT NULL');
+        }
         // v10: costo de campaña que el equipo anota en la planilla (para cotejar con Meta).
         try {
             Db::one('SELECT spend FROM sales_daily LIMIT 1');

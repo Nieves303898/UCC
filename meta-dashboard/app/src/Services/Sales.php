@@ -26,7 +26,8 @@ final class Sales
         return array_map(function ($s) {
             $s['id'] = (int) $s['id'];
             $s['mapping'] = $s['mapping_json'] ? json_decode($s['mapping_json'], true) : null;
-            unset($s['mapping_json']);
+            $s['report'] = !empty($s['report_json']) ? json_decode($s['report_json'], true) : null;
+            unset($s['mapping_json'], $s['report_json']);
             $range = Db::one('SELECT MIN(day) AS min_day, MAX(day) AS max_day FROM sales_daily WHERE source_id = ?', [$s['id']]);
             return $s + $range;
         }, Db::all('SELECT * FROM sales_sources WHERE client_id = ? ORDER BY id', [$clientId]));
@@ -94,18 +95,25 @@ final class Sales
     public static function connect(int $clientId, string $url, string $name = ''): array
     {
         Clients::find($clientId);
-        $table = SalesImport::readGoogleSheet($url);
+        $existing = self::sameFile($clientId, $url);
+        $tabs = $existing ? self::tabUrls($existing) : [];
+        $csv = SalesImport::googleCsvUrl($url);
+        if (!in_array($csv, $tabs, true)) {
+            $tabs[] = $csv;
+        }
+        $table = SalesImport::readGoogleSheet($url, $tabs);
         $map = SalesImport::suggest($table['headers'], $table['rows']);
         $map += ['_auto' => true];
         $agg = $map['date'] !== null ? SalesImport::aggregateTable($table, $map) : ['days' => []];
         if ($map['date'] === null || $map['orders'] === null || !$agg['days']) {
             return ['needs_mapping' => true] + self::preview(null, $url);
         }
-        // El mismo archivo (aunque sea el link de otra pestaña) se actualiza, no se duplica:
-        // ya se leen todas sus pestañas.
-        $existing = self::sameFile($clientId, $url);
+        // El mismo archivo (aunque sea el link de otra pestaña) se actualiza, no se duplica;
+        // se guarda el link de cada pestaña por si Google no entrega el archivo completo.
         $res = self::store($clientId, $agg, $map, ['kind' => 'gsheet', 'url' => $url, 'source_id' => $existing['id'] ?? 0, 'name' => $name ?: ($existing['name'] ?? 'Planilla de ventas (Sheets)')]);
+        Db::exec('UPDATE sales_sources SET tab_urls = ? WHERE id = ?', [json_encode(array_values(array_unique($tabs))), $res['source_id']]);
         return $res + [
+            'via' => $table['via'] ?? null,
             'updated' => (bool) $existing,
             'orders' => array_sum(array_column($agg['days'], 'orders')),
             'revenue' => array_sum(array_column($agg['days'], 'revenue')),
@@ -135,7 +143,8 @@ final class Sales
         }
         // Planilla completa (Sheets) reemplaza todo; un archivo reemplaza sólo las fechas que trae.
         self::replaceRows($clientId, $sourceId, $agg, $kind === 'gsheet');
-        return ['source_id' => $sourceId, 'days' => count(array_unique(array_column($agg['days'], 'day'))), 'skipped' => $agg['skipped'], 'min' => $agg['min'], 'max' => $agg['max']];
+        Db::exec('UPDATE sales_sources SET report_json = ? WHERE id = ?', [json_encode($agg['report'] ?? null, JSON_UNESCAPED_UNICODE), $sourceId]);
+        return ['report' => $agg['report'] ?? null, 'source_id' => $sourceId, 'days' => count(array_unique(array_column($agg['days'], 'day'))), 'skipped' => $agg['skipped'], 'min' => $agg['min'], 'max' => $agg['max']];
     }
 
     public static function sync(int $sourceId): array
@@ -145,17 +154,18 @@ final class Sales
             throw new InvalidArgumentException('Sólo se pueden sincronizar fuentes de Google Sheets.');
         }
         try {
-            $table = SalesImport::readGoogleSheet((string) $src['url']);
+            $table = SalesImport::readGoogleSheet((string) $src['url'], self::tabUrls($src));
             $map = json_decode((string) $src['mapping_json'], true) ?: [];
-            if (!empty($map['_auto'])) { // conectada en un paso: se vuelve a detectar (pestañas o columnas nuevas)
-                $fresh = SalesImport::suggest($table['headers'], $table['rows']);
-                if ($fresh['date'] !== null && $fresh['orders'] !== null) {
-                    $map = $fresh + ['_auto' => true];
-                    Db::exec('UPDATE sales_sources SET mapping_json = ? WHERE id = ?', [json_encode($map), $sourceId]);
-                }
+            $fresh = SalesImport::suggest($table['headers'], $table['rows']);
+            // Conectada en un paso, o la misma columna de ventas que eligieron a mano:
+            // se vuelve a detectar en cada lectura (pestañas o columnas nuevas).
+            if ($fresh['date'] !== null && $fresh['orders'] !== null && (!empty($map['_auto']) || ($map['orders'] ?? null) === $fresh['orders'])) {
+                $map = $fresh + ['_auto' => true];
+                Db::exec('UPDATE sales_sources SET mapping_json = ? WHERE id = ?', [json_encode($map), $sourceId]);
             }
             $agg = SalesImport::aggregateTable($table, $map);
             self::replaceRows((int) $src['client_id'], $sourceId, $agg, true);
+            Db::exec('UPDATE sales_sources SET report_json = ? WHERE id = ?', [json_encode($agg['report'] ?? null, JSON_UNESCAPED_UNICODE), $sourceId]);
             return ['days' => count($agg['days']), 'max' => $agg['max']];
         } catch (\Throwable $e) {
             Db::exec('UPDATE sales_sources SET last_error = ?, last_sync_at = ? WHERE id = ?', [$e->getMessage(), Db::now(), $sourceId]);
@@ -724,11 +734,21 @@ final class Sales
         }
     }
 
+    /** Links (CSV) de cada pestaña conocida de una fuente de Google Sheets. */
+    private static function tabUrls(array $src): array
+    {
+        $list = json_decode((string) ($src['tab_urls'] ?? ''), true) ?: [];
+        if (!empty($src['url']) && !in_array($src['url'], $list, true)) {
+            array_unshift($list, $src['url']);
+        }
+        return array_values(array_unique($list));
+    }
+
     /** Fuente de Google Sheets del mismo archivo ya conectada para este cliente. */
     private static function sameFile(int $clientId, string $url): ?array
     {
         $id = SalesImport::googleFileId($url);
-        foreach (Db::all("SELECT id, name, url FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' ORDER BY id", [$clientId]) as $s) {
+        foreach (Db::all("SELECT id, name, url, tab_urls FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' ORDER BY id", [$clientId]) as $s) {
             if ($id && SalesImport::googleFileId((string) $s['url']) === $id) {
                 return $s;
             }
@@ -741,12 +761,16 @@ final class Sales
     {
         $seen = [];
         $removed = 0;
-        foreach (Db::all("SELECT id, url FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' ORDER BY id", [$clientId]) as $s) {
+        foreach (Db::all("SELECT id, url, tab_urls FROM sales_sources WHERE client_id = ? AND kind = 'gsheet' ORDER BY id", [$clientId]) as $s) {
             $fid = SalesImport::googleFileId((string) $s['url']);
             if ($fid === null) {
                 continue;
             }
             if (isset($seen[$fid])) {
+                // Se conserva el link de esta pestaña en la fuente que queda.
+                $keep = Db::one('SELECT id, url, tab_urls FROM sales_sources WHERE id = ?', [$seen[$fid]]);
+                $merged = array_values(array_unique([...self::tabUrls($keep), ...self::tabUrls($s)]));
+                Db::exec('UPDATE sales_sources SET tab_urls = ? WHERE id = ?', [json_encode($merged), $seen[$fid]]);
                 Db::exec('DELETE FROM sales_daily WHERE source_id = ?', [$s['id']]);
                 Db::exec('DELETE FROM sales_sources WHERE id = ?', [$s['id']]);
                 $removed++;

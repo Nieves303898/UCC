@@ -65,6 +65,7 @@ El tablero muestra: total, facturación, ticket promedio, promedio diario, consu
 
 ### Mes a mes y cotejo planilla vs Meta
 
+- **Si Google no entrega el archivo completo** (pasa en algunos servidores: el panel lo avisa en la fuente), se lee **pestaña por pestaña** con los links que pegaste. Por eso conviene pegar el link de cada mes (uno por renglón): si son del mismo archivo se guardan en una sola fuente, sin duplicar. Debajo de cada fuente se ve qué se leyó de cada pestaña (mes, ventas, días y hasta qué fecha) y el motivo si alguna no entró.
 - **Varias planillas a la vez**: en Ventas → Conectar se pueden pegar varios links (uno por renglón) cuando los meses están en **archivos distintos**. Si los meses son **pestañas de un mismo archivo**, alcanza con un link: se leen todas. Si se pega el mismo archivo más de una vez (por ejemplo, el link de cada pestaña), se actualiza la misma fuente y no se duplica; las fuentes duplicadas que hubieran quedado se limpian solas al abrir el panel.
 - **Cada pestaña se lee con sus propios títulos**: si cada mes tiene campañas distintas (ej. "Día de la Madre" en septiembre, "Primavera Saldo x4" en octubre), se toman todas sus columnas de interacciones y costo. Las pestañas sin carga diaria (ej. "Histórico") se ignoran.
 - **Día por día**: tocando un mes en *Mes a mes* se ve cada día con ventas, interacciones anotadas, conversaciones de Meta, costo anotado, gasto de Meta (con y sin impuestos) y costo por venta, y avisa si algún día viene de dos planillas.

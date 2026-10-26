@@ -2766,6 +2766,17 @@ async function mountSalesHome(boxId, cid) {
 }
 
 // ---------- Admin: carga de ventas de un cliente ----------
+/** Qué se leyó de cada pestaña de una planilla (para ver al instante si un mes no entró). */
+function tabReport(rep) {
+  if (!rep || !rep.length) return '';
+  const label = (t) => (/^Pestaña \d/.test(t.tab) && t.min ? cap(new Date(t.min + 'T12:00:00').toLocaleDateString(LOCALE, { month: 'long' })) : t.tab);
+  rep = [...rep].sort((a, b) => (a.min || '9') .localeCompare(b.min || '9'));
+  return `<div class="flex flex-wrap gap-1.5 mt-2">${rep.map((t) => (t.status === 'ok'
+    ? `<span class="pill green plain" title="${esc(t.min ? fmt.date(t.min) + ' → ' + fmt.date(t.max) : '')}">${esc(label(t))} · ${fmt.int(t.orders)} en ${t.days} días (hasta ${fmt.date(t.max)})</span>`
+    : `<span class="pill ${/hist|resum/i.test(t.tab) ? 'plain' : 'red plain'}" title="${esc(t.reason || '')}">${esc(t.tab)} · no se leyó${t.reason ? ': ' + esc(t.reason) : ''}</span>`)).join('')}
+    ${rep.some((t) => t.note) ? `<div class="t-warn text-xs w-full mt-1">${esc(rep.find((t) => t.note).note)}</div>` : ''}</div>`;
+}
+
 function salesPane(c) {
   const kinds = { upload: 'Archivo', gsheet: 'Google Sheets', manual: 'Carga manual' };
   return `
@@ -2778,7 +2789,8 @@ function salesPane(c) {
               <span class="w-8 h-8 rounded-lg sunk grid place-items-center t2">${icon(s.kind === 'gsheet' ? 'link' : s.kind === 'manual' ? 'calendar' : 'report', 15)}</span>
               <div class="min-w-0 flex-1"><div class="t1 font-medium">${esc(s.name)} <span class="pill plain">${kinds[s.kind] || s.kind}</span></div>
                 <div class="t3 text-xs mt-0.5">${fmt.int(s.rows_count)} filas · ${s.min_day ? `${fmt.date(s.min_day)} → ${fmt.date(s.max_day)}` : 'sin datos'} · actualizado ${s.last_sync_at ? fmt.ago(s.last_sync_at) : 'nunca'}</div>
-                ${s.last_error ? `<div class="t-bad text-xs mt-1">${esc(s.last_error)}</div>` : ''}</div>
+                ${s.last_error ? `<div class="t-bad text-xs mt-1">${esc(s.last_error)}</div>` : ''}
+                ${tabReport(s.report)}</div>
               ${s.kind === 'gsheet' ? `<button class="btn btn-sm" data-sales-sync="${s.id}">${icon('refresh', 14)}Sincronizar</button>` : ''}
               ${s.kind === 'upload' ? `<button class="btn btn-sm" data-sales-reupload="${s.id}" data-name="${esc(s.name)}">${icon('download', 14)}Subir actualización</button>` : ''}
               <button class="btn btn-sm btn-ghost btn-danger" data-sales-del="${s.id}">${icon('x', 14)}</button>
@@ -2790,7 +2802,7 @@ function salesPane(c) {
           <div class="p-5 space-y-4" data-step="1">
             <div class="seg" id="imp-kind"><button class="on" data-k="gsheet">Google Sheets (automático)</button><button data-k="upload">Excel / CSV</button></div>
             <div data-k-pane="gsheet" class="space-y-2">
-              <textarea class="input !h-20 py-2" id="imp-url" placeholder="Pegá el link de la planilla. Si los meses son pestañas del mismo archivo, alcanza con UN link. Si son archivos distintos, uno por renglón."></textarea>
+              <textarea class="input !h-20 py-2" id="imp-url" placeholder="Pegá el link de cada mes (pestaña), uno por renglón: julio, agosto, septiembre, octubre… Si es el mismo archivo se guardan juntos y no se duplican."></textarea>
               <p class="t3 text-xs">1) En Google Sheets: <b>Compartir → “Cualquier persona con el enlace” → Lector</b>. 2) Pegá el link y tocá <b>Conectar</b>: la fecha y las ventas se detectan solas, en <b>todas las pestañas</b> (agregás la del mes nuevo y entra sola). Se vuelve a leer cada 5 minutos.</p>
             </div>
             <div data-k-pane="upload" class="hidden space-y-2">
@@ -2877,7 +2889,7 @@ function mountSalesPane(c) {
           out.push(`<li class="t-warn">Planilla ${i + 1}: no se reconocieron las columnas. Conectala sola para elegirlas.</li>`);
           continue;
         }
-        out.push(`<li>${r.updated ? '<span class="pill blue plain">Mismo archivo: se actualizó</span> ' : ''}<b class="t1">${fmt.int(r.orders)} ${esc(lower(c.sales_label))}</b> en ${r.days} días (${fmt.date(r.min)} → ${fmt.date(r.max)}) · ${esc(Object.entries(r.columns).map(([k, v]) => `${k}: “${v}”`).join(' · '))}${r.tabs?.length > 1 ? ` · ${r.tabs.length} pestañas` : ''}</li>`);
+        out.push(`<li>${r.updated ? '<span class="pill blue plain">Mismo archivo: se actualizó</span> ' : ''}<b class="t1">${fmt.int(r.orders)} ${esc(lower(c.sales_label))}</b> en ${r.days} días (${fmt.date(r.min)} → ${fmt.date(r.max)})${tabReport(r.report)}</li>`);
       } catch (err) { out.push(`<li class="t-bad">Planilla ${i + 1}: ${esc(err.message)}</li>`); }
     }
     btn.disabled = false; btn.innerHTML = `${icon('link', 14)}Conectar`;
@@ -2933,7 +2945,7 @@ function mountSalesPane(c) {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.copyName) copyText(b.dataset.copyName);
-    if (b.dataset.salesSync) { b.disabled = true; try { await post('sales_sync', { id: +b.dataset.salesSync }, 'Planilla sincronizada'); render({ silent: true }); } catch { b.disabled = false; } }
+    if (b.dataset.salesSync) { b.disabled = true; b.textContent = 'Leyendo…'; try { const r = await post('sales_sync', { id: +b.dataset.salesSync }); toast(`Planilla leída: ${r.days} días, hasta ${fmt.date(r.max)}`); render({ silent: true }); } catch { b.disabled = false; b.textContent = 'Sincronizar'; } }
     if (b.dataset.salesDel && confirm('¿Eliminar esta fuente y todos sus datos?')) { await post('sales_source_delete', { id: +b.dataset.salesDel }, 'Fuente eliminada'); render({ silent: true }); }
     if (b.dataset.salesReupload) {
       $('#imp-source').value = b.dataset.salesReupload; $('#imp-source').dataset.name = b.dataset.name;
