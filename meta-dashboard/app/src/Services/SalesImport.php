@@ -87,8 +87,14 @@ final class SalesImport
     }
 
     /** @return array{0: string|false, 1: int, 2: string} */
+    /** Reemplazable en pruebas: fn(string $url): array{0: string|false, 1: int, 2: string}. */
+    public static ?\Closure $fetcher = null;
+
     private static function download(string $url): array
     {
+        if (self::$fetcher) {
+            return (self::$fetcher)($url);
+        }
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,

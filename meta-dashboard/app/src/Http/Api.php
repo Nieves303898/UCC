@@ -72,6 +72,12 @@ final class Api
             self::json(['ok' => false, 'error' => 'Sesión vencida. Volvé a iniciar sesión.', 'auth' => false], 401);
         }
 
+        try {
+            \App\Schema::ensure(); // por si la página se sirvió desde la caché del hosting y no corrió la actualización
+        } catch (\Throwable $e) {
+            error_log('[metahub] schema: ' . $e);
+        }
+
         $action = (string) ($_GET['action'] ?? '');
         $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
         $body = $isPost ? (json_decode((string) file_get_contents('php://input'), true) ?: $_POST) : [];
@@ -115,7 +121,9 @@ final class Api
             self::json(['ok' => false, 'error' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             error_log('[metahub] ' . $e);
-            self::json(['ok' => false, 'error' => Config::get('debug') ? $e->getMessage() : 'Error interno. Revisá el log del servidor.'], 500);
+            // A la administradora se le muestra el detalle (para poder resolverlo); a los demás, un mensaje genérico.
+            $detail = $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+            self::json(['ok' => false, 'error' => Config::get('debug') || Auth::isAdmin() ? 'Error interno: ' . $detail : 'Error interno. Revisá el log del servidor.'], 500);
         }
     }
 

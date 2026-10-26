@@ -115,6 +115,7 @@ switch ($route) {
             redirect('index.php?r=login');
         }
         Schema::install(); // asegura tablas nuevas tras actualizar
+        \App\Settings::set('schema_version', (string) Schema::VERSION);
         try {
             \App\Services\Sales::dedupeAll(); // una misma planilla conectada varias veces cuenta una sola vez
         } catch (\Throwable) {

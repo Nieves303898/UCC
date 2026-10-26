@@ -6,6 +6,27 @@ namespace App;
 /** Crea las tablas. Es idempotente (CREATE TABLE IF NOT EXISTS). */
 final class Schema
 {
+    /** Sube cada vez que se agrega una tabla o columna. */
+    public const VERSION = 12;
+
+    /**
+     * Aplica las tablas/columnas nuevas si la base está en una versión anterior.
+     * Se llama desde la página y desde la API, así una actualización nunca deja
+     * la base a medias aunque el hosting sirva la página desde su caché.
+     */
+    public static function ensure(): void
+    {
+        try {
+            $v = (int) (\App\Settings::get('schema_version') ?? 0);
+        } catch (\Throwable) {
+            $v = 0;
+        }
+        if ($v < self::VERSION) {
+            self::install();
+            \App\Settings::set('schema_version', (string) self::VERSION);
+        }
+    }
+
     public static function install(): void
     {
         $mysql = Db::driver() !== 'sqlite';
