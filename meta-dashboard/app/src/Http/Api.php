@@ -57,7 +57,7 @@ final class Api
         'user_add', 'user_delete', 'user_reset_password', 'password_change',
         'client_save', 'client_delete', 'client_assets', 'update_save', 'update_delete',
         'sales_preview', 'sales_import', 'sales_sync', 'sales_entry', 'sales_source_delete', 'sales_connect',
-        'budget_save', 'settings_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
+        'budget_save', 'settings_save', 'platform_save', 'campaign_target_save', 'client_rule_add', 'user_scope_save',
         'report_note_save', 'logo_upload', 'report_brand_save', 'brand_goal_save', 'brand_map_save', 'client_kind_save', 'sheet_add', 'sheet_delete', 'sheet_refresh', 'client_user_save',
         'portal_user_add', 'portal_user_save', 'portal_user_reset', 'portal_user_delete', 'clients_delete',
         'adlib_niche_save', 'adlib_niche_delete', 'adlib_competitor_add', 'adlib_competitor_delete', 'adlib_save', 'adlib_delete', 'adlib_upload',
@@ -173,7 +173,8 @@ final class Api
                     'counts'      => $allowed ? array_map('count', $allowed) : Assets::counts(),
                     'connections' => Auth::isAdmin() ? count(Connections::all()) : null,
                     'presets'     => DateRange::PRESETS,
-                    'app_name'    => Config::get('app_name'),
+                    'app_name'    => \App\Settings::platformName(),
+                    'platform_logo' => \App\Settings::platformLogo(),
                     'agency_name' => Config::get('agency_name', Config::get('app_name')),
                     'refresh_sec' => (int) Config::get('cache.realtime_ttl', 120),
                     'kinds'       => Clients::UPDATE_KINDS,
@@ -353,6 +354,7 @@ final class Api
                     'businesses'    => Assets::list('business', true),
                     'clients'       => Db::all('SELECT id, name, color FROM clients ORDER BY name'),
                     'tax_rate'      => \App\Settings::taxRate() * 100,
+                    'platform'      => ['name' => \App\Settings::platformName(), 'logo' => \App\Settings::platformLogo()],
                     'oauth_ready'   => Config::get('meta.app_id') && Config::get('meta.app_secret'),
                     'redirect_uri'  => OAuth::redirectUri(),
                     'webhook_url'   => Config::url('webhook.php'),
@@ -364,6 +366,12 @@ final class Api
             case 'budget_save':
                 $key = !empty($body['client_id']) ? 'client:' . $ownClient((int) $body['client_id']) : $ownAccount(self::id((string) ($body['account'] ?? '')));
                 Budgets::save($key, $body['month'] ?? null, $body['amount'] ?? null, $body['note'] ?? null);
+                return null;
+            case 'platform_save':
+                \App\Settings::set('platform_name', mb_substr(trim((string) ($body['name'] ?? '')), 0, 60));
+                if (!empty($body['reset_logo'])) {
+                    \App\Settings::set('platform_logo', null);
+                }
                 return null;
             case 'settings_save':
                 $rate = SalesImport::parseNumber($body['tax_rate'] ?? null);
@@ -684,11 +692,13 @@ final class Api
 
     private static function uploadLogo(?array $file, string $target): string
     {
-        if ($target !== 'report') {
+        if ($target !== 'report' && $target !== 'platform') {
             Clients::find((int) $target);
         }
         $url = self::storeImage($file, 'logo', 2);
-        if ($target === 'report') {
+        if ($target === 'platform') {
+            \App\Settings::set('platform_logo', $url);
+        } elseif ($target === 'report') {
             \App\Settings::set('report_logo', $url);
         } else {
             Db::exec('UPDATE clients SET logo_url = ? WHERE id = ?', [$url, (int) $target]);

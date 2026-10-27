@@ -26,7 +26,21 @@ final class Settings
     public static function set(string $key, ?string $value): void
     {
         Db::upsert('settings', ['k' => $key, 'v' => $value], ['k']);
+        self::get($key); // carga el resto antes de cachear (si no, quedaría una caché parcial)
         self::$cache[$key] = $value;
+    }
+
+    /** Nombre de la plataforma (marca blanca): "Paylab" salvo que se cambie en Configuración. */
+    public static function platformName(): string
+    {
+        $n = trim((string) self::get('platform_name', ''));
+        return $n !== '' ? $n : 'Paylab';
+    }
+
+    /** Logo propio subido en Configuración (o null para usar el de Paylab). */
+    public static function platformLogo(): ?string
+    {
+        return self::get('platform_logo') ?: null;
     }
 
     /** Impuestos sobre el gasto en Meta (Argentina: ~35%). Devuelve 0.35. */

@@ -14,7 +14,7 @@ const store = {
 };
 
 const state = {
-  range: store.get('range', { preset: 'last_7d' }),
+  range: store.get('range', { preset: 'this_month' }),
   live: store.get('live', true),
   boot: null,
   charts: [],
@@ -38,6 +38,7 @@ const portalClient = () => (isClient() ? state.boot.client?.id : state.preview);
 // Íconos (trazos propios, 24x24)
 // =========================================================================
 const ICONS = {
+  upload: '<path d="M12 16V4m0 0-5 5m5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
   home: '<path d="M4 10.5 12 4l8 6.5V20h-5v-5.5H9V20H4z"/>',
   grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
   target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
@@ -92,6 +93,8 @@ function paintThemeButtons() {
   $$('[data-theme-toggle]').forEach((b) => { b.innerHTML = icon(theme() === 'dark' ? 'sun' : 'moon'); });
 }
 function setAccent(color) {
+  // Toda la plataforma usa la identidad Paylab; el color de cada marca queda en sus chips y avatares.
+  color = null;
   if (color && /^#[0-9a-f]{6}$/i.test(color)) {
     document.documentElement.style.setProperty('--accent', color);
     // Texto legible sobre el color de marca.
@@ -1366,12 +1369,45 @@ async function switchBrand(id, to = '#/') {
   state.boot = await api('bootstrap');
   setAccent(state.boot.client?.color);
   renderNav();
+  // Si la sección no existe para la nueva marca (ej. sin campañas), vamos al inicio.
+  if (to !== '#/' && to !== '#/org' && !$(`#nav [href="${to}"]`)) to = '#/';
   if (location.hash === to || (to === '#/' && location.hash === '')) render(); else location.hash = to;
+}
+
+/** Secciones que se mantienen al cambiar de marca (el resto vuelve al inicio). */
+const BRAND_KEEP = ['#/sales', '#/plan', '#/sheets', '#/work', '#/report', '#/social', '#/ads', '#/ads/top'];
+
+/** Barra de marcas fija debajo del encabezado del portal: un toque y cambia. */
+function renderBrandStrip() {
+  const wrap = $('#brand-strip-wrap');
+  if (!wrap) return;
+  const o = state.boot.org;
+  if (!o || !o.brands?.length) { wrap.classList.add('hidden'); return; }
+  const cur = location.hash === '#/org' ? o.id : state.boot.client?.id;
+  const chip = (id, name, color) => `<button type="button" class="brand-chip ${cur === id ? 'on' : ''}" data-strip-brand="${id}" style="--bc:${esc(color || 'var(--accent)')}" aria-pressed="${cur === id}">${esc(name)}</button>`;
+  $('#brand-strip').innerHTML = `<span class="lbl hidden sm:inline">${esc(o.name)}</span>${chip(o.id, o.brands.length > 1 ? 'Todas las marcas' : 'Resumen', '#00aeef')}${o.brands.map((b) => chip(b.id, b.name, b.color)).join('')}`;
+  wrap.classList.remove('hidden');
+  const on = $('#brand-strip .brand-chip.on');
+  if (on) $('#brand-strip').scrollLeft = Math.max(0, on.offsetLeft - 16);
+}
+function initBrandStrip() {
+  $('#brand-strip')?.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-strip-brand]');
+    if (!b || b.classList.contains('busy')) return;
+    const o = state.boot.org;
+    const id = +b.dataset.stripBrand;
+    const here = location.hash || '#/';
+    $$('#brand-strip .brand-chip').forEach((x) => x.classList.toggle('on', x === b));
+    if (id === o.id && !o.can_open) { if (here === '#/org') return; location.hash = '#/org'; return; }
+    b.classList.add('busy');
+    try { await switchBrand(id, id === o.id ? (here === '#/sales' || here === '#/plan' ? here : '#/') : (BRAND_KEEP.includes(here) ? here : '#/')); } catch (err) { toast(err.message, 'error'); renderBrandStrip(); } finally { b.classList.remove('busy'); }
+  });
 }
 
 /** Barra de marcas arriba de Inicio y Ventas: "Todas" + cada marca, siempre a mano. */
 function brandBar(org, currentId, page = '') {
-  if (!org || !org.brands?.length) return '';
+  // En el portal del cliente las marcas están siempre arriba (renderBrandStrip).
+  if (!org || !org.brands?.length || isClient()) return '';
   const item = (id, name, color, on) => (isClient()
     ? `<button class="brand-chip ${on ? 'on' : ''}" data-brand-go="${id}" style="--bc:${esc(color || 'var(--accent)')}">${esc(name)}</button>`
     : `<a class="brand-chip ${on ? 'on' : ''}" href="#/preview/${id}${page ? '/' + page : ''}" style="--bc:${esc(color || 'var(--accent)')}">${esc(name)}</a>`);
@@ -1452,7 +1488,7 @@ async function viewOrgHome(cid, org) {
     html,
     mount() {
       mountBrandBar(orgInfo);
-      $$('[data-open-brand]').forEach((b) => b.addEventListener('click', () => { switchBrand(+b.dataset.openBrand); const sel = $('#brand-switch'); if (sel) sel.value = b.dataset.openBrand; }));
+      $$('[data-open-brand]').forEach((b) => b.addEventListener('click', () => switchBrand(+b.dataset.openBrand)));
       if (d.brands.length > 1) {
         chart($('#org-chart'), d.brands.map((b) => b.name), [
           { label: `Inversión +${tax}`, data: d.brands.map((b) => b.ads.spend_tax), type: 'bar', fmt: m, color: cssVar('--t3') },
@@ -2338,6 +2374,14 @@ async function viewSettings() {
       </div>
 
       <div class="space-y-6">
+        <form class="card p-5 space-y-3" id="platform-form">
+          <div class="h2">Marca de la plataforma</div>
+          <p class="t3 text-xs">Es lo que ven tus clientes arriba de todo y al ingresar. Subí el logo oficial (PNG con fondo transparente, horizontal) o dejá el de Paylab.</p>
+          <div class="flex items-center gap-3 p-3 rounded-xl sunk">${s.platform.logo ? `<img src="${esc(s.platform.logo)}" alt="" style="height:32px;max-width:180px;object-fit:contain">` : `<img src="assets/paylab-mark.svg" width="30" height="30" alt=""><span class="pl-word text-[20px]">${esc(s.platform.name.toLowerCase() === 'paylab' ? 'paylab' : s.platform.name)}</span>`}</div>
+          <label class="field"><span>Nombre</span><input class="input" name="name" value="${esc(s.platform.name)}" maxlength="60"></label>
+          <div class="flex flex-wrap gap-2 items-center"><label class="btn btn-sm cursor-pointer">${icon('upload', 13)}Subir logo<input type="file" id="platform-logo" accept="image/png,image/jpeg,image/webp" class="hidden"></label>
+            ${s.platform.logo ? '<label class="t2 text-xs inline-flex items-center gap-1.5"><input type="checkbox" class="check" name="reset_logo" value="1">Volver al logo de Paylab</label>' : ''}<div class="flex-1"></div><button class="btn btn-primary">Guardar</button></div>
+        </form>
         <form class="card p-5 space-y-3" id="tax-form">
           <div class="h2">Impuestos sobre el gasto en Meta</div>
           <p class="t3 text-xs">Se suman al gasto en presupuestos, costo por venta y ROAS real. En Argentina suele rondar el 35% (IVA + percepciones).</p>
@@ -2416,6 +2460,12 @@ async function viewSettings() {
       };
       form('token-form', 'connection_add_token', 'Token guardado y activos sincronizados', reload);
       form('admin-form', 'user_add', 'Usuario creado', () => render());
+      form('platform-form', 'platform_save', 'Marca actualizada', () => location.reload());
+      $('#platform-logo')?.addEventListener('change', async (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        const fd = new FormData(); fd.append('file', f); fd.append('target', 'platform');
+        try { await post('logo_upload', fd, 'Logo cargado'); location.reload(); } catch { /* toast */ }
+      });
       form('tax-form', 'settings_save', 'Impuestos actualizados', async () => { state.boot = await api('bootstrap'); render(); });
       form('pass-form', 'password_change', 'Contraseña actualizada');
     },
@@ -4295,15 +4345,9 @@ function renderNav() {
     $('#nav-mobile').innerHTML = html;
     const c = state.boot.client;
     const o = state.boot.org;
-    $('#client-brand').innerHTML = `
-      <div class="mono-avatar w-8 h-8 text-xs" style="background:var(--accent);color:var(--on-accent)">${c?.logo_url ? `<img src="${esc(c.logo_url)}" class="w-full h-full object-cover rounded-[10px]" alt="">` : esc(initials(c?.name))}</div>
-      <div class="leading-tight min-w-[90px] max-w-[220px] hidden ${o ? '2xl:block' : 'sm:block'}"><div class="font-semibold t1 truncate">${esc(c?.name || '')}</div><div class="t3 text-[11px] truncate">${o && c?.id !== o.id ? esc(o.name) : 'por ' + esc(state.boot.agency_name)}</div></div>
-      ${o ? `<select class="select select-sm w-40" id="brand-switch" title="Cambiar de marca"><option value="org" ${c?.id === o.id || location.hash === '#/org' ? 'selected' : ''}>Todas las marcas</option>${o.brands.map((b) => `<option value="${b.id}" ${c?.id === b.id && location.hash !== '#/org' ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>` : ''}`;
-    $('#brand-switch')?.addEventListener('change', (e) => {
-      if (e.target.value !== 'org') return switchBrand(+e.target.value);
-      if (o.can_open) return switchBrand(o.id);
-      location.hash = '#/org'; // ve sólo algunas marcas: resumen de ésas
-    });
+    $('#client-brand').innerHTML = o ? `<div class="leading-tight max-w-[200px]"><div class="t3 text-[10.5px] uppercase tracking-wider">Cliente</div><div class="font-semibold t1 truncate text-[13px]">${esc(o.name)}</div></div>`
+      : `<div class="mono-avatar w-7 h-7 text-[10px]" style="background:${esc(c?.color || 'var(--accent)')};color:#fff">${c?.logo_url ? `<img src="${esc(c.logo_url)}" class="w-full h-full object-cover rounded-[8px]" alt="">` : esc(initials(c?.name))}</div><div class="font-semibold t1 truncate text-[13px] max-w-[180px]">${esc(c?.name || '')}</div>`;
+    renderBrandStrip();
     return;
   }
   const counts = state.boot.counts;
@@ -4534,6 +4578,7 @@ function closeMenu() {
   renderNav();
   initControls();
   if (window.FLASH) toast(window.FLASH.text, window.FLASH.type === 'error' ? 'error' : 'info');
-  window.addEventListener('hashchange', () => render());
+  initBrandStrip();
+  window.addEventListener('hashchange', () => { if (isClient()) renderBrandStrip(); render(); });
   render();
 })();

@@ -255,3 +255,10 @@ meta-dashboard/
 ├─ cron/sync.php         → tarea diaria
 └─ public/               → raíz web: index.php, api.php, webhook.php, cron.php, assets/
 ```
+
+## Identidad Paylab y barra de marcas
+
+- Toda la plataforma usa la identidad **Paylab** (degradé índigo `#2E3192` → cian `#00AEEF`), en tema claro y oscuro. El color de cada marca queda sólo en sus chips y avatares.
+- **Configuración → Marca de la plataforma**: cambiar el nombre y subir el logo oficial (PNG/JPG/WebP horizontal). Si no hay logo subido se usa el isotipo de Paylab.
+- Portal del cliente: las marcas están **siempre arriba**, debajo del menú. Un toque cambia de marca y te deja en la misma sección (Ventas, Presupuesto, Campañas…). Ya no hay desplegable.
+- El período por defecto es **Este mes**.

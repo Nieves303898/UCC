@@ -1,7 +1,7 @@
 <?php
 /** @var string $mode install|login */
 /** @var ?string $error */
-$appName = App\Config::get('app_name', 'Meta Hub');
+$appName = App\Settings::platformName();
 $agency = App\Config::get('agency_name', $appName);
 ?><!doctype html>
 <html lang="es">
@@ -11,20 +11,15 @@ $agency = App\Config::get('agency_name', $appName);
 </head>
 <body class="min-h-screen">
   <div class="min-h-screen grid lg:grid-cols-[1fr_520px]">
-    <section class="hidden lg:flex flex-col justify-between p-12 hair-r" style="background:var(--panel)">
-      <div class="flex items-center gap-3">
-        <div class="mono-avatar w-9 h-9" style="background:var(--t1);color:var(--bg)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17V7l7 6 7-6v10"/></svg>
-        </div>
-        <span class="h2"><?= e($appName) ?></span>
-      </div>
+    <section class="hidden lg:flex flex-col justify-between p-12 auth-hero">
+      <div class="flex items-center gap-3 sidebar" style="background:none;border:0"><?php $plSize = 38; $plLight = true; require __DIR__ . '/_logo.php'; ?></div>
       <div class="max-w-lg">
-        <div class="eyebrow mb-4">Performance · Meta Ads · Facebook · Instagram</div>
-        <h1 class="text-4xl font-semibold tracking-tight t1 leading-tight">Tus resultados, en vivo y en un solo lugar.</h1>
+        <div class="eyebrow mb-4">Inteligencia comercial · Meta Ads · Ventas</div>
+        <h1 class="text-4xl font-semibold tracking-tight leading-tight" style="color:#fff">Tus resultados, en vivo y en un solo lugar.</h1>
         <p class="t2 mt-4 text-base leading-relaxed">Inversión, ventas, conversaciones y contenido actualizados en tiempo real, junto con todo lo que estamos trabajando para tu marca.</p>
-        <div class="mt-10 grid grid-cols-3 gap-px rounded-xl overflow-hidden" style="background:var(--line);border:1px solid var(--line)">
-          <?php foreach ([['Actualización', 'cada 2 min'], ['Fuentes', 'Ads · FB · IG'], ['Acceso', 'privado']] as [$k, $v]): ?>
-            <div class="p-4" style="background:var(--bg)"><div class="eyebrow"><?= e($k) ?></div><div class="t1 font-medium mt-1"><?= e($v) ?></div></div>
+        <div class="mt-10 grid grid-cols-3 gap-px rounded-xl overflow-hidden" style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.12)">
+          <?php foreach ([['Actualización', 'en tiempo real'], ['Fuentes', 'Meta · Ventas'], ['Acceso', 'privado']] as [$k, $v]): ?>
+            <div class="p-4" style="background:rgba(8,13,44,.55)"><div class="eyebrow"><?= e($k) ?></div><div class="font-medium mt-1" style="color:#fff"><?= e($v) ?></div></div>
           <?php endforeach; ?>
         </div>
       </div>
@@ -33,6 +28,7 @@ $agency = App\Config::get('agency_name', $appName);
 
     <section class="flex items-center justify-center p-6">
       <form method="post" class="w-full max-w-sm space-y-5">
+        <div class="lg:hidden mb-2"><?php $plSize = 34; $plLight = false; require __DIR__ . '/_logo.php'; ?></div>
         <div>
           <h2 class="h1"><?= $mode === 'install' ? 'Crear administrador' : 'Ingresar' ?></h2>
           <p class="t2 mt-1"><?= $mode === 'install' ? 'Primera ejecución: se crean las tablas y tu usuario.' : 'Usá el usuario y la contraseña que te dio la agencia.' ?></p>

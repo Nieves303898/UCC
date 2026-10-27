@@ -1,19 +1,22 @@
 /* ==========================================================================
-   Meta Hub — sistema visual
+   Paylab — sistema visual
    Tema claro por defecto; oscuro con [data-theme="dark"].
-   --accent se reemplaza por el color del cliente en su portal.
+   Identidad: degradé índigo #2E3192 → cian #00AEEF.
    ========================================================================== */
 :root {
-  --bg: #f5f5f2;
+  --brand-1: #2e3192;
+  --brand-2: #00aeef;
+  --grad: linear-gradient(120deg, var(--brand-1) 0%, #1b6fd0 55%, var(--brand-2) 100%);
+  --bg: #f3f6fc;
   --panel: #ffffff;
-  --sunk: #f0f0ec;
-  --hover: #f7f7f4;
-  --line: #e7e6e1;
-  --line-2: #d8d7d0;
-  --t1: #18181b;
-  --t2: #52525b;
-  --t3: #8d8d95;
-  --accent: #0e7c66;
+  --sunk: #edf1f9;
+  --hover: #f4f7fd;
+  --line: #e1e7f2;
+  --line-2: #cdd6e7;
+  --t1: #0e1538;
+  --t2: #4a5378;
+  --t3: #8890ad;
+  --accent: #1f5fd6;
   --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
   --accent-line: color-mix(in srgb, var(--accent) 35%, transparent);
   --on-accent: #ffffff;
@@ -22,38 +25,43 @@
   --bad: #b42318; --bad-soft: #fdecea;
   --warn: #a16207; --warn-soft: #fbf3dc;
   --info: #2952a3; --info-soft: #eaf0fb;
-  --c1: var(--accent); --c2: #d9822b; --c3: #3a6fd8; --c4: #b9468b; --c5: #7c8a3a; --c6: #6b5bd6; --c7: #2c9db0; --c8: #8a6d55;
-  --grid: #efeee9;
-  --shadow: 0 1px 0 rgba(24, 24, 27, .03), 0 1px 3px rgba(24, 24, 27, .04);
-  --shadow-lg: 0 12px 40px -12px rgba(24, 24, 27, .25);
+  --c1: var(--accent); --c2: #00aeef; --c3: #2e3192; --c4: #b9468b; --c5: #d9822b; --c6: #6b5bd6; --c7: #12a17f; --c8: #8a6d55;
+  --grid: #eaeff7;
+  --glow: rgba(0, 174, 239, .18);
+  --shadow: 0 1px 0 rgba(14, 21, 56, .03), 0 1px 3px rgba(14, 21, 56, .05);
+  --shadow-lg: 0 16px 44px -14px rgba(14, 21, 56, .32);
   --radius: 14px;
   color-scheme: light;
 }
 [data-theme="dark"] {
-  --bg: #0c0d0f;
-  --panel: #131417;
-  --sunk: #191a1e;
-  --hover: #17181c;
-  --line: #24262b;
-  --line-2: #30333a;
-  --t1: #ececee;
-  --t2: #a5a5ad;
-  --t3: #6f7078;
-  --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --bg: #060a1c;
+  --panel: #0c1230;
+  --sunk: #111a3d;
+  --hover: #101839;
+  --line: #1b2552;
+  --line-2: #27336a;
+  --t1: #e9edff;
+  --t2: #a3abd3;
+  --t3: #6c76a6;
+  --accent: #2bb6f2;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --on-accent: #04122a;
   --pos: #4ade80; --pos-soft: rgba(74, 222, 128, .1);
   --neg: #fb923c; --neg-soft: rgba(251, 146, 60, .1);
   --bad: #f87171; --bad-soft: rgba(248, 113, 113, .1);
   --warn: #fbbf24; --warn-soft: rgba(251, 191, 36, .1);
   --info: #7aa2f7; --info-soft: rgba(122, 162, 247, .12);
-  --c2: #f0a04b; --c3: #6f9bf2; --c4: #e07ab5; --c5: #b3c25a; --c6: #9d8ff5; --c7: #4cc3d4; --c8: #c4a585;
-  --grid: #1c1e22;
-  --shadow: 0 0 0 1px rgba(0, 0, 0, .2);
-  --shadow-lg: 0 20px 50px -10px rgba(0, 0, 0, .7);
+  --c2: #5b8cff; --c3: #8b8ff0; --c4: #e07ab5; --c5: #f0a04b; --c6: #9d8ff5; --c7: #4ade9b; --c8: #c4a585;
+  --grid: #141c42;
+  --glow: rgba(0, 174, 239, .28);
+  --shadow: 0 0 0 1px rgba(0, 0, 0, .25);
+  --shadow-lg: 0 20px 50px -10px rgba(0, 0, 0, .75);
   color-scheme: dark;
 }
 
 * { -webkit-font-smoothing: antialiased; }
 html, body { background: var(--bg); color: var(--t1); }
+body { background-image: radial-gradient(1100px 520px at 105% -12%, color-mix(in srgb, var(--brand-2) 13%, transparent), transparent 70%), radial-gradient(900px 480px at -12% -8%, color-mix(in srgb, var(--brand-1) 11%, transparent), transparent 70%); background-attachment: fixed; background-repeat: no-repeat; }
 body { font-family: Geist, Inter, system-ui, -apple-system, sans-serif; font-size: 14px; letter-spacing: -.005em; }
 .num, .tbl td, .kpi .val { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 .mono { font-family: "Geist Mono", ui-monospace, monospace; }
@@ -81,19 +89,23 @@ a.link { color: var(--accent); } a.link:hover { text-decoration: underline; }
 .card-link:hover { border-color: var(--line-2); transform: translateY(-1px); }
 
 /* layout */
-.sidebar { background: var(--panel); border-right: 1px solid var(--line); }
-.topbar { background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--line); }
+.sidebar { --panel: #111a47; --sunk: rgba(255, 255, 255, .08); --hover: rgba(255, 255, 255, .06); --line: rgba(255, 255, 255, .08); --line-2: rgba(255, 255, 255, .16); --t1: #eef1ff; --t2: #aab3dc; --t3: #6e78ad; --accent: #38c6ff; --bg: #0b1238;
+  background: radial-gradient(420px 260px at 0% 100%, rgba(0, 174, 239, .22), transparent 70%), linear-gradient(180deg, #0b1238 0%, #121a52 100%); border-right: 1px solid rgba(255, 255, 255, .06); color: var(--t1); }
+.sidebar kbd { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .12); color: var(--t2); }
+.topbar { background: color-mix(in srgb, var(--bg) 84%, transparent); backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid var(--line); position: sticky; }
+.topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--grad); opacity: .85; }
 .nav-sec { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--t3); padding: 14px 10px 6px; }
 .nav-link { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: var(--t2); font-weight: 450; }
 .nav-link svg { width: 17px; height: 17px; color: var(--t3); }
 .nav-link:hover { background: var(--hover); color: var(--t1); }
-.nav-link.active { background: var(--sunk); color: var(--t1); font-weight: 550; }
+.nav-link.active { background: linear-gradient(90deg, rgba(56, 198, 255, .18), rgba(56, 198, 255, .04)); color: var(--t1); font-weight: 550; box-shadow: inset 2px 0 0 var(--accent); }
 .nav-link.active svg { color: var(--accent); }
 .nav-count { margin-left: auto; font-size: 11px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .topnav a { padding: 6px 12px; border-radius: 8px; color: var(--t2); font-weight: 500; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .topnav a svg { width: 16px; height: 16px; }
 .topnav a:hover { color: var(--t1); background: var(--hover); }
-.topnav a.active { color: var(--t1); background: var(--panel); box-shadow: var(--shadow), 0 0 0 1px var(--line); }
+.topnav a.active { color: #fff; background: var(--grad); box-shadow: 0 4px 14px -6px var(--glow); }
+.topnav a.active svg { color: #fff; }
 
 /* controles */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; padding: 0 13px; border-radius: 9px; font-size: 13px; font-weight: 500; color: var(--t1); background: var(--panel); border: 1px solid var(--line-2); transition: background .12s, border-color .12s; white-space: nowrap; }
@@ -102,8 +114,8 @@ a.link { color: var(--accent); } a.link:hover { text-decoration: underline; }
 .btn svg { width: 15px; height: 15px; }
 .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 8px; }
 .btn-icon { width: 34px; padding: 0; }
-.btn-primary { background: var(--t1); color: var(--bg); border-color: var(--t1); }
-.btn-primary:hover { background: color-mix(in srgb, var(--t1) 85%, var(--bg)); }
+.btn-primary { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 6px 18px -8px var(--glow); }
+.btn-primary:hover { background: var(--grad); filter: brightness(1.08); }
 .btn-accent { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .btn-accent:hover { filter: brightness(1.08); background: var(--accent); }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--t2); }
@@ -347,3 +359,23 @@ kbd { font-family: "Geist Mono", monospace; font-size: 11px; padding: 1px 5px; b
 .brand-chip.on { background: var(--bc); color: #fff; }
 .brand-chip.on::before { background: #fff; }
 .camp-pick { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); }
+
+/* Paylab: marca, barra de marcas global y detalles tecnológicos */
+.pl-word { font-weight: 700; letter-spacing: -.035em; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+[data-theme="dark"] .pl-word, .sidebar .pl-word { background: linear-gradient(120deg, #8f95ff, #38c6ff); -webkit-background-clip: text; background-clip: text; }
+.pl-logo { display: inline-flex; align-items: center; gap: 9px; }
+.pl-logo img.pl-custom { height: 30px; width: auto; max-width: 160px; object-fit: contain; }
+.kpi-row, .card { position: relative; }
+.kpi-row::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--grad); z-index: 1; opacity: .9; }
+.card-link:hover { border-color: var(--accent-line); box-shadow: 0 10px 30px -16px var(--glow); }
+.brand-strip { display: flex; align-items: center; gap: 6px; padding: 8px 0 10px; overflow-x: auto; scrollbar-width: none; }
+.brand-strip::-webkit-scrollbar { display: none; }
+.brand-strip .lbl { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--t3); margin-right: 4px; white-space: nowrap; }
+.brand-strip .brand-chip { flex: none; cursor: pointer; height: 34px; }
+.brand-strip .brand-chip.on { background: var(--grad); color: #fff; box-shadow: 0 6px 16px -8px var(--glow); }
+.brand-strip .brand-chip.on::before { background: #fff; box-shadow: 0 0 0 2px var(--bc); }
+.brand-strip .brand-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.brand-chip.busy { opacity: .65; }
+.auth-hero { background: linear-gradient(rgba(255, 255, 255, .045) 1px, transparent 1px) 0 0 / 36px 36px, linear-gradient(90deg, rgba(255, 255, 255, .045) 1px, transparent 1px) 0 0 / 36px 36px, radial-gradient(700px 420px at 100% 0%, rgba(0, 174, 239, .35), transparent 65%), radial-gradient(600px 400px at 0% 100%, rgba(46, 49, 146, .55), transparent 70%), linear-gradient(160deg, #0a1036 0%, #141c5a 100%); color: #eef1ff; }
+.auth-hero .t2 { color: #b3bbe3; } .auth-hero .t3, .auth-hero .eyebrow { color: #7f89bf; }
+[data-theme="dark"] .pl-logo img[src$="paylab-mark.svg"] { content: url(paylab-mark-light.svg); }

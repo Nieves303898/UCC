@@ -5,7 +5,7 @@ $isClient = $user['role'] === 'client';
 <html lang="es">
 <head>
 <?php require __DIR__ . '/_head.php'; ?>
-  <title><?= e(App\Config::get('app_name', 'Meta Hub')) ?></title>
+  <title><?= e(App\Settings::platformName()) ?></title>
   <meta name="csrf" content="<?= e(App\Auth::csrfToken()) ?>">
   <script src="assets/vendor/chart.umd.min.js"></script>
 </head>
@@ -15,8 +15,8 @@ $isClient = $user['role'] === 'client';
 <?php if (!$isClient): ?>
   <aside id="sidebar" class="sidebar fixed inset-y-0 left-0 z-40 w-[248px] -translate-x-full lg:translate-x-0 transition-transform flex flex-col">
     <div class="h-16 px-4 flex items-center gap-3 hair-b">
-      <div class="mono-avatar w-8 h-8" style="background:var(--t1);color:var(--bg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17V7l7 6 7-6v10"/></svg></div>
-      <div class="min-w-0 leading-tight"><div class="font-semibold t1 truncate"><?= e(App\Config::get('app_name', 'Meta Hub')) ?></div><div class="text-xs t3 truncate"><?= e(App\Config::get('agency_name', '')) ?></div></div>
+      <?php $plSize = 30; $plLight = true; require __DIR__ . '/_logo.php'; ?>
+      <div class="min-w-0 leading-tight ml-auto text-right"><div class="text-[11px] t3 truncate max-w-[90px]"><?= e(App\Config::get('agency_name', '')) ?></div></div>
     </div>
     <button id="palette-btn" class="mx-3 mt-3 btn justify-start t3" style="font-weight:400"><span data-icon="search"></span>Buscar…<kbd class="ml-auto">Ctrl K</kbd></button>
     <nav id="nav" class="flex-1 overflow-y-auto px-3 pb-3 text-[13.5px]"></nav>
@@ -33,7 +33,8 @@ $isClient = $user['role'] === 'client';
   <header class="topbar sticky top-0 z-20">
     <div class="<?= $isClient ? 'max-w-[1320px] mx-auto' : '' ?> px-4 lg:px-8 h-16 flex items-center gap-3">
       <?php if ($isClient): ?>
-        <div id="client-brand" class="flex items-center gap-3 shrink-0"></div>
+        <a href="#/" class="shrink-0" title="Inicio"><?php $plSize = 28; $plLight = false; require __DIR__ . '/_logo.php'; ?></a>
+        <div id="client-brand" class="hidden lg:flex items-center gap-2 shrink-0 pl-3 ml-1" style="border-left:1px solid var(--line)"></div>
         <nav id="nav" class="topnav hidden md:flex items-center gap-1 ml-4 text-[13.5px]"></nav>
       <?php else: ?>
         <button id="menu-btn" class="lg:hidden btn btn-ghost btn-icon -ml-2" aria-label="Menú" data-icon="menu"></button>
@@ -41,14 +42,15 @@ $isClient = $user['role'] === 'client';
       <?php endif; ?>
       <div class="flex-1"></div>
       <div id="range-ctl" class="flex items-center gap-2"></div>
-      <button id="live-btn" class="btn btn-sm hidden sm:inline-flex" title="Actualización automática"><span class="live-dot"></span><span>En vivo</span></button>
+      <button id="live-btn" class="btn btn-sm hidden <?= $isClient ? 'xl' : 'sm' ?>:inline-flex" title="Actualización automática"><span class="live-dot"></span><span>En vivo</span></button>
       <button id="refresh-btn" class="btn btn-icon btn-sm" title="Actualizar ahora" data-icon="refresh"></button>
       <?php if ($isClient): ?>
         <button class="btn btn-ghost btn-icon btn-sm" data-theme-toggle title="Cambiar tema"></button>
-        <button class="btn btn-ghost btn-sm" id="account-btn"><span data-icon="user"></span><span class="hidden sm:inline" id="user-name"></span></button>
+        <button class="btn btn-ghost btn-sm" id="account-btn"><span data-icon="user"></span><span class="hidden 2xl:inline" id="user-name"></span></button>
       <?php endif; ?>
     </div>
     <?php if ($isClient): ?>
+      <div id="brand-strip-wrap" class="hidden hair-t"><div class="max-w-[1320px] mx-auto px-4 lg:px-8"><div id="brand-strip" class="brand-strip"></div></div></div>
       <nav id="nav-mobile" class="topnav md:hidden flex gap-1 px-4 pb-2 overflow-x-auto text-[13px]"></nav>
     <?php endif; ?>
   </header>
