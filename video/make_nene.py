@@ -30,22 +30,21 @@ def region(box):
     im.putalpha(feather(im.size))
     return im, b
 
-A_SHORT, GAP = 10.09, 0.5
-L = A_SHORT + GAP  # inicio del audio largo
+L = 0
 items = [  # caja en coords del afiche original, segundo de aparición
-    ((35, 25, 245, 258), 0.5),           # escudo
-    ((285, 15, 795, 305), 2.8),          # título maratón
-    ((185, 335, 870, 560), L + 0.7),     # ¡GRACIAS!
-    ((265, 560, 805, 785), L + 5.3),     # hoy vivimos...
-    ((15, 915, 362, 1185), L + 15.6),    # corazón familias
-    ((335, 835, 690, 1135), L + 21.5),   # corazón papás
-    ((680, 915, 1022, 1205), L + 28.1),  # corazón comunidad
-    ((215, 1165, 805, 1355), L + 35.1),  # corremos juntos
-    ((285, 1365, 785, 1462), L + 40.0),  # pie escuela
+    ((35, 25, 245, 258), 0.4),           # escudo
+    ((285, 15, 795, 305), 1.2),          # título maratón
+    ((185, 335, 870, 560), 4.0),     # ¡GRACIAS!
+    ((265, 560, 805, 785), 6.0),     # hoy vivimos...
+    ((15, 915, 362, 1185), 8.5),    # corazón familias
+    ((335, 835, 690, 1135), 9.7),   # corazón papás
+    ((680, 915, 1022, 1205), 10.9),  # corazón comunidad
+    ((215, 1165, 805, 1355), 12.8),  # corremos juntos
+    ((285, 1365, 785, 1462), 14.2),  # pie escuela
 ]
 items = [(region(b), t) for b, t in items]
 kids = [(region((0, 440, 292, 955)), 0.3, -1), (region((768, 455, 1024, 945)), 0.6, 1)]
-TOTAL = L + 43.75 + 1.5
+TOTAL = 19.0
 
 def ease_back(x):
     x = min(max(x, 0), 1); c = 1.7
@@ -63,10 +62,8 @@ def pop(frame, im, b, t0, t):
 
 ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
     "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-    "-i", U + "4fea8959-AUDIO-2026-10-30-18-08-46.m4a",
-    "-i", U + "b4967644-AUDIO-2026-10-30-18-07-02.m4a",
-    "-filter_complex", f"[2:a]adelay={int(L*1000)}[b];[1:a][b]amix=inputs=2:normalize=0,loudnorm=I=-16[a]",
-    "-map", "0:v", "-map", "[a]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
+    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+    "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
     "-c:a", "aac", "-b:a", "192k", "-t", f"{TOTAL:.2f}", OUT], stdin=subprocess.PIPE)
 bgA = bg.convert("RGBA")
 for i in range(int(TOTAL * FPS)):
