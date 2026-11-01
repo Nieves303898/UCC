@@ -36,12 +36,14 @@ PLAN = [
     [vd(6, 7), vd(7, 4)],
     [vd(8, 14), vd(9, 1)],
     [ph("5d921f0c"), ph("070128f9")],            # salida
+    [ph("d391a4d7"), ph("63a52c07")],
     [vd(3, 1)],
     [vd(1, 0, 4.79)],
     [ph("ba7dbbb6"), ph("6d857504")],            # carrera y postas
     [vd(2, 0), vd(4, 1.5)],
     [vd(5, 2.5), vd(2, 6.5)],
     [vd(4, 7.5), vd(5, 13)],
+    [ph("bb11e27a")],                            # mesa de pintura
     [ph("78921a4f"), ph("bcf7e892")],            # mural
     [("img", OUT + "gracias.jpg")],
 ]
