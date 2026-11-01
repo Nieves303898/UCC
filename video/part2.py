@@ -33,16 +33,21 @@ PLAN = [
     [ph("a03ac497"), ph("5ea0ac06")],            # preparativos
     [ph("2ceb9018"), ph("700946f1")],
     [ph("ec45277c"), ph("37b2df42")],            # calentamiento
+    [ph("1e312a73"), ph("683ccff2"), ph("523081b3")],
     [vd(6, 7), vd(7, 4)],
     [vd(8, 14), vd(9, 1)],
     [ph("5d921f0c"), ph("070128f9")],            # salida
     [ph("d391a4d7"), ph("63a52c07")],
+    [ph("d1a7a02c"), ph("2c4c21ba")],
+    [ph("f086e6a9"), ph("56ddeeb8"), ph("c49226ac")],
     [vd(3, 1)],
     [vd(1, 0, 4.79)],
     [ph("ba7dbbb6"), ph("6d857504")],            # carrera y postas
     [vd(2, 0), vd(4, 1.5)],
     [vd(5, 2.5), vd(2, 6.5)],
     [vd(4, 7.5), vd(5, 13)],
+    [ph("36177b4b"), ph("2be454ce")],            # postas con colchonetas
+    [ph("4d05f9b9"), ph("b63ffaac")],
     [ph("bb11e27a")],                            # mesa de pintura
     [ph("78921a4f"), ph("bcf7e892")],            # mural
     [("img", OUT + "gracias.jpg")],
