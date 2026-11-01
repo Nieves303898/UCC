@@ -40,6 +40,7 @@ PLAN = [
     [ph("d391a4d7"), ph("63a52c07")],
     [ph("d1a7a02c"), ph("2c4c21ba")],
     [ph("f086e6a9"), ph("56ddeeb8"), ph("c49226ac")],
+    [ph("5422d0a2"), ph("4a53af65")],
     [vd(3, 1)],
     [vd(1, 0, 4.79)],
     [ph("ba7dbbb6"), ph("6d857504")],            # carrera y postas
@@ -48,8 +49,10 @@ PLAN = [
     [vd(4, 7.5), vd(5, 13)],
     [ph("36177b4b"), ph("2be454ce")],            # postas con colchonetas
     [ph("4d05f9b9"), ph("b63ffaac")],
+    [ph("eb2d2179"), ph("c724561f")],
     [ph("bb11e27a")],                            # mesa de pintura
     [ph("78921a4f"), ph("bcf7e892")],            # mural
+    [ph("92dcd96c"), ph("a1951f04")],            # docentes
     [("img", OUT + "gracias.jpg")],
 ]
 enc = ["-r", "30", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-crf", "20", "-an"]
