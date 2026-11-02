@@ -6,7 +6,7 @@ K = __import__('os').environ['GEMINI_API_KEY']
 SR = 24000; FPS = 30
 # (voce Gemini, stile, semitoni extra)
 V = {
- "narr":  ("Leda",      "come una bambina di dieci anni che racconta una fiaba, con voce dolce, chiara e piena di meraviglia", 1.5),
+ "narr":  ("Charon", "narratore", 0),
  "zeus":  ("Algenib",   "come Zeus, il re degli dèi: voce profonda, potente, solenne e maestosa, lenta", -1.5),
  "pos":   ("Orus",      "come Poseidone, il dio del mare: voce forte, fiera e tonante", -1.0),
  "atena": ("Kore",      "come Atena, la dea della saggezza: voce calma, nobile, sicura e gentile", 0),
