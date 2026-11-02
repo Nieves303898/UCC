@@ -38,7 +38,7 @@ for i, e in enumerate(S):
         env = [float(np.sqrt(np.mean(a[j:j + hop] ** 2))) for j in range(0, len(a), hop)]
         m = max(env) or 1; e["env"] = [round(min(1, v / m * 1.4), 3) for v in env]
         e["start"] = t + 0.15; e["end"] = e["start"] + len(a) / SR
-        segs.append((e["start"], a)); t = e["end"] + 0.5
+        segs.append((e["start"], a)); t = e["end"] + 0.35
     else:
         e["start"] = t; e["end"] = t + e["dur"]; t = e["end"]
     timeline.append(e)
