@@ -4,9 +4,12 @@ tl = json.load(open(D + "/timeline.json")); total = tl["total"]
 voice, _ = sf.read(D + "/audio/voice.wav"); N = len(voice)
 rng = np.random.default_rng(1)
 def pluck(f, dur=1.6, amp=0.3):
-    n = int(dur * SR); p = max(2, int(SR / f)); buf = rng.uniform(-1, 1, p); out = np.zeros(n)
+    n = int(dur * SR); p = max(2, int(SR / f)); buf = rng.uniform(-1, 1, p)
+    for _ in range(4): buf = 0.5 * (buf + np.roll(buf, 1))
+    out = np.zeros(n)
     for i in range(n):
         out[i] = buf[i % p]; buf[i % p] = 0.5 * (buf[i % p] + buf[(i + 1) % p]) * 0.996
+    att = int(0.008 * SR); out[:att] *= np.linspace(0, 1, att)
     return out * amp
 # musica: lira in re dorico
 notes = {"D3":146.8,"A3":220,"D4":293.7,"E4":329.6,"F4":349.2,"G4":392,"A4":440,"C5":523.3,"D5":587.3,"C4":261.6,"G3":196,"F3":174.6,"Bb3":233.1}
@@ -32,9 +35,9 @@ while t < total + 2:
     t += 8 * beat; b += 1
 music = music[:N]
 # ducking sotto la voce
-env = np.abs(voice); w = int(0.25 * SR)
+env = np.abs(voice); w = int(0.25 * SR); w2 = int(1.2 * SR)
 env = np.convolve(env, np.ones(w) / w, "same"); duck = np.where(env > 0.01, 0.28, 1.0)
-duck = np.convolve(duck, np.ones(w) / w, "same")
+duck = np.minimum(duck, np.convolve(np.where(env > 0.01, 0.28, 1.0), np.ones(w2) / w2, "same")); duck = np.convolve(duck, np.ones(w) / w, "same")
 sfx = np.zeros(N)
 def add(t0, x):
     o = int(t0 * SR); x = x[:max(0, N - o)]; sfx[o:o + len(x)] += x
@@ -79,7 +82,7 @@ for e in tl["items"]:
     if ev == "celebrate": add(s, applause(2.4))
     if ev == "fine": add(s + 0.3, chime(587, 8, 0.18))
     if e["type"] == "card": add(s, whoosh(0.8) * 0.7)
-mix = voice * 1.0 + music * duck * 0.55 + sfx
+mix = voice * 1.0 + lp(music, 0.35) * duck * 0.42 + sfx
 mix = mix / np.max(np.abs(mix)) * 0.92
 fade = int(2 * SR); mix[-fade:] *= np.linspace(1, 0, fade)
 sf.write(D + "/audio/mix.wav", mix, SR)
