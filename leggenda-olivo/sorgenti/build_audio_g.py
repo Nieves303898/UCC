@@ -61,7 +61,9 @@ def call(voice, style, text, path):
 def proc(raw, out, semi):
     flt = (f"rubberband=pitch={2**(semi/12):.5f}," if semi else "") + "silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse"
     subprocess.run(["ffmpeg","-y","-loglevel","error","-i",raw,"-af",flt,"-ar",str(SR),"-ac","1",out],check=True)
-    a,_=sf.read(out); a = clean_edges(a, os.path.basename(out)); sf.write(out, a, SR); return a
+    a,_=sf.read(out)
+    if not os.path.basename(out).startswith("41_"): a = clean_edges(a, os.path.basename(out)); sf.write(out, a, SR)
+    return a
 def clean_edges(a, name=""):
     hop = SR // 100; e = np.array([np.sqrt(np.mean(a[k:k+hop]**2)) for k in range(0, len(a)-hop, hop)]); m = e.max(); sil = e < m * 0.02
     # coda: ultimo silenzio >=0.12s seguito da un pezzo breve (<0.45s)
