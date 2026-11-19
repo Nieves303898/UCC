@@ -67,6 +67,28 @@ if (count($featured) < 3) {
     }
 }
 
+// Productos de Navidad para la franja de campaña (solo con el tema
+// navideño prendido). Toma la categoría cuyo slug contiene "navid", así
+// sigue andando aunque se le cambie el nombre a la cápsula.
+$navidadProducts = [];
+$navidadCat = null;
+if (tema_navidad($pdo)) {
+    try {
+        $navidadCat = $pdo->query("SELECT * FROM categories WHERE slug LIKE '%navid%' ORDER BY sort_order LIMIT 1")->fetch() ?: null;
+        if ($navidadCat) {
+            $st = $pdo->prepare("SELECT p.*, c.name AS cat_name, c.slug AS cat_slug,
+                (SELECT COUNT(*) FROM product_variants v WHERE v.product_id = p.id AND v.active = 1) AS variant_count,
+                (SELECT COUNT(*) FROM product_variants v WHERE v.product_id = p.id AND v.active = 1 AND (v.stock IS NULL OR v.stock > 0)) AS has_stock
+                FROM products p JOIN categories c ON c.id = p.category_id
+                WHERE p.active = 1 AND p.category_id = ? ORDER BY p.featured DESC, p.sort_order, p.created_at DESC LIMIT 4");
+            $st->execute([$navidadCat['id']]);
+            $navidadProducts = $st->fetchAll();
+        }
+    } catch (Throwable $e) {
+        $navidadProducts = [];
+    }
+}
+
 function product_card_html(array $p): string {
     $img = product_image_url($p['image']);
     $outOfStock = !empty($p['has_stock']) ? false : true;
@@ -116,7 +138,8 @@ function product_card_html(array $p): string {
       }
   }
 ?>
-<section class="hero-slider" id="heroSlider" style="--hero-ratio:<?= h($heroRatio) ?>">
+<?php $heroEditorial = !empty($slides[0]['title']); ?>
+<section class="hero-slider<?= $heroEditorial ? ' hero-slider-editorial' : '' ?>" id="heroSlider" style="--hero-ratio:<?= h($heroRatio) ?>">
   <?php foreach ($slides as $i => $s): $simg = portada_image_url($s['image']); ?>
   <?php
     // Ojo: esta imagen se usa como variable CSS (--slide-img). Un
@@ -128,15 +151,32 @@ function product_card_html(array $p): string {
     // se la use.
     $simgAbs = $simg ? '/' . ltrim($simg, '/') : '';
   ?>
+  <?php if ($s['title']): ?>
+  <?php /* Slide "editorial": texto en un panel a la izquierda y la foto
+         enmarcada a la derecha. Se usa cuando el slide tiene título
+         cargado en el panel. Así el texto se lee bien en celular y
+         cualquier foto (vertical u horizontal) queda linda. */ ?>
+  <div class="hero-slide hero-slide-editorial <?= $i===0?'is-active':'' ?>">
+    <div class="hero-ed-text">
+      <span class="hero-ed-eyebrow"><svg aria-hidden="true"><use href="#nav-star"/></svg><?= tema_navidad($pdo) ? 'Navidad ' . date('Y') . ' · Romantiza' : 'Romantiza · Deco textil' ?></span>
+      <h2 class="hero-ed-title"><?= h($s['title']) ?></h2>
+      <?php if ($s['subtitle']): ?><p class="hero-ed-lead"><?= h($s['subtitle']) ?></p><?php endif; ?>
+      <?php if ($s['link_url'] && $s['link_text']): ?><a class="btn hero-ed-btn" href="<?= h($s['link_url']) ?>"><?= h($s['link_text']) ?> <svg style="width:14px;height:14px"><use href="#ic-arrow"/></svg></a><?php endif; ?>
+    </div>
+    <div class="hero-ed-media">
+      <div class="hero-ed-frame"><img src="<?= h($simgAbs) ?>" alt="<?= h($s['title']) ?>" <?= $i===0 ? 'fetchpriority="high"' : 'loading="lazy"' ?>></div>
+    </div>
+  </div>
+  <?php else: ?>
   <div class="hero-slide <?= $i===0?'is-active':'' ?>" style="--slide-img:url('<?= h($simgAbs) ?>')">
     <div class="hero-slide-overlay">
       <div class="container hero-slide-inner">
-        <?php if ($s['title']): ?><h1><?= h($s['title']) ?></h1><?php endif; ?>
         <?php if ($s['subtitle']): ?><p class="lead"><?= h($s['subtitle']) ?></p><?php endif; ?>
         <?php if ($s['link_url'] && $s['link_text']): ?><a class="btn btn-primary" href="<?= h($s['link_url']) ?>"><?= h($s['link_text']) ?></a><?php endif; ?>
       </div>
     </div>
   </div>
+  <?php endif; ?>
   <?php endforeach; ?>
   <?php if (count($slides) > 1): ?>
   <button type="button" class="hero-slider-arrow hero-slider-prev" aria-label="Foto anterior"><svg style="width:14px;height:14px"><use href="#ic-arrow"/></svg></button>
@@ -167,12 +207,24 @@ function product_card_html(array $p): string {
 </div>
 <?php endif; ?>
 
+<?php if ($navidadProducts): ?>
+<section class="navidad-strip">
+  <div class="container pad">
+    <div class="section-head">
+      <div><span class="eyebrow">Cápsula de temporada</span><h2><?= h($navidadCat['name']) ?></h2></div>
+      <a class="btn btn-ghost btn-sm" href="tienda.php?categoria=<?= h($navidadCat['slug']) ?>">Ver toda la cápsula</a>
+    </div>
+    <div class="product-grid product-grid-4"><?php foreach ($navidadProducts as $p) echo product_card_html($p); ?></div>
+  </div>
+</section>
+<?php endif; ?>
+
 <?php if ($categories): ?>
 <section class="pad container">
   <div class="section-head-center">
     <span class="eyebrow">Nuestras líneas</span>
-    <h2>Cada rincón, con su textil</h2>
-    <p class="section-lead">Cada línea tiene identidad propia: elegí la que mejor combine con tu casa y descubrí los textiles pensados para ese rincón.</p>
+    <h2>Colecciones con estampado propio</h2>
+    <p class="section-lead">Manteles, caminos, individuales y almohadones que combinan entre sí. Elegí una línea y armá la mesa completa.</p>
   </div>
   <div class="cat-grid">
     <?php foreach ($categories as $c): $cimg = category_image_url($c['image'] ?? null); ?>
@@ -198,30 +250,15 @@ function product_card_html(array $p): string {
         </div>
       </div>
       <div class="essence-content">
-        <h2>Nuestra esencia</h2>
-        <p class="essence-lead">Elegimos cada tela y cuidamos cada estampado pensando en las manos que los van a usar todos los días. Por eso, cuando algo sale de Romantiza, se nota la diferencia.</p>
-        <div class="essence-grid">
-          <div class="essence-card">
-            <span class="essence-icon essence-icon-rosa"><svg class="motif"><use href="#mot-sprig"/></svg></span>
-            <h3>Romántica</h3>
-            <p>Diseños delicados, sin caer en lo excesivo.</p>
-          </div>
-          <div class="essence-card">
-            <span class="essence-icon essence-icon-salvia"><svg class="motif"><use href="#mot-bloom"/></svg></span>
-            <h3>Artesanal</h3>
-            <p>Estampados y terminaciones hechas a mano.</p>
-          </div>
-          <div class="essence-card">
-            <span class="essence-icon essence-icon-arena"><svg class="motif"><use href="#mot-sprig"/></svg></span>
-            <h3>Natural</h3>
-            <p>Algodón y lino en tonos crudos y suaves.</p>
-          </div>
-          <div class="essence-card">
-            <span class="essence-icon essence-icon-rosa"><svg class="motif"><use href="#mot-bloom"/></svg></span>
-            <h3>Atemporal</h3>
-            <p>Piezas que acompañan tu casa por años.</p>
-          </div>
-        </div>
+        <span class="eyebrow">Desde Sáenz Peña, Chaco</span>
+        <h2>Textiles hechos a mano</h2>
+        <p class="essence-lead">Trabajamos con algodón y lino, estampamos a mano y terminamos cada pieza con puntillas y bordes cuidados. Son textiles para usar todos los días, lavar y volver a poner en la mesa.</p>
+        <ul class="essence-list">
+          <li><strong>Algodón y lino</strong><span>Telas naturales en tonos crudos.</span></li>
+          <li><strong>Estampado a mano</strong><span>Diseños propios, pieza por pieza.</span></li>
+          <li><strong>Terminaciones con puntilla</strong><span>El detalle que distingue a Romantiza.</span></li>
+          <li><strong>Envíos a todo el país</strong><span>Despachamos desde Chaco.</span></li>
+        </ul>
         <a class="btn btn-primary" href="tienda.php">Descubrí la colección <svg style="width:14px;height:14px"><use href="#ic-arrow"/></svg></a>
       </div>
     </div>
@@ -231,7 +268,7 @@ function product_card_html(array $p): string {
 <?php if ($featured): ?>
 <section class="pad container">
   <div class="section-head">
-    <div><span class="eyebrow">Lo más elegido</span><h2>Elegidos para empezar</h2></div>
+    <div><span class="eyebrow">Los más pedidos</span><h2>Favoritos de la casa</h2></div>
     <a class="btn btn-ghost btn-sm" href="tienda.php">Ver toda la tienda</a>
   </div>
   <div class="product-grid"><?php foreach ($featured as $p) echo product_card_html($p); ?></div>
@@ -265,7 +302,7 @@ function product_card_html(array $p): string {
 
 <section class="container" style="padding-bottom:5.5rem">
   <div class="newsletter">
-    <div><h2>Sumate al mundo Romantiza</h2><p>Recibí novedades, lanzamientos y descuentos exclusivos antes que nadie.</p></div>
+    <div><h2>Novedades por mail</h2><p>Te avisamos cuando salen colecciones nuevas y promociones. Solo cuando hay algo para contar.</p></div>
     <form class="nl-form" method="post" action="index.php#suscribite">
       <input type="email" name="newsletter_email" required placeholder="tu@email.com">
       <button class="btn btn-accent" type="submit">Suscribirme</button>

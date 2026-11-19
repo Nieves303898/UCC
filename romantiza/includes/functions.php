@@ -491,3 +491,19 @@ function create_order(PDO $pdo, array $customer, array $cartItems, string $payme
         'subtotal' => $subtotal,
     ];
 }
+
+/**
+ * Tema navideño: se activa solo entre el 1 de noviembre y el 30 de
+ * diciembre (hora de Argentina, ver config.php) y se apaga solo el 31.
+ * Se puede forzar desde la base con el setting "tema_navidad":
+ *   'on'  → siempre prendido · 'off' → siempre apagado · vacío/'auto' → por fecha.
+ */
+function tema_navidad(PDO $pdo): bool {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $modo = strtolower(trim(setting($pdo, 'tema_navidad', 'auto')));
+    if ($modo === 'on') return $cache = true;
+    if ($modo === 'off') return $cache = false;
+    $md = (int) date('md'); // ej: 1119 = 19 de noviembre
+    return $cache = ($md >= 1101 && $md <= 1230);
+}

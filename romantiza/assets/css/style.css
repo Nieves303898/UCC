@@ -617,3 +617,185 @@
     .cart-row-total{ width:100%; text-align:right; }
     .order-confirm .btn{ display:block; width:100%; margin:.5rem 0 0 !important; }
   }
+
+/* =====================================================================
+   PORTADA — SLIDE EDITORIAL (panel de texto + foto enmarcada)
+   Se usa cuando el slide tiene título cargado en el panel → Portada.
+   ===================================================================== */
+  .hero-slider-editorial{ height:620px; background:var(--marron-2); }
+  .hero-slide-editorial{
+    display:grid; grid-template-columns:1fr 1fr; background:var(--marron-2);
+  }
+  .hero-ed-text{
+    position:relative; display:flex; flex-direction:column; justify-content:center;
+    padding:3rem clamp(1.6rem,4vw,4rem) 3rem max(1.6rem, calc((100vw - var(--container)) / 2 + 1.6rem)); color:#F3EBDD;
+  }
+  .hero-ed-eyebrow{
+    display:inline-flex; align-items:center; gap:.55rem; font-size:.72rem; font-weight:800;
+    letter-spacing:.2em; text-transform:uppercase; color:var(--arena-2); margin-bottom:1.4rem;
+  }
+  .hero-ed-eyebrow svg{ width:14px; height:14px; color:currentColor; }
+  .hero-ed-title{
+    font-family:var(--font-display); font-weight:450; font-style:italic; color:#FBF6EC;
+    font-size:clamp(2.3rem,3.4vw + 1rem,4.3rem); line-height:1.04; letter-spacing:-.01em; max-width:15ch;
+  }
+  .hero-ed-lead{ font-size:1.06rem; line-height:1.6; color:rgba(243,235,221,.86); max-width:30rem; margin:1.4rem 0 2.2rem; }
+  .hero-ed-btn{ align-self:flex-start; background:#F3EBDD; color:var(--marron-2); }
+  .hero-ed-btn:hover{ background:#fff; transform:translateY(-1px); box-shadow:0 12px 26px -14px rgba(0,0,0,.6); }
+  .hero-ed-media{
+    position:relative; display:flex; align-items:center; justify-content:center; padding:2.6rem 2rem;
+    overflow:hidden;
+  }
+  .hero-ed-frame{
+    position:relative; height:100%; aspect-ratio:4/5; max-width:100%;
+    border-radius:999px 999px 6px 6px; overflow:hidden;
+    box-shadow:0 0 0 1px rgba(255,255,255,.18), 0 0 0 9px rgba(0,0,0,.12), 0 30px 60px -24px rgba(0,0,0,.65);
+  }
+  .hero-ed-frame img{ width:100%; height:100%; object-fit:cover; display:block; transform:scale(1.04); transition:transform 6s ease; }
+  .hero-slide-editorial.is-active .hero-ed-frame img{ transform:scale(1); }
+  .hero-slider-editorial .hero-slider-dots{ left:max(1.6rem, calc((100vw - var(--container)) / 2 + 1.6rem)); transform:none; bottom:2rem; }
+  .hero-slider-editorial .hero-slider-arrow{ top:auto; bottom:1.6rem; transform:none; background:rgba(255,255,255,.14); color:#F3EBDD; }
+  .hero-slider-editorial .hero-slider-arrow:hover{ background:rgba(255,255,255,.28); }
+  .hero-slider-editorial .hero-slider-prev{ left:calc(50% - 5.6rem); right:auto; }
+  .hero-slider-editorial .hero-slider-next{ left:calc(50% - 2.6rem); right:auto; }
+
+  @media (max-width:980px){
+    .hero-slider-editorial{ aspect-ratio:auto; max-height:none; height:auto; min-height:0; }
+    .hero-slider-editorial .hero-slide-editorial{ position:absolute; }
+    .hero-slider-editorial .hero-slide-editorial.is-active{ position:relative; }
+    .hero-slide-editorial{ grid-template-columns:1fr; }
+    .hero-ed-media{ order:-1; padding:1.6rem 1.4rem .4rem; }
+    .hero-ed-frame{ height:auto; width:min(66vw,300px); }
+    .hero-ed-text{ padding:1.8rem 1.4rem 4.6rem; text-align:center; align-items:center; }
+    .hero-ed-title{ max-width:none; }
+    .hero-ed-lead{ margin:1rem auto 1.6rem; }
+    .hero-ed-btn{ align-self:center; }
+    .hero-slider-editorial .hero-slider-dots{ left:50%; transform:translateX(-50%); bottom:1.9rem; }
+    .hero-slider-editorial .hero-slider-arrow{ display:none; }
+  }
+
+/* ---- Nueva sección "Hecho a mano" (reemplaza las 4 tarjetitas) ---- */
+  .essence-list{ display:grid; grid-template-columns:1fr 1fr; gap:0 2rem; margin:0 0 2.2rem; border-top:1px solid var(--border); }
+  .essence-list li{ padding:1rem 0; border-bottom:1px solid var(--border); }
+  .essence-list strong{ display:block; font-family:var(--font-display); font-weight:560; font-size:1.06rem; color:var(--marron-2); }
+  .essence-list span{ display:block; color:var(--text-muted); font-size:.88rem; margin-top:.15rem; }
+  @media (max-width:640px){ .essence-list{ grid-template-columns:1fr; } }
+
+  .product-grid-4{ grid-template-columns:repeat(4,1fr); }
+  @media (max-width:980px){ .product-grid-4{ grid-template-columns:repeat(2,1fr); } }
+
+/* =====================================================================
+   TEMA NAVIDEÑO — "vidriera de Nueva York", sin nieve.
+   Se prende solo del 1/11 al 30/12 (ver tema_navidad() en functions.php).
+   Todo lo de acá depende de la clase .tema-navidad en <body>: fuera de
+   esas fechas la web vuelve sola a su estilo de siempre.
+   ===================================================================== */
+  .tema-navidad{
+    --nav-verde:#163A2B; --nav-verde-2:#0F2A1F; --nav-rojo:#8C1D25; --nav-rojo-2:#6E141B;
+    --nav-oro:#C9A35B; --nav-oro-claro:#E7D3A1;
+    background-color:var(--crudo);
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='%23C9A35B' fill-opacity='.22'%3E%3Cpath d='M40 30l2 7 7 2-7 2-2 7-2-7-7-2 7-2z'/%3E%3Cpath d='M190 120l1.4 5 5 1.4-5 1.4-1.4 5-1.4-5-5-1.4 5-1.4z'/%3E%3Ccircle cx='120' cy='60' r='1.6'/%3E%3Ccircle cx='230' cy='30' r='1.2'/%3E%3Ccircle cx='70' cy='190' r='1.4'/%3E%3Cpath d='M110 210l1.8 6 6 1.8-6 1.8-1.8 6-1.8-6-6-1.8 6-1.8z'/%3E%3Ccircle cx='220' cy='230' r='1.6'/%3E%3C/g%3E%3C/svg%3E");
+  }
+
+  /* Barra de anuncio: rojo profundo con detalle dorado */
+  .announce-navidad{
+    display:flex; align-items:center; justify-content:center; gap:.9rem; flex-wrap:wrap;
+    background:var(--nav-rojo); color:#F7EEDC; letter-spacing:.08em;
+    border-bottom:1px solid var(--nav-oro);
+  }
+  .announce-navidad a{ color:var(--nav-oro-claro); font-weight:700; border-bottom:1px solid rgba(231,211,161,.5); }
+  .announce-navidad a:hover{ color:#fff; }
+  .announce-star{ width:12px; height:12px; color:var(--nav-oro-claro); }
+
+  /* Guirnalda de luces cálidas colgando debajo del menú */
+  .site-header{ position:sticky; }
+  .string-lights{
+    position:absolute; left:0; right:0; top:100%; height:26px; pointer-events:none; z-index:2;
+    display:flex; justify-content:space-between; padding:0 1rem; overflow:hidden;
+    background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='16' viewBox='0 0 120 16'%3E%3Cpath d='M0 1 Q30 15 60 1 T120 1' fill='none' stroke='%233A2C21' stroke-opacity='.55' stroke-width='1.1'/%3E%3C/svg%3E") repeat-x 0 0 / 120px 16px;
+  }
+  .string-lights span{
+    position:relative; flex:none; width:8px; height:12px; margin-top:6px; border-radius:50% 50% 50% 50% / 40% 40% 60% 60%;
+    background:#FFD98A; box-shadow:0 0 6px 2px rgba(255,205,110,.75), 0 0 16px 4px rgba(255,190,90,.35);
+    animation:nav-twinkle 2.8s ease-in-out infinite;
+  }
+  .string-lights span::before{ content:""; position:absolute; left:2px; top:-3px; width:4px; height:3px; background:#3A2C21; border-radius:1px; }
+  .string-lights span:nth-child(odd){ margin-top:11px; }
+  .string-lights span:nth-child(4n+2){ background:#F6B39B; box-shadow:0 0 6px 2px rgba(240,140,110,.7), 0 0 16px 4px rgba(220,90,70,.3); animation-delay:.6s; }
+  .string-lights span:nth-child(4n+3){ animation-delay:1.3s; }
+  .string-lights span:nth-child(4n){ background:#FFF1C9; animation-delay:2s; }
+  @keyframes nav-twinkle{ 0%,100%{ opacity:1; } 50%{ opacity:.45; } }
+
+  /* Slide editorial en versión navidad: verde pino + dorado, con luces desenfocadas */
+  .tema-navidad .hero-slider-editorial,
+  .tema-navidad .hero-slide-editorial{ background:var(--nav-verde); }
+  .tema-navidad .hero-slide-editorial:nth-child(3n+2){ background:var(--nav-rojo-2); }
+  .tema-navidad .hero-ed-eyebrow{ color:var(--nav-oro-claro); }
+  .tema-navidad .hero-ed-text::after{
+    content:""; position:absolute; left:max(1.6rem, calc((100vw - var(--container)) / 2 + 1.6rem)); right:clamp(1.6rem,4vw,4rem); top:2.2rem; height:1px;
+    background:linear-gradient(90deg, var(--nav-oro), rgba(201,163,91,0));
+  }
+  .tema-navidad .hero-ed-btn{ background:var(--nav-oro); color:var(--nav-verde-2); }
+  .tema-navidad .hero-ed-btn:hover{ background:var(--nav-oro-claro); }
+  .tema-navidad .hero-ed-media{
+    background:
+      radial-gradient(circle at 14% 22%, rgba(255,214,140,.35) 0 6px, transparent 22px),
+      radial-gradient(circle at 82% 14%, rgba(255,214,140,.28) 0 9px, transparent 30px),
+      radial-gradient(circle at 90% 70%, rgba(255,180,120,.25) 0 7px, transparent 26px),
+      radial-gradient(circle at 10% 82%, rgba(255,230,170,.3) 0 5px, transparent 20px),
+      radial-gradient(circle at 60% 92%, rgba(255,214,140,.22) 0 8px, transparent 28px),
+      radial-gradient(ellipse at 50% 50%, rgba(255,255,255,.06), transparent 70%);
+  }
+  .tema-navidad .hero-ed-frame{
+    box-shadow:0 0 0 1px var(--nav-oro), 0 0 0 8px rgba(0,0,0,.18), 0 0 0 9px rgba(201,163,91,.55), 0 30px 60px -24px rgba(0,0,0,.7);
+  }
+
+  /* Franja de la cápsula navideña */
+  .navidad-strip{
+    background-color:var(--crudo-2);
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='%23C9A35B' fill-opacity='.35'%3E%3Cpath d='M30 24l1.6 5.4 5.4 1.6-5.4 1.6L30 38l-1.6-5.4L23 31l5.4-1.6z'/%3E%3Ccircle cx='120' cy='50' r='1.4'/%3E%3Cpath d='M140 130l1.2 4 4 1.2-4 1.2-1.2 4-1.2-4-4-1.2 4-1.2z'/%3E%3Ccircle cx='60' cy='150' r='1.2'/%3E%3C/g%3E%3C/svg%3E");
+    border-top:3px double var(--nav-oro); border-bottom:3px double var(--nav-oro);
+  }
+  .navidad-strip .section-head h2{ color:var(--nav-rojo-2); font-style:italic; font-weight:450; }
+  .navidad-strip .btn-ghost{ border-color:var(--nav-verde); color:var(--nav-verde); }
+  .navidad-strip .btn-ghost:hover{ background:var(--nav-verde); color:#F7EEDC; }
+  .navidad-strip .card-cat{ color:var(--nav-rojo); }
+
+  /* Detalles dorados en títulos y tarjetas */
+  .tema-navidad .eyebrow{ color:var(--nav-rojo); }
+  .tema-navidad .section-head-center h2::after{
+    content:""; display:block; width:64px; height:12px; margin:.9rem auto 0;
+    background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='12' viewBox='0 0 64 12'%3E%3Cpath d='M0 6h24M40 6h24' stroke='%23C9A35B' stroke-width='1'/%3E%3Cpath d='M32 0l1.6 4.4L38 6l-4.4 1.6L32 12l-1.6-4.4L26 6l4.4-1.6z' fill='%23C9A35B'/%3E%3C/svg%3E") no-repeat center;
+  }
+  .tema-navidad .cat-card[href*="navid"]::before{
+    content:"Navidad"; position:absolute; z-index:3; top:14px; left:-6px;
+    background:var(--nav-rojo); color:#F7EEDC; font-size:.68rem; font-weight:800; letter-spacing:.16em; text-transform:uppercase;
+    padding:.35rem .8rem; box-shadow:0 6px 14px -6px rgba(0,0,0,.5); border-left:3px solid var(--nav-oro);
+  }
+  .tema-navidad .btn-primary{ background:var(--nav-verde); }
+  .tema-navidad .btn-primary:hover{ background:var(--nav-verde-2); }
+  .tema-navidad .newsletter{ background:var(--nav-rojo-2); box-shadow:inset 0 0 0 1px rgba(201,163,91,.45); }
+  .tema-navidad .btn-accent{ background:var(--nav-oro); color:var(--nav-verde-2); }
+  .tema-navidad .btn-accent:hover{ background:var(--nav-oro-claro); }
+
+  /* Pie de página verde pino */
+  .tema-navidad .site-footer{ background:var(--nav-verde-2); color:#E9DFC9; border-top:3px double var(--nav-oro); }
+  .tema-navidad .site-footer .brand-word{ color:#FBF6EC; }
+  .tema-navidad .footer-col h4{ color:var(--nav-oro-claro); }
+  .tema-navidad .footer-brand p,
+  .tema-navidad .footer-bottom{ color:rgba(233,223,201,.7); border-color:rgba(201,163,91,.3); }
+  .tema-navidad .footer-col a:hover{ color:var(--nav-oro-claro); }
+  .tema-navidad .wa-fab{ background:var(--nav-verde); box-shadow:0 0 0 2px var(--nav-oro), var(--shadow-soft); }
+
+  .tema-navidad .footer-brand .brand img{ border-radius:50%; box-shadow:0 0 0 2px var(--nav-oro); }
+  @media (max-width:980px){ .tema-navidad .hero-ed-text::after{ display:none; } }
+  @media (max-width:640px){
+    .announce-navidad > span{ display:none; }
+    .tema-navidad .cat-card[href*="navid"]::before{ left:-4px; font-size:.6rem; }
+  }
+
+/* Arreglo: "section.pad" pisaba el margen lateral de .container y en
+   celular los textos y fotos quedaban pegados al borde de la pantalla. */
+  .container.pad{ padding-left:1.6rem; padding-right:1.6rem; }
+  @media (max-width:640px){ .container.pad{ padding-left:1.1rem; padding-right:1.1rem; } }
+  .navidad-strip .card-cat{ display:none; }

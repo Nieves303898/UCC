@@ -14,6 +14,7 @@ $activeNav = $activeNav ?? '';
 $noIndex = $noIndex ?? false;
 $waNumber = setting($pdo, 'contact_whatsapp', '');
 $cartCount = cart_raw_count();
+$navidad = tema_navidad($pdo);
 ?>
 <!doctype html>
 <html lang="es-AR">
@@ -40,7 +41,7 @@ $cartCount = cart_raw_count();
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,450;0,9..144,560;0,9..144,650;1,9..144,400;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/style.css?v=<?= h((string) asset_version(__DIR__ . '/../assets/css/style.css')) ?>">
 </head>
-<body>
+<body<?= $navidad ? ' class="tema-navidad"' : '' ?>>
 <a href="#main" class="skip-link">Saltar al contenido</a>
 
 <svg style="display:none" aria-hidden="true">
@@ -60,9 +61,19 @@ $cartCount = cart_raw_count();
   <symbol id="ic-wa" viewBox="0 0 32 32" fill="currentColor"><path d="M16 3C9 3 3.3 8.7 3.3 15.7c0 2.5.7 4.9 2 7L3 29l6.5-2.2c2 .9 4.2 1.4 6.5 1.4 7 0 12.7-5.7 12.7-12.7C28.7 8.7 23 3 16 3zm0 22.9c-2 0-4-.5-5.7-1.5l-.4-.2-4 1.3 1.3-3.9-.3-.4a10.4 10.4 0 0 1-1.7-5.8C5.2 9.6 10 4.8 16 4.8c5.9 0 10.7 4.8 10.7 10.7S21.9 25.9 16 25.9zm5.9-8c-.3-.2-1.9-1-2.2-1.1-.3-.1-.5-.1-.7.1-.2.3-.8 1-1 1.2-.2.2-.4.2-.6.1a8.7 8.7 0 0 1-4.4-3.8c-.3-.5.3-.5.9-1.6.1-.2 0-.4 0-.5l-.9-2.2c-.2-.5-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.1.2 2.2 3.3 5.2 4.6.7.3 1.3.5 1.8.6.7.2 1.4.2 1.9.1.6-.1 1.9-.8 2.1-1.5.3-.7.3-1.4.2-1.5-.1-.1-.3-.2-.6-.4z"/></symbol>
   <symbol id="mot-sprig" viewBox="0 0 60 100"><path d="M30 96 30 20"/><path d="M30 55c0-14-16-18-20-30 16 2 22 12 20 22"/><path d="M30 40c0-12 14-16 17-27-15 2-20 11-17 20"/><circle cx="30" cy="16" r="6"/><circle cx="20" cy="8" r="2"/><circle cx="40" cy="10" r="1.6"/></symbol>
   <symbol id="mot-bloom" viewBox="0 0 100 100"><circle cx="50" cy="50" r="9"/><path d="M50 41c-4-10-16-12-22-6 6 8 16 8 22 6Z"/><path d="M59 45c8-8 6-20-2-24-4 9 0 18 2 24Z"/><path d="M60 55c11 1 17-9 15-18-9 2-15 10-15 18Z"/><path d="M52 60c2 11 13 15 21 10-5-8-14-11-21-10Z"/><path d="M43 59c-3 10-14 12-21 6 6-8 14-9 21-6Z"/></symbol>
+  <symbol id="nav-star" viewBox="0 0 24 24"><path fill="currentColor" d="M12 1.5l1.9 7.1 7.1 1.9-7.1 1.9L12 19.5l-1.9-7.1L3 10.5l7.1-1.9z"/></symbol>
+  <symbol id="nav-ornament" viewBox="0 0 40 52" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M20 2v6"/><rect x="15" y="8" width="10" height="5" rx="1"/><circle cx="20" cy="31" r="17"/><path d="M4 27c8 4 24 4 32 0M4 35c8-4 24-4 32 0"/></symbol>
 </svg>
 
+<?php if ($navidad): ?>
+<div class="announce announce-navidad">
+  <svg class="announce-star" aria-hidden="true"><use href="#nav-star"/></svg>
+  <span>Navidad en casa &middot; Envíos a todo el país</span>
+  <a href="tienda.php?categoria=capsula-ilusion-navidena-romantiza">Ver la cápsula navideña &rarr;</a>
+</div>
+<?php else: ?>
 <div class="announce">Envíos a todo el país &middot; Cambios sin cargo dentro de los 30 días</div>
+<?php endif; ?>
 
 <header class="site-header">
   <div class="header-inner container">
@@ -96,6 +107,7 @@ $cartCount = cart_raw_count();
       <button type="button" class="search-close" id="searchClose">Cerrar</button>
     </form>
   </div>
+  <?php if ($navidad): ?><div class="string-lights" aria-hidden="true"><?php for ($i = 0; $i < 28; $i++): ?><span></span><?php endfor; ?></div><?php endif; ?>
 </header>
 
 <main id="main">
