@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /carrito.php
+Disallow: /checkout.php
+Disallow: /pedido-confirmado.php
+Disallow: /whatsapp_lead.php
+Disallow: /mp_webhook.php
+
+Sitemap: https://www.romantiza.com.ar/sitemap.php
