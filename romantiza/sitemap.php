@@ -10,7 +10,7 @@ require __DIR__ . '/includes/functions.php';
  * robots.txt.
  */
 
-$base = defined('SITE_URL') ? rtrim(SITE_URL, '/') : ('https://' . ($_SERVER['HTTP_HOST'] ?? 'www.romantiza.com.ar'));
+$base = public_site_url();
 
 header('Content-Type: application/xml; charset=UTF-8');
 

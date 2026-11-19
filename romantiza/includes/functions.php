@@ -507,3 +507,16 @@ function tema_navidad(PDO $pdo): bool {
     $md = (int) date('md'); // ej: 1119 = 19 de noviembre
     return $cache = ($md >= 1101 && $md <= 1230);
 }
+
+/**
+ * Dirección pública de la web (para Google: canonical y sitemap).
+ * Si config.php todavía tiene el dominio temporal de Hostinger, se usa
+ * igual el dominio real, así no hace falta tocar config.php.
+ */
+function public_site_url(): string {
+    $url = defined('SITE_URL') ? rtrim(SITE_URL, '/') : '';
+    if ($url === '' || stripos($url, 'hostingersite.com') !== false) {
+        $url = 'https://www.romantiza.com.ar';
+    }
+    return $url;
+}
