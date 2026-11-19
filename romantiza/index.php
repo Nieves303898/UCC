@@ -136,6 +136,11 @@ function product_card_html(array $p): string {
     <h1><?= h($heroTitle) ?></h1>
     <?php if ($heroLead): ?><p><?= h($heroLead) ?></p><?php endif; ?>
     <a class="btn h-cta" href="<?= h($cta['url']) ?>"><?= h($cta['text']) ?></a>
+    <ul class="h-hero-facts">
+      <li>Envíos a todo el país</li>
+      <li>Mercado Pago</li>
+      <li>Cambios sin cargo</li>
+    </ul>
   </div>
   <div class="h-hero-media">
     <?php foreach ($heroImages as $i => $img): ?>
@@ -144,33 +149,27 @@ function product_card_html(array $p): string {
   </div>
 </section>
 
-<!-- 2. PROBLEMA — ¿Me entienden? -->
-<section class="h-problem">
-  <div class="container">
-    <p><?= $navidad
-      ? 'Se viene la cena del 24 y querés una mesa linda. Pero en todos lados encontrás lo mismo: manteles sintéticos y diseños repetidos.'
-      : 'Querés una mesa linda para todos los días. Pero en todos lados encontrás lo mismo: telas sintéticas y diseños repetidos.' ?></p>
-  </div>
-</section>
-
-<!-- 3. SOLUCIÓN — ¿Cómo me ayudan? -->
-<section class="h-solution">
-  <div class="container h-solution-grid">
-    <?php if ($essenceImage): ?><img class="h-solution-img" src="<?= h($essenceImage) ?>" alt="Textiles Romantiza estampados a mano" loading="lazy"><?php endif; ?>
-    <div>
-      <h2>Textiles de verdad, hechos a mano en Chaco</h2>
+<!-- 2 + 3. PROBLEMA Y SOLUCIÓN — ¿Me entienden? ¿Cómo me ayudan? -->
+<section class="h-why">
+  <div class="container h-why-grid">
+    <div class="h-why-text">
+      <p class="h-why-problem"><?= $navidad
+        ? 'Se viene la cena del 24 y querés una mesa linda. Pero en todos lados encontrás lo mismo: manteles sintéticos y diseños repetidos.'
+        : 'Querés una mesa linda para todos los días. Pero en todos lados encontrás lo mismo: telas sintéticas y diseños repetidos.' ?></p>
+      <h2>Por eso hacemos textiles de verdad, a mano, en Chaco</h2>
       <ol class="h-points">
-        <li><strong>Telas naturales.</strong> Algodón o lino, según la pieza.</li>
-        <li><strong>Hechos a mano.</strong> Estampados, puntillas y terminaciones, una por una.</li>
-        <li><strong>Todo combina.</strong> Manteles, caminos e individuales de la misma línea para armar la mesa completa.</li>
+        <li><strong>Telas naturales</strong><span>Algodón o lino, según la pieza.</span></li>
+        <li><strong>Hechos a mano</strong><span>Estampados, puntillas y terminaciones, una por una.</span></li>
+        <li><strong>Todo combina</strong><span>Manteles, caminos e individuales de la misma línea.</span></li>
       </ol>
     </div>
+    <?php if ($essenceImage): ?><img class="h-why-img" src="<?= h($essenceImage) ?>" alt="Textiles Romantiza estampados a mano" loading="lazy"><?php endif; ?>
   </div>
 </section>
 
 <?php if ($caminos): ?>
 <!-- 4. PARA QUIÉN ES — ¿Es para mí? -->
-<section class="h-section">
+<section class="h-section h-paths-wrap">
   <div class="container">
     <h2>¿Qué estás buscando?</h2>
     <div class="h-paths">
@@ -199,14 +198,14 @@ function product_card_html(array $p): string {
 <?php endif; ?>
 
 <!-- 6. CÓMO COMPRAR — ¿Qué pasa si compro? -->
-<section class="h-section h-steps-wrap">
+<section class="h-steps-wrap">
   <div class="container">
     <h2>Cómo es comprar en Romantiza</h2>
     <ol class="h-steps">
-      <li><strong>Elegís y pagás</strong><span>Con Mercado Pago, transferencia o efectivo.</span></li>
-      <li><strong>Coordinamos el envío</strong><span>Te escribimos por WhatsApp cuando se confirma el pedido.</span></li>
-      <li><strong>Lo despachamos</strong><span>Desde Sáenz Peña a cualquier ciudad del país.</span></li>
-      <li><strong>Si algo no va, lo cambiás</strong><span>Sin cargo, dentro de los 30 días de recibido.</span></li>
+      <li><strong>Elegís y pagás</strong><span>Mercado Pago, transferencia o efectivo.</span></li>
+      <li><strong>Coordinamos el envío</strong><span>Te escribimos por WhatsApp al confirmar el pedido.</span></li>
+      <li><strong>Lo despachamos</strong><span>Desde Sáenz Peña a todo el país.</span></li>
+      <li><strong>Si algo no va, lo cambiás</strong><span>Sin cargo, dentro de los 30 días.</span></li>
     </ol>
   </div>
 </section>
@@ -228,11 +227,11 @@ function product_card_html(array $p): string {
 </section>
 <?php endif; ?>
 
-<!-- 8. QUIÉNES SOMOS — ¿Quién está detrás? -->
-<section class="h-section h-about">
-  <div class="container h-about-grid">
-    <h2>Somos Romantiza, de Sáenz Peña</h2>
-    <div>
+<!-- 8 + 9. QUIÉNES SOMOS Y PREGUNTAS — ¿Quién está detrás? ¿Y si…? -->
+<section class="h-section h-about-faq">
+  <div class="container h-af-grid">
+    <div class="h-about">
+      <h2>Somos Romantiza, de Sáenz Peña</h2>
       <p><?= h(setting($pdo, 'about_lead')) ?></p>
       <ul class="h-facts">
         <?php if ($address): ?><li><?= h($address) ?></li><?php endif; ?>
@@ -241,31 +240,27 @@ function product_card_html(array $p): string {
       </ul>
       <a class="h-link" href="nosotros.php">Conocé nuestra historia <svg><use href="#ic-arrow"/></svg></a>
     </div>
-  </div>
-</section>
-
-<!-- 9. PREGUNTAS FRECUENTES — ¿Y si…? -->
-<section class="h-section h-faq">
-  <div class="container">
-    <h2>Preguntas frecuentes</h2>
-    <div class="h-faq-list">
-      <?php if ($navidad): ?>
-      <details><summary>¿Llega antes de Navidad?</summary><p>Depende de tu ciudad. Escribinos por WhatsApp antes de comprar y te decimos si llega a tiempo.</p></details>
-      <?php endif; ?>
-      <details><summary>¿Envían a mi ciudad?</summary><p>Sí, despachamos a todo el país. Una vez confirmado el pedido, coordinamos el envío por WhatsApp.</p></details>
-      <details><summary>¿Cómo puedo pagar?</summary><p>Con Mercado Pago, transferencia o efectivo.</p></details>
-      <details><summary>¿Y si la medida no me va?</summary><p>Lo cambiás sin cargo dentro de los 30 días de recibido el producto.</p></details>
-      <details><summary>¿De qué tela son y cómo se lavan?</summary><p>Son 100% algodón o lino natural, según la pieza. Lavar a mano o en ciclo suave con agua fría, sin lavandina. Planchar del revés a temperatura media.</p></details>
-      <?php if ($waNumber): ?>
-      <details><summary>Tengo otra pregunta</summary><p><a href="https://wa.me/<?= h($waNumber) ?>" target="_blank" rel="noopener">Escribinos por WhatsApp</a><?= $hours ? ' y te respondemos (' . h($hours) . ').' : '.' ?></p></details>
-      <?php endif; ?>
+    <div class="h-faq">
+      <h2>Preguntas frecuentes</h2>
+      <div class="h-faq-list">
+        <?php if ($navidad): ?>
+        <details><summary>¿Llega antes de Navidad?</summary><p>Depende de tu ciudad. Escribinos por WhatsApp antes de comprar y te decimos si llega a tiempo.</p></details>
+        <?php endif; ?>
+        <details><summary>¿Envían a mi ciudad?</summary><p>Sí, despachamos a todo el país. Una vez confirmado el pedido, coordinamos el envío por WhatsApp.</p></details>
+        <details><summary>¿Cómo puedo pagar?</summary><p>Con Mercado Pago, transferencia o efectivo.</p></details>
+        <details><summary>¿Y si la medida no me va?</summary><p>Lo cambiás sin cargo dentro de los 30 días de recibido el producto.</p></details>
+        <details><summary>¿De qué tela son y cómo se lavan?</summary><p>Son 100% algodón o lino natural, según la pieza. Lavar a mano o en ciclo suave con agua fría, sin lavandina. Planchar del revés a temperatura media.</p></details>
+        <?php if ($waNumber): ?>
+        <details><summary>Tengo otra pregunta</summary><p><a href="https://wa.me/<?= h($waNumber) ?>" target="_blank" rel="noopener">Escribinos por WhatsApp</a><?= $hours ? ' y te respondemos (' . h($hours) . ').' : '.' ?></p></details>
+        <?php endif; ?>
+      </div>
     </div>
   </div>
 </section>
 
 <!-- 10. CIERRE — ¿Cómo empiezo? -->
 <section class="h-close">
-  <div class="container">
+  <div class="container h-close-inner">
     <h2><?= $navidad ? 'Armá tu mesa de Navidad' : 'Armá tu mesa' ?></h2>
     <a class="btn h-cta h-cta-lg" href="<?= h($cta['url']) ?>"><?= h($cta['text']) ?></a>
   </div>
