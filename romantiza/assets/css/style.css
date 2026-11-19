@@ -782,3 +782,75 @@
     .h-linea strong{ font-size:1.2rem; }
     .h-linea-n{ font-size:.88rem; }
   }
+
+
+/* =====================================================================
+   MENOS "CUADRADO": tamaños distintos, fotos escalonadas y superpuestas,
+   y borde de puntilla (como el de los manteles) en vez de cortes rectos.
+   ===================================================================== */
+  .h-path, .h-linea-img, .h-products .card-media .ph, .h-why-img, .h-why-img2{ border-radius:6px; }
+
+  /* Borde de puntilla: semicírculos del color de la sección siguiente */
+  .tema-navidad .h-hero::after,
+  .tema-navidad .h-close::after{ display:none; }
+  .h-hero, .h-close, .h-steps-wrap{ position:relative; }
+  .h-hero::before{
+    content:""; position:absolute; left:0; right:0; bottom:-1px; height:11px; z-index:3; pointer-events:none;
+    background:radial-gradient(circle at 50% 100%, var(--surface) 7.5px, transparent 8.5px) repeat-x 0 0 / 18px 11px;
+  }
+  .h-steps-wrap::before, .h-close::before{
+    content:""; position:absolute; left:0; right:0; top:-1px; height:11px; pointer-events:none;
+    background:radial-gradient(circle at 50% 0, var(--surface) 7.5px, transparent 8.5px) repeat-x 0 0 / 18px 11px;
+  }
+  .h-steps-wrap::before{ background-image:radial-gradient(circle at 50% 0, var(--surface) 7.5px, transparent 8.5px); }
+  .h-close::before{ background-image:radial-gradient(circle at 50% 0, var(--bg) 7.5px, transparent 8.5px); }
+  .h-steps-wrap{ padding-top:3rem; }
+  .h-close{ padding-top:2.9rem; }
+
+  /* Problema + solución: collage con una foto chica encima */
+  .h-why-media{ position:relative; padding:0 0 2.2rem 0; }
+  .h-why-img2{
+    position:absolute; left:-.4rem; bottom:0; width:38%; aspect-ratio:4/5; object-fit:cover;
+    border:5px solid var(--surface); box-shadow:0 14px 30px -18px rgba(40,25,15,.55);
+  }
+  .h-why-img{ margin-left:auto; display:block; width:88%; }
+
+  /* Qué estás buscando: alturas y desfases distintos */
+  @media (min-width:760px){
+    .h-paths{ align-items:start; grid-template-columns:1.15fr 1fr 1fr; }
+    .h-path:nth-child(1){ aspect-ratio:4/5; }
+    .h-path:nth-child(2){ aspect-ratio:3/4; margin-top:2.6rem; }
+    .h-path:nth-child(3){ aspect-ratio:4/5; margin-top:1rem; }
+  }
+  @media (max-width:759px){
+    .h-path:nth-child(2){ margin-left:1.4rem; }
+    .h-path:nth-child(3){ margin-right:1.4rem; }
+  }
+
+  /* Colección: los productos chicos van escalonados */
+  .h-products .card:nth-child(3), .h-products .card:nth-child(5){ margin-top:1.8rem; }
+  @media (min-width:980px){
+    .h-products{ align-items:start; }
+    .h-products .card:nth-child(3), .h-products .card:nth-child(5){ margin-top:3rem; }
+    .h-products .card:nth-child(4), .h-products .card:nth-child(5){ margin-top:-1rem; }
+    .h-products .card:nth-child(5){ margin-top:2rem; }
+  }
+
+  /* Líneas: la primera más grande, las otras escalonadas; en celular se deslizan */
+  @media (min-width:760px){
+    .h-lineas-grid{ grid-template-columns:1.35fr 1fr 1fr; align-items:end; }
+    .h-linea:nth-child(1) .h-linea-img{ aspect-ratio:1/1; }
+    .h-linea:nth-child(2) .h-linea-img{ aspect-ratio:3/4; }
+    .h-linea:nth-child(3){ align-self:start; }
+    .h-linea:nth-child(3) .h-linea-img{ aspect-ratio:4/5; }
+  }
+  @media (max-width:759px){
+    .h-lineas-grid{ display:flex; overflow-x:auto; scroll-snap-type:x mandatory; gap:.8rem; margin:0 -1.1rem; padding:0 1.1rem .4rem; scrollbar-width:none; }
+    .h-lineas-grid::-webkit-scrollbar{ display:none; }
+    .h-linea{ flex:0 0 68%; scroll-snap-align:start; }
+    .h-linea:nth-child(even) .h-linea-img{ aspect-ratio:3/4; }
+  }
+  @media (min-width:980px){
+    .h-products .card:first-child{ align-self:stretch; margin-top:0; }
+    .h-products .card:first-child .card-media{ min-height:0; }
+  }

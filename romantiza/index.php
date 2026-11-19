@@ -173,7 +173,10 @@ function product_card_html(array $p): string {
         <li><strong>Todo combina</strong><span>Manteles, caminos e individuales de la misma línea.</span></li>
       </ol>
     </div>
-    <?php if ($essenceImage): ?><img class="h-why-img" src="<?= h($essenceImage) ?>" alt="Textiles Romantiza estampados a mano" loading="lazy"><?php endif; ?>
+    <div class="h-why-media">
+      <?php if ($essenceImage): ?><img class="h-why-img" src="<?= h($essenceImage) ?>" alt="Textiles Romantiza estampados a mano" loading="lazy"><?php endif; ?>
+      <?php $detalle = !empty($oferta[1]['image']) ? product_image_url($oferta[1]['image']) : null; if ($detalle): ?><img class="h-why-img2" src="<?= h($detalle) ?>" alt="" loading="lazy"><?php endif; ?>
+    </div>
   </div>
 </section>
 
