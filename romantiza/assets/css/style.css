@@ -767,3 +767,18 @@
     .h-path span{ font-size:1.1rem; align-items:center; padding:1.6rem 1rem .8rem; }
     .h-why-img{ aspect-ratio:16/10; }
   }
+
+/* Líneas de todo el año */
+  .h-lineas{ background:var(--surface); border-top:1px solid var(--border); }
+  .h-lineas-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:.7rem; }
+  .h-linea{ display:flex; flex-direction:column; gap:.15rem; }
+  .h-linea-img{ display:block; aspect-ratio:4/5; overflow:hidden; border-radius:2px; background:var(--arena); margin-bottom:.45rem; }
+  .h-linea-img img{ width:100%; height:100%; object-fit:cover; transition:transform .5s ease; }
+  .h-linea:hover .h-linea-img img{ transform:scale(1.04); }
+  .h-linea strong{ font-family:var(--font-display); font-weight:560; font-size:.95rem; line-height:1.2; color:var(--marron-2); }
+  .h-linea-n{ font-size:.8rem; color:var(--text-muted); }
+  @media (min-width:760px){
+    .h-lineas-grid{ gap:1.2rem; }
+    .h-linea strong{ font-size:1.2rem; }
+    .h-linea-n{ font-size:.88rem; }
+  }

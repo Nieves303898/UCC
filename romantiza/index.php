@@ -90,6 +90,16 @@ if (!$oferta) {
     $oferta = $pdo->query($prodSql . " ORDER BY p.featured DESC, p.sort_order, p.created_at DESC LIMIT 5")->fetchAll();
 }
 
+// ---- Líneas de todo el año (las que no son de Navidad), con su cantidad de productos.
+try {
+    $lineas = $pdo->query("SELECT c.*, (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.active = 1) AS n,
+        (SELECT p.image FROM products p WHERE p.category_id = c.id AND p.active = 1 AND p.image <> '' ORDER BY p.featured DESC, p.sort_order LIMIT 1) AS first_image
+        FROM categories c WHERE c.is_linea = 1 AND c.slug NOT LIKE '%navid%' ORDER BY c.sort_order")->fetchAll();
+    $lineas = array_values(array_filter($lineas, fn($c) => (int) $c['n'] > 0));
+} catch (Throwable $e) {
+    $lineas = [];
+}
+
 try {
     $homeVideos = $pdo->query('SELECT * FROM home_videos WHERE active = 1 ORDER BY sort_order, id')->fetchAll();
 } catch (Throwable $e) {
@@ -193,6 +203,27 @@ function product_card_html(array $p): string {
       <a class="h-link" href="<?= h($cta['url']) ?>">Ver todo <svg><use href="#ic-arrow"/></svg></a>
     </div>
     <div class="h-products"><?php foreach ($oferta as $p) echo product_card_html($p); ?></div>
+  </div>
+</section>
+<?php endif; ?>
+
+<?php if ($lineas): ?>
+<!-- 5b. LÍNEAS DE TODO EL AÑO -->
+<section class="h-section h-lineas">
+  <div class="container">
+    <div class="h-head">
+      <h2><?= $navidad ? 'Y para el resto del año' : 'Nuestras líneas' ?></h2>
+      <a class="h-link" href="tienda.php">Ver la tienda <svg><use href="#ic-arrow"/></svg></a>
+    </div>
+    <div class="h-lineas-grid">
+      <?php foreach ($lineas as $l): $limg = category_image_url($l['image'] ?? null) ?: product_image_url($l['first_image'] ?? null); ?>
+      <a class="h-linea" href="tienda.php?categoria=<?= h($l['slug']) ?>">
+        <span class="h-linea-img"><?php if ($limg): ?><img src="<?= h($limg) ?>" alt="<?= h($l['name']) ?>" loading="lazy"><?php endif; ?></span>
+        <strong><?= h($l['name']) ?></strong>
+        <span class="h-linea-n"><?= (int) $l['n'] ?> <?= (int) $l['n'] === 1 ? 'producto' : 'productos' ?></span>
+      </a>
+      <?php endforeach; ?>
+    </div>
   </div>
 </section>
 <?php endif; ?>
