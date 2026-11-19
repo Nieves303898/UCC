@@ -28,8 +28,8 @@
     --font-body: 'Manrope', 'Segoe UI', system-ui, sans-serif;
 
     --container: 1180px;
-    --radius: 3px 14px 3px 14px;
-    --radius-sm: 2px 8px 2px 8px;
+    --radius: 4px;
+    --radius-sm: 3px;
     --shadow-soft: 0 18px 40px -22px rgba(74,57,43,0.35);
     --shadow-card: 0 10px 24px -16px rgba(74,57,43,0.28);
   }
@@ -145,7 +145,7 @@
   .btn{
     display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
     font-family:var(--font-body); font-weight:700; font-size:.85rem; letter-spacing:.02em;
-    padding:.85rem 1.7rem; border-radius:2px 10px 2px 10px; border:1.5px solid transparent;
+    padding:.85rem 1.7rem; border-radius:4px; border:1.5px solid transparent;
     transition:transform .15s, box-shadow .15s, background .15s, color .15s; cursor:pointer;
   }
   .btn-primary{ background:var(--marron); color:var(--crudo-2); }
@@ -618,184 +618,152 @@
     .order-confirm .btn{ display:block; width:100%; margin:.5rem 0 0 !important; }
   }
 
-/* =====================================================================
-   PORTADA — SLIDE EDITORIAL (panel de texto + foto enmarcada)
-   Se usa cuando el slide tiene título cargado en el panel → Portada.
-   ===================================================================== */
-  .hero-slider-editorial{ height:620px; background:var(--marron-2); }
-  .hero-slide-editorial{
-    display:grid; grid-template-columns:1fr 1fr; background:var(--marron-2);
-  }
-  .hero-ed-text{
-    position:relative; display:flex; flex-direction:column; justify-content:center;
-    padding:3rem clamp(1.6rem,4vw,4rem) 3rem max(1.6rem, calc((100vw - var(--container)) / 2 + 1.6rem)); color:#F3EBDD;
-  }
-  .hero-ed-eyebrow{
-    display:inline-flex; align-items:center; gap:.55rem; font-size:.72rem; font-weight:800;
-    letter-spacing:.2em; text-transform:uppercase; color:var(--arena-2); margin-bottom:1.4rem;
-  }
-  .hero-ed-eyebrow svg{ width:14px; height:14px; color:currentColor; }
-  .hero-ed-title{
-    font-family:var(--font-display); font-weight:450; font-style:italic; color:#FBF6EC;
-    font-size:clamp(2.3rem,3.4vw + 1rem,4.3rem); line-height:1.04; letter-spacing:-.01em; max-width:15ch;
-  }
-  .hero-ed-lead{ font-size:1.06rem; line-height:1.6; color:rgba(243,235,221,.86); max-width:30rem; margin:1.4rem 0 2.2rem; }
-  .hero-ed-btn{ align-self:flex-start; background:#F3EBDD; color:var(--marron-2); }
-  .hero-ed-btn:hover{ background:#fff; transform:translateY(-1px); box-shadow:0 12px 26px -14px rgba(0,0,0,.6); }
-  .hero-ed-media{
-    position:relative; display:flex; align-items:center; justify-content:center; padding:2.6rem 2rem;
-    overflow:hidden;
-  }
-  .hero-ed-frame{
-    position:relative; height:100%; aspect-ratio:4/5; max-width:100%;
-    border-radius:999px 999px 6px 6px; overflow:hidden;
-    box-shadow:0 0 0 1px rgba(255,255,255,.18), 0 0 0 9px rgba(0,0,0,.12), 0 30px 60px -24px rgba(0,0,0,.65);
-  }
-  .hero-ed-frame img{ width:100%; height:100%; object-fit:cover; display:block; transform:scale(1.04); transition:transform 6s ease; }
-  .hero-slide-editorial.is-active .hero-ed-frame img{ transform:scale(1); }
-  .hero-slider-editorial .hero-slider-dots{ left:max(1.6rem, calc((100vw - var(--container)) / 2 + 1.6rem)); transform:none; bottom:2rem; }
-  .hero-slider-editorial .hero-slider-arrow{ top:auto; bottom:1.6rem; transform:none; background:rgba(255,255,255,.14); color:#F3EBDD; }
-  .hero-slider-editorial .hero-slider-arrow:hover{ background:rgba(255,255,255,.28); }
-  .hero-slider-editorial .hero-slider-prev{ left:calc(50% - 5.6rem); right:auto; }
-  .hero-slider-editorial .hero-slider-next{ left:calc(50% - 2.6rem); right:auto; }
-
-  @media (max-width:980px){
-    .hero-slider-editorial{ aspect-ratio:auto; max-height:none; height:auto; min-height:0; }
-    .hero-slider-editorial .hero-slide-editorial{ position:absolute; }
-    .hero-slider-editorial .hero-slide-editorial.is-active{ position:relative; }
-    .hero-slide-editorial{ grid-template-columns:1fr; }
-    .hero-ed-media{ order:-1; padding:1.6rem 1.4rem .4rem; }
-    .hero-ed-frame{ height:auto; width:min(66vw,300px); }
-    .hero-ed-text{ padding:1.8rem 1.4rem 4.6rem; text-align:center; align-items:center; }
-    .hero-ed-title{ max-width:none; }
-    .hero-ed-lead{ margin:1rem auto 1.6rem; }
-    .hero-ed-btn{ align-self:center; }
-    .hero-slider-editorial .hero-slider-dots{ left:50%; transform:translateX(-50%); bottom:1.9rem; }
-    .hero-slider-editorial .hero-slider-arrow{ display:none; }
-  }
-
-/* ---- Nueva sección "Hecho a mano" (reemplaza las 4 tarjetitas) ---- */
-  .essence-list{ display:grid; grid-template-columns:1fr 1fr; gap:0 2rem; margin:0 0 2.2rem; border-top:1px solid var(--border); }
-  .essence-list li{ padding:1rem 0; border-bottom:1px solid var(--border); }
-  .essence-list strong{ display:block; font-family:var(--font-display); font-weight:560; font-size:1.06rem; color:var(--marron-2); }
-  .essence-list span{ display:block; color:var(--text-muted); font-size:.88rem; margin-top:.15rem; }
-  @media (max-width:640px){ .essence-list{ grid-template-columns:1fr; } }
-
-  .product-grid-4{ grid-template-columns:repeat(4,1fr); }
-  @media (max-width:980px){ .product-grid-4{ grid-template-columns:repeat(2,1fr); } }
-
-/* =====================================================================
-   TEMA NAVIDEÑO — "vidriera de Nueva York", sin nieve.
-   Se prende solo del 1/11 al 30/12 (ver tema_navidad() en functions.php).
-   Todo lo de acá depende de la clase .tema-navidad en <body>: fuera de
-   esas fechas la web vuelve sola a su estilo de siempre.
-   ===================================================================== */
-  .tema-navidad{
-    --nav-verde:#163A2B; --nav-verde-2:#0F2A1F; --nav-rojo:#8C1D25; --nav-rojo-2:#6E141B;
-    --nav-oro:#C9A35B; --nav-oro-claro:#E7D3A1;
-    background-color:var(--crudo);
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='%23C9A35B' fill-opacity='.22'%3E%3Cpath d='M40 30l2 7 7 2-7 2-2 7-2-7-7-2 7-2z'/%3E%3Cpath d='M190 120l1.4 5 5 1.4-5 1.4-1.4 5-1.4-5-5-1.4 5-1.4z'/%3E%3Ccircle cx='120' cy='60' r='1.6'/%3E%3Ccircle cx='230' cy='30' r='1.2'/%3E%3Ccircle cx='70' cy='190' r='1.4'/%3E%3Cpath d='M110 210l1.8 6 6 1.8-6 1.8-1.8 6-1.8-6-6-1.8 6-1.8z'/%3E%3Ccircle cx='220' cy='230' r='1.6'/%3E%3C/g%3E%3C/svg%3E");
-  }
-
-  /* Barra de anuncio: rojo profundo con detalle dorado */
-  .announce-navidad{
-    display:flex; align-items:center; justify-content:center; gap:.9rem; flex-wrap:wrap;
-    background:var(--nav-rojo); color:#F7EEDC; letter-spacing:.08em;
-    border-bottom:1px solid var(--nav-oro);
-  }
-  .announce-navidad a{ color:var(--nav-oro-claro); font-weight:700; border-bottom:1px solid rgba(231,211,161,.5); }
-  .announce-navidad a:hover{ color:#fff; }
-  .announce-star{ width:12px; height:12px; color:var(--nav-oro-claro); }
-
-  /* Guirnalda de luces cálidas colgando debajo del menú */
-  .site-header{ position:sticky; }
-  .string-lights{
-    position:absolute; left:0; right:0; top:100%; height:26px; pointer-events:none; z-index:2;
-    display:flex; justify-content:space-between; padding:0 1rem; overflow:hidden;
-    background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='16' viewBox='0 0 120 16'%3E%3Cpath d='M0 1 Q30 15 60 1 T120 1' fill='none' stroke='%233A2C21' stroke-opacity='.55' stroke-width='1.1'/%3E%3C/svg%3E") repeat-x 0 0 / 120px 16px;
-  }
-  .string-lights span{
-    position:relative; flex:none; width:8px; height:12px; margin-top:6px; border-radius:50% 50% 50% 50% / 40% 40% 60% 60%;
-    background:#FFD98A; box-shadow:0 0 6px 2px rgba(255,205,110,.75), 0 0 16px 4px rgba(255,190,90,.35);
-    animation:nav-twinkle 2.8s ease-in-out infinite;
-  }
-  .string-lights span::before{ content:""; position:absolute; left:2px; top:-3px; width:4px; height:3px; background:#3A2C21; border-radius:1px; }
-  .string-lights span:nth-child(odd){ margin-top:11px; }
-  .string-lights span:nth-child(4n+2){ background:#F6B39B; box-shadow:0 0 6px 2px rgba(240,140,110,.7), 0 0 16px 4px rgba(220,90,70,.3); animation-delay:.6s; }
-  .string-lights span:nth-child(4n+3){ animation-delay:1.3s; }
-  .string-lights span:nth-child(4n){ background:#FFF1C9; animation-delay:2s; }
-  @keyframes nav-twinkle{ 0%,100%{ opacity:1; } 50%{ opacity:.45; } }
-
-  /* Slide editorial en versión navidad: verde pino + dorado, con luces desenfocadas */
-  .tema-navidad .hero-slider-editorial,
-  .tema-navidad .hero-slide-editorial{ background:var(--nav-verde); }
-  .tema-navidad .hero-slide-editorial:nth-child(3n+2){ background:var(--nav-rojo-2); }
-  .tema-navidad .hero-ed-eyebrow{ color:var(--nav-oro-claro); }
-  .tema-navidad .hero-ed-text::after{
-    content:""; position:absolute; left:max(1.6rem, calc((100vw - var(--container)) / 2 + 1.6rem)); right:clamp(1.6rem,4vw,4rem); top:2.2rem; height:1px;
-    background:linear-gradient(90deg, var(--nav-oro), rgba(201,163,91,0));
-  }
-  .tema-navidad .hero-ed-btn{ background:var(--nav-oro); color:var(--nav-verde-2); }
-  .tema-navidad .hero-ed-btn:hover{ background:var(--nav-oro-claro); }
-  .tema-navidad .hero-ed-media{
-    background:
-      radial-gradient(circle at 14% 22%, rgba(255,214,140,.35) 0 6px, transparent 22px),
-      radial-gradient(circle at 82% 14%, rgba(255,214,140,.28) 0 9px, transparent 30px),
-      radial-gradient(circle at 90% 70%, rgba(255,180,120,.25) 0 7px, transparent 26px),
-      radial-gradient(circle at 10% 82%, rgba(255,230,170,.3) 0 5px, transparent 20px),
-      radial-gradient(circle at 60% 92%, rgba(255,214,140,.22) 0 8px, transparent 28px),
-      radial-gradient(ellipse at 50% 50%, rgba(255,255,255,.06), transparent 70%);
-  }
-  .tema-navidad .hero-ed-frame{
-    box-shadow:0 0 0 1px var(--nav-oro), 0 0 0 8px rgba(0,0,0,.18), 0 0 0 9px rgba(201,163,91,.55), 0 30px 60px -24px rgba(0,0,0,.7);
-  }
-
-  /* Franja de la cápsula navideña */
-  .navidad-strip{
-    background-color:var(--crudo-2);
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='%23C9A35B' fill-opacity='.35'%3E%3Cpath d='M30 24l1.6 5.4 5.4 1.6-5.4 1.6L30 38l-1.6-5.4L23 31l5.4-1.6z'/%3E%3Ccircle cx='120' cy='50' r='1.4'/%3E%3Cpath d='M140 130l1.2 4 4 1.2-4 1.2-1.2 4-1.2-4-4-1.2 4-1.2z'/%3E%3Ccircle cx='60' cy='150' r='1.2'/%3E%3C/g%3E%3C/svg%3E");
-    border-top:3px double var(--nav-oro); border-bottom:3px double var(--nav-oro);
-  }
-  .navidad-strip .section-head h2{ color:var(--nav-rojo-2); font-style:italic; font-weight:450; }
-  .navidad-strip .btn-ghost{ border-color:var(--nav-verde); color:var(--nav-verde); }
-  .navidad-strip .btn-ghost:hover{ background:var(--nav-verde); color:#F7EEDC; }
-  .navidad-strip .card-cat{ color:var(--nav-rojo); }
-
-  /* Detalles dorados en títulos y tarjetas */
-  .tema-navidad .eyebrow{ color:var(--nav-rojo); }
-  .tema-navidad .section-head-center h2::after{
-    content:""; display:block; width:64px; height:12px; margin:.9rem auto 0;
-    background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='12' viewBox='0 0 64 12'%3E%3Cpath d='M0 6h24M40 6h24' stroke='%23C9A35B' stroke-width='1'/%3E%3Cpath d='M32 0l1.6 4.4L38 6l-4.4 1.6L32 12l-1.6-4.4L26 6l4.4-1.6z' fill='%23C9A35B'/%3E%3C/svg%3E") no-repeat center;
-  }
-  .tema-navidad .cat-card[href*="navid"]::before{
-    content:"Navidad"; position:absolute; z-index:3; top:14px; left:-6px;
-    background:var(--nav-rojo); color:#F7EEDC; font-size:.68rem; font-weight:800; letter-spacing:.16em; text-transform:uppercase;
-    padding:.35rem .8rem; box-shadow:0 6px 14px -6px rgba(0,0,0,.5); border-left:3px solid var(--nav-oro);
-  }
-  .tema-navidad .btn-primary{ background:var(--nav-verde); }
-  .tema-navidad .btn-primary:hover{ background:var(--nav-verde-2); }
-  .tema-navidad .newsletter{ background:var(--nav-rojo-2); box-shadow:inset 0 0 0 1px rgba(201,163,91,.45); }
-  .tema-navidad .btn-accent{ background:var(--nav-oro); color:var(--nav-verde-2); }
-  .tema-navidad .btn-accent:hover{ background:var(--nav-oro-claro); }
-
-  /* Pie de página verde pino */
-  .tema-navidad .site-footer{ background:var(--nav-verde-2); color:#E9DFC9; border-top:3px double var(--nav-oro); }
-  .tema-navidad .site-footer .brand-word{ color:#FBF6EC; }
-  .tema-navidad .footer-col h4{ color:var(--nav-oro-claro); }
-  .tema-navidad .footer-brand p,
-  .tema-navidad .footer-bottom{ color:rgba(233,223,201,.7); border-color:rgba(201,163,91,.3); }
-  .tema-navidad .footer-col a:hover{ color:var(--nav-oro-claro); }
-  .tema-navidad .wa-fab{ background:var(--nav-verde); box-shadow:0 0 0 2px var(--nav-oro), var(--shadow-soft); }
-
-  .tema-navidad .footer-brand .brand img{ border-radius:50%; box-shadow:0 0 0 2px var(--nav-oro); }
-  @media (max-width:980px){ .tema-navidad .hero-ed-text::after{ display:none; } }
-  @media (max-width:640px){
-    .announce-navidad > span{ display:none; }
-    .tema-navidad .cat-card[href*="navid"]::before{ left:-4px; font-size:.6rem; }
-  }
-
 /* Arreglo: "section.pad" pisaba el margen lateral de .container y en
    celular los textos y fotos quedaban pegados al borde de la pantalla. */
   .container.pad{ padding-left:1.6rem; padding-right:1.6rem; }
   @media (max-width:640px){ .container.pad{ padding-left:1.1rem; padding-right:1.1rem; } }
-  .navidad-strip .card-cat{ display:none; }
+
+/* =====================================================================
+   PORTADA (index.php) — 10 secciones en orden de venta.
+   Arriba color fuerte y frases cortas; abajo fondo claro y detalle.
+   Pensado primero para celular.
+   ===================================================================== */
+  :root{ --h-fuerte:var(--marron-2); --h-fuerte-2:#2A1F17; }
+  .tema-navidad{ --h-fuerte:#7E1A22; --h-fuerte-2:#5E1219; }
+
+  .card{ box-shadow:none; border:1px solid var(--border); }
+  .card:hover{ transform:none; box-shadow:none; border-color:var(--marron-suave); }
+
+  .h-section{ padding:3.5rem 0; }
+  .h-section h2, .h-solution h2, .h-close h2{
+    font-size:clamp(1.6rem,1.2rem + 2vw,2.5rem); line-height:1.15; letter-spacing:-.01em; font-weight:560;
+  }
+  .h-head{ display:flex; align-items:baseline; justify-content:space-between; gap:1rem; margin-bottom:1.6rem; }
+  .h-section > .container > h2{ margin-bottom:1.6rem; }
+  .h-link{ display:inline-flex; align-items:center; gap:.4rem; font-weight:700; font-size:.92rem; color:var(--marron-2); border-bottom:1.5px solid currentColor; padding-bottom:2px; white-space:nowrap; }
+  .h-link svg{ width:14px; height:14px; }
+
+  /* Botón principal (el mismo en portada y cierre) */
+  .h-cta{ background:#FBF6EC; color:var(--h-fuerte-2); font-size:1rem; padding:1.05rem 1.8rem; min-height:52px; }
+  .h-cta:hover{ background:#fff; }
+
+  /* 1. Portada */
+  .h-hero{ display:flex; flex-direction:column; background:var(--h-fuerte); color:#FBF6EC; }
+  .h-hero-media{ position:relative; order:-1; aspect-ratio:4/3; overflow:hidden; background:var(--h-fuerte-2); }
+  .h-hero-img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity 1.2s ease; }
+  .h-hero-img.is-active{ opacity:1; }
+  .h-hero-text{ padding:2rem 1.25rem 2.4rem; }
+  .h-hero h1{ color:#FBF6EC; font-size:clamp(2.1rem,1.4rem + 4vw,4rem); line-height:1.05; letter-spacing:-.015em; font-weight:560; max-width:14ch; }
+  .h-hero p{ font-size:1.05rem; line-height:1.55; color:rgba(251,246,236,.85); margin:1rem 0 1.6rem; max-width:34rem; }
+  .h-hero .h-cta{ width:100%; }
+
+  /* 2. Problema */
+  .h-problem{ padding:3.5rem 0; background:var(--crudo); }
+  .h-problem p{ font-family:var(--font-display); font-size:clamp(1.35rem,1.1rem + 1.6vw,2.1rem); line-height:1.35; color:var(--marron-2); max-width:30ch; margin:0 auto; text-align:center; }
+
+  /* 3. Solución */
+  .h-solution{ padding:3.5rem 0; background:var(--surface); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .h-solution-grid{ display:grid; gap:2rem; align-items:center; }
+  .h-solution-img{ width:100%; aspect-ratio:4/5; object-fit:cover; border-radius:var(--radius); }
+  .h-points{ list-style:none; counter-reset:pt; margin:1.6rem 0 0; padding:0; }
+  .h-points li{ counter-increment:pt; position:relative; padding:1rem 0 1rem 2.6rem; border-top:1px solid var(--border); color:var(--text-muted); }
+  .h-points li::before{ content:counter(pt); position:absolute; left:0; top:.95rem; font-family:var(--font-display); font-size:1.3rem; color:var(--h-fuerte); }
+  .h-points strong{ color:var(--marron-2); }
+
+  /* 4. Para quién es */
+  .h-paths{ display:grid; gap:1rem; }
+  .h-path{ position:relative; display:block; border-radius:var(--radius); overflow:hidden; aspect-ratio:16/10; background:var(--arena); }
+  .h-path img{ width:100%; height:100%; object-fit:cover; transition:transform .4s ease; }
+  .h-path:hover img{ transform:scale(1.04); }
+  .h-path span{
+    position:absolute; left:0; right:0; bottom:0; display:flex; align-items:center; justify-content:space-between; gap:.6rem;
+    padding:2.4rem 1.1rem 1rem; color:#fff; font-family:var(--font-display); font-size:1.25rem; line-height:1.2;
+    background:linear-gradient(180deg, transparent, rgba(20,14,10,.72));
+  }
+  .h-path span svg{ width:18px; height:18px; flex:none; }
+
+  /* 5. Oferta: la primera pieza, destacada */
+  .h-offer{ background:var(--crudo); padding-top:0; }
+  .h-products{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+  .h-products .card-media .ph{ height:auto; aspect-ratio:4/5; }
+  .h-products .card:first-child{ grid-column:1 / -1; }
+  .h-products .card:first-child .card-media .ph{ aspect-ratio:4/3; }
+  .h-products .card-body{ padding:.9rem 1rem 1.1rem; }
+  .h-products .card-title{ font-size:1.02rem; }
+  .h-products .card-cat, .h-products .quick-add{ display:none; }
+
+  /* 6. Cómo comprar */
+  .h-steps-wrap{ background:var(--surface); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .h-steps{ list-style:none; counter-reset:st; margin:0; padding:0; display:grid; gap:0; }
+  .h-steps li{ counter-increment:st; display:grid; grid-template-columns:2.6rem 1fr; padding:1rem 0; border-top:1px solid var(--border); }
+  .h-steps li::before{ content:counter(st); grid-row:1 / 3; width:1.9rem; height:1.9rem; border-radius:50%; background:var(--h-fuerte); color:#FBF6EC; font-weight:700; font-size:.9rem; display:flex; align-items:center; justify-content:center; }
+  .h-steps strong{ font-size:1.02rem; color:var(--marron-2); }
+  .h-steps span{ color:var(--text-muted); font-size:.95rem; }
+
+  /* 8. Quiénes somos */
+  .h-about-grid{ display:grid; gap:1rem; }
+  .h-about p{ font-size:1.05rem; color:var(--text); margin:0 0 1rem; max-width:36rem; }
+  .h-facts{ list-style:none; padding:0; margin:0 0 1.4rem; color:var(--text-muted); font-size:.95rem; }
+  .h-facts li{ padding:.3rem 0; }
+  .h-facts a{ border-bottom:1px solid currentColor; }
+
+  /* 9. Preguntas frecuentes */
+  .h-faq{ background:var(--surface); border-top:1px solid var(--border); }
+  .h-faq-list{ max-width:46rem; border-top:1px solid var(--border); }
+  .h-faq details{ border-bottom:1px solid var(--border); }
+  .h-faq summary{ list-style:none; cursor:pointer; padding:1.1rem 2rem 1.1rem 0; position:relative; font-weight:700; color:var(--marron-2); font-size:1.02rem; }
+  .h-faq summary::-webkit-details-marker{ display:none; }
+  .h-faq summary::after{ content:"+"; position:absolute; right:.2rem; top:50%; transform:translateY(-50%); font-size:1.4rem; font-weight:400; color:var(--h-fuerte); }
+  .h-faq details[open] summary::after{ content:"–"; }
+  .h-faq details p{ margin:0 0 1.2rem; color:var(--text-muted); max-width:40rem; }
+  .h-faq details a{ color:var(--marron-2); font-weight:700; border-bottom:1px solid currentColor; }
+
+  /* 10. Cierre */
+  .h-close{ background:var(--h-fuerte); color:#FBF6EC; padding:3.5rem 0; text-align:center; }
+  .h-close h2{ color:#FBF6EC; margin-bottom:1.4rem; }
+  .h-cta-lg{ width:100%; max-width:26rem; font-size:1.05rem; }
+  body:has(.h-close) .site-footer{ margin-top:0; }
+
+  @media (min-width:760px){
+    .h-section, .h-problem, .h-solution, .h-close{ padding:5rem 0; }
+    .h-offer{ padding-top:0; }
+    .h-paths{ grid-template-columns:repeat(3,1fr); }
+    .h-path{ aspect-ratio:3/4; }
+    .h-steps{ grid-template-columns:repeat(4,1fr); gap:1.6rem; }
+    .h-steps li{ grid-template-columns:1fr; border-top:2px solid var(--marron-2); padding-top:1.2rem; }
+    .h-steps li::before{ grid-row:auto; margin-bottom:.8rem; }
+    .h-about-grid{ grid-template-columns:1fr 1.2fr; gap:3rem; }
+    .h-hero .h-cta{ width:auto; }
+  }
+  @media (min-width:980px){
+    .h-hero{ flex-direction:row; min-height:min(84vh,680px); }
+    .h-hero-media{ order:0; flex:1 1 52%; aspect-ratio:auto; }
+    .h-hero-text{ flex:1 1 48%; display:flex; flex-direction:column; justify-content:center; padding:4rem 3.5rem 4rem max(1.6rem, calc((100vw - var(--container)) / 2 + 1.6rem)); }
+    .h-solution-grid{ grid-template-columns:.9fr 1.1fr; gap:4rem; }
+    .h-products{ grid-template-columns:repeat(4,1fr); gap:1.4rem; }
+    .h-products .card:first-child{ grid-column:span 2; grid-row:span 2; }
+    .h-products .card:first-child{ display:flex; flex-direction:column; }
+    .h-products .card:first-child .card-media{ flex:1; min-height:420px; }
+    .h-products .card:first-child .card-media .ph{ position:absolute; inset:0; height:auto; aspect-ratio:auto; }
+    .h-products .card:first-child .card-media .ph img{ width:100%; height:100%; object-fit:cover; }
+    .h-products .card:first-child .card-title{ font-size:1.35rem; }
+  }
+
+/* ---- Navidad: rojo + verde planos, como un papel de regalo. Sin brillos. ---- */
+  .tema-navidad{ --h-verde:#1E4A35; --h-verde-2:#163828; }
+  .announce-navidad{ background:var(--h-verde); color:#F3EBDD; }
+  .tema-navidad .h-problem{ background:var(--h-verde); }
+  .tema-navidad .h-problem p{ color:#F3EBDD; }
+  /* Cinta a rayas rojo/crudo/verde: separa la portada del resto y abre el pie */
+  .tema-navidad .h-hero,
+  .tema-navidad .site-footer{ position:relative; }
+  .tema-navidad .h-hero::after,
+  .tema-navidad .h-close::after{
+    content:""; position:absolute; left:0; right:0; bottom:0; height:8px;
+    background:repeating-linear-gradient(-45deg, #7E1A22 0 10px, #F3EBDD 10px 14px, #1E4A35 14px 24px, #F3EBDD 24px 28px);
+  }
+  .tema-navidad .h-close{ position:relative; }
+  .tema-navidad .h-steps li::before{ background:var(--h-verde); }
+  .tema-navidad .h-points li::before{ color:#7E1A22; }
+  .tema-navidad .btn-primary{ background:var(--h-verde); }
+  .tema-navidad .btn-primary:hover{ background:var(--h-verde-2); }

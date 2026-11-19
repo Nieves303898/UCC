@@ -157,3 +157,18 @@
     });
   });
 })();
+
+/* Portada: las fotos de la portada se van turnando (único efecto de la sección). */
+(function () {
+  var hero = document.getElementById("hHero");
+  if (!hero) return;
+  var imgs = hero.querySelectorAll(".h-hero-img");
+  if (imgs.length < 2) return;
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  var i = 0;
+  setInterval(function () {
+    imgs[i].classList.remove("is-active");
+    i = (i + 1) % imgs.length;
+    imgs[i].classList.add("is-active");
+  }, 5000);
+})();

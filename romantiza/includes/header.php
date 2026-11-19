@@ -62,15 +62,10 @@ $navidad = tema_navidad($pdo);
   <symbol id="mot-sprig" viewBox="0 0 60 100"><path d="M30 96 30 20"/><path d="M30 55c0-14-16-18-20-30 16 2 22 12 20 22"/><path d="M30 40c0-12 14-16 17-27-15 2-20 11-17 20"/><circle cx="30" cy="16" r="6"/><circle cx="20" cy="8" r="2"/><circle cx="40" cy="10" r="1.6"/></symbol>
   <symbol id="mot-bloom" viewBox="0 0 100 100"><circle cx="50" cy="50" r="9"/><path d="M50 41c-4-10-16-12-22-6 6 8 16 8 22 6Z"/><path d="M59 45c8-8 6-20-2-24-4 9 0 18 2 24Z"/><path d="M60 55c11 1 17-9 15-18-9 2-15 10-15 18Z"/><path d="M52 60c2 11 13 15 21 10-5-8-14-11-21-10Z"/><path d="M43 59c-3 10-14 12-21 6 6-8 14-9 21-6Z"/></symbol>
   <symbol id="nav-star" viewBox="0 0 24 24"><path fill="currentColor" d="M12 1.5l1.9 7.1 7.1 1.9-7.1 1.9L12 19.5l-1.9-7.1L3 10.5l7.1-1.9z"/></symbol>
-  <symbol id="nav-ornament" viewBox="0 0 40 52" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M20 2v6"/><rect x="15" y="8" width="10" height="5" rx="1"/><circle cx="20" cy="31" r="17"/><path d="M4 27c8 4 24 4 32 0M4 35c8-4 24-4 32 0"/></symbol>
 </svg>
 
 <?php if ($navidad): ?>
-<div class="announce announce-navidad">
-  <svg class="announce-star" aria-hidden="true"><use href="#nav-star"/></svg>
-  <span>Navidad en casa &middot; Envíos a todo el país</span>
-  <a href="tienda.php?categoria=capsula-ilusion-navidena-romantiza">Ver la cápsula navideña &rarr;</a>
-</div>
+<div class="announce announce-navidad">Navidad: envíos a todo el país &middot; Cambios sin cargo dentro de los 30 días</div>
 <?php else: ?>
 <div class="announce">Envíos a todo el país &middot; Cambios sin cargo dentro de los 30 días</div>
 <?php endif; ?>
@@ -107,7 +102,6 @@ $navidad = tema_navidad($pdo);
       <button type="button" class="search-close" id="searchClose">Cerrar</button>
     </form>
   </div>
-  <?php if ($navidad): ?><div class="string-lights" aria-hidden="true"><?php for ($i = 0; $i < 28; $i++): ?><span></span><?php endfor; ?></div><?php endif; ?>
 </header>
 
 <main id="main">
